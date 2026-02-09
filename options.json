@@ -1,14 +1,18 @@
 {
     "folder_root": "/data/zue/E_PROFILE/ALC/L1_FILES/",
-    "folder_output": "/data/pay/REM/ACQ/E_PROFILE_ALC/Calibration/rayleigh-test-v11/",
+    "folder_output": "/data/zue/E_PROFILE/ALC/Calibration/rayleigh-test-v13/",
     "folder_ECMWF": "/data/ECMWF/",
     "hour_min": 20,
     "hour_max": 4,
     "min_time_range": 3,
-    "z_low_cloud": 4000,
+	"_comment_cloud": "Full profiles are excluded if the cloud base is below this altitude",
+    "z_low_cloud": 6000, 
+	"_comment_range": "Molecular window search: center position between these values",
+	"range_start_m": 2000,
+    "range_end_m": 6000,
     "LRaer": 52,
     "threshold_quality": 15,
     "use_std_atm": 1,
     "plot_main": 1,
-    "plot_all": 0
+    "plot_all": 0  
 }

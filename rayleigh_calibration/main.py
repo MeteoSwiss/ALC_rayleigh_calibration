@@ -57,6 +57,10 @@ def setup_logging(verbose: bool = False) -> None:
         ]
     )
 
+    # Suppress noisy third-party loggers
+    logging.getLogger("matplotlib").setLevel(logging.WARNING)
+    logging.getLogger("PIL").setLevel(logging.WARNING)
+
 
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""

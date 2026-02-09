@@ -64,6 +64,10 @@ def plot_rcs_timeseries(
     title: str = "",
     save_path: Optional[Path] = None,
     time_datetime: Optional[List[datetime]] = None,
+    molecular_window_range: Optional[tuple] = None,
+    sensitivity_range: Optional[tuple] = None,
+    time_subset_info: Optional[str] = None,
+    time_subset_indices: Optional[List[NDArray]] = None,
 ) -> "Figure":
     """
     Pseudo-colour plot of the range-corrected signal with cloud-base overlay.
@@ -82,6 +86,14 @@ def plot_rcs_timeseries(
         Sentinel used for "no cloud".
     time_datetime : (N,), optional
         Datetime objects for better x-axis formatting.
+    molecular_window_range : tuple of (start_m, end_m), optional
+        Optimal molecular window range to overlay.
+    sensitivity_range : tuple of (min_m, max_m), optional
+        Full sensitivity test range (with altitude shifts) to overlay.
+    time_subset_info : str, optional
+        Information about time subsets used in sensitivity analysis.
+    time_subset_indices : list of ndarray, optional
+        Profile indices for each time subset (for visualization).
     title, save_path : see module docstring.
     """
     plt = _get_plt()
@@ -101,7 +113,13 @@ def plot_rcs_timeseries(
         vmin, vmax = 0.0, 6.0
 
     # Use datetime for x-axis if available, otherwise use hours
-    x_data = time_datetime if time_datetime is not None else hours_since_start
+    use_datetime = time_datetime is not None
+    if use_datetime:
+        from matplotlib import dates as mdates
+        # Convert datetime objects to matplotlib numeric dates
+        x_data = np.array(mdates.date2num(time_datetime))
+    else:
+        x_data = hours_since_start
 
     im = ax.pcolormesh(
         x_data,
@@ -113,6 +131,31 @@ def plot_rcs_timeseries(
         cmap="viridis",
     )
     plt.colorbar(im, ax=ax, label=r"log$_{10}$(RCS)", pad=0.02)
+
+    # Visualize time subset coverage at top
+    if time_subset_indices is not None:
+        y_top = float(range_alc.max()) * 1e-3  # Top of plot in km
+        y_spacing = (y_top * 0.04)  # 4% of range for each subset indicator
+        colours_subset = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
+        
+        if use_datetime:
+            from matplotlib import dates as mdates
+            x_min_num = x_data.min()
+            x_max_num = x_data.max()
+        else:
+            x_min_num = x_data.min()
+            x_max_num = x_data.max()
+        
+        for subset_idx, indices in enumerate(time_subset_indices):
+            if len(indices) == 0:
+                continue
+            y_pos = y_top + y_spacing * (subset_idx + 1)
+            # Mark profile indices in this subset
+            for idx in indices:
+                x_val = x_data[idx] if idx < len(x_data) else x_min_num
+                ax.plot([x_val, x_val], [y_pos - 0.05, y_pos + 0.05], 
+                       color=colours_subset[subset_idx % len(colours_subset)], 
+                       linewidth=2, alpha=0.7, zorder=10)
 
     # Cloud base height overlay (all available layers)
     if cbh is not None:
@@ -130,8 +173,21 @@ def plot_rcs_timeseries(
                 label=f"CBH layer {layer + 1}" if layer == 0 else None,
             )
 
+    # Overlay molecular window and sensitivity ranges
+    if sensitivity_range is not None:
+        y_sens = np.array(sensitivity_range) * 1e-3  # Convert to km
+        ax.axhline(y_sens[0], color='orange', linestyle='--', linewidth=1.5, alpha=0.8,
+                   label=f'Sensitivity range ({y_sens[0]:.2f}–{y_sens[1]:.2f} km)')
+        ax.axhline(y_sens[1], color='orange', linestyle='--', linewidth=1.5, alpha=0.8)
+    
+    if molecular_window_range is not None:
+        y_mol = np.array(molecular_window_range) * 1e-3  # Convert to km
+        ax.axhline(y_mol[0], color='cyan', linestyle='-', linewidth=2.5, 
+                   label=f'Molecular window ({y_mol[0]:.2f}–{y_mol[1]:.2f} km)')
+        ax.axhline(y_mol[1], color='cyan', linestyle='-', linewidth=2.5)
+
     # Format x-axis
-    if time_datetime is not None:
+    if use_datetime:
         from matplotlib import dates as mdates
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
         ax.xaxis.set_major_locator(mdates.AutoDateLocator())
@@ -141,8 +197,24 @@ def plot_rcs_timeseries(
         ax.set_xlabel("Hours since start of window")
 
     ax.set_ylabel("Range (km)")
-    ax.set_ylim(0, min(float(range_alc.max()) * 1e-3, 15.0))
+    # Extend y-axis if showing subset indicators
+    y_max = float(range_alc.max()) * 1e-3
+    if time_subset_indices is not None:
+        y_max += y_max * 0.25  # Add 25% for subset indicators
+    ax.set_ylim(0, y_max)
     ax.set_title(title or "Range-Corrected Signal")
+    
+    # Add legend if we have overlays (positioned above plot to avoid masking subset indicators)
+    if molecular_window_range is not None or sensitivity_range is not None:
+        ax.legend(loc='upper center', fontsize=9, framealpha=0.9, 
+                 bbox_to_anchor=(0.5, 1.02), ncol=2)
+    
+    # Add time subset information box
+    if time_subset_info is not None:
+        ax.text(0.02, 0.8, time_subset_info, transform=ax.transAxes,
+                fontsize=8, verticalalignment='top',
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+    
     ax.grid(True, alpha=0.25)
     fig.tight_layout()
 
@@ -382,6 +454,8 @@ def plot_sensitivity_analysis(
     cl_matrix: NDArray[np.float64],
     cl_median: float,
     cl_uncertainty: float,
+    cl_cube: Optional[NDArray[np.float64]] = None,
+    time_sample_labels: Optional[List[str]] = None,
     title: str = "",
     save_path: Optional[Path] = None,
 ) -> "Figure":
@@ -393,17 +467,26 @@ def plot_sensitivity_analysis(
     ----------
     lr_values : (N,)   Lidar-ratio values tested.
     alt_shifts : (M,)  Altitude-window shifts in metres.
-    cl_matrix : (N, M) Lidar constant for each combination.  NaN = failed.
-    cl_median : float   Best-estimate (median).
+    cl_matrix : (N, M) Lidar constant for each (LR, alt) combination
+                        (median over time samples).  NaN = failed.
+    cl_median : float   Best-estimate (median over all).
     cl_uncertainty : float  Robust 2-sigma uncertainty.
+    cl_cube : (N, M, T), optional
+        Full 3-D cube of lidar constants (LR × alt-shift × time-sample).
+        When provided the right panel shows per-sample spread.
+    time_sample_labels : list of str, optional
+        Labels for each time sample (length T).
     title, save_path : see module docstring.
     """
     plt = _get_plt()
 
+    n_panels = 3 if cl_cube is not None else 2
     fig, axes = plt.subplots(
-        1, 2, figsize=(14, 5),
-        gridspec_kw={"width_ratios": [2, 1]},
+        1, n_panels, figsize=(6 * n_panels, 5),
+        gridspec_kw={"width_ratios": [2, 1, 1][:n_panels]},
     )
+    if n_panels == 2:
+        axes = list(axes)
 
     # -- Left: heatmap (deviation from median %) --
     ax = axes[0]
@@ -433,20 +516,24 @@ def plot_sensitivity_analysis(
     ax.set_yticklabels([f"{lr:.0f}" for lr in lr_values])
     ax.set_xlabel("Altitude-window shift (m)")
     ax.set_ylabel("Lidar ratio (sr)")
-    ax.set_title("Lidar Constant -- Sensitivity Grid")
+    ax.set_title("Sensitivity Grid (median over time samples)")
 
-    # -- Right: box-plot / strip-chart --
+    # -- Middle: overall box-plot / strip-chart --
     ax2 = axes[1]
-    valid = cl_matrix[np.isfinite(cl_matrix)].ravel()
-    if len(valid) > 0:
+    if cl_cube is not None:
+        all_valid = cl_cube[np.isfinite(cl_cube)].ravel()
+    else:
+        all_valid = cl_matrix[np.isfinite(cl_matrix)].ravel()
+
+    if len(all_valid) > 0:
         ax2.boxplot(
-            valid, vert=True, widths=0.4, patch_artist=True,
+            all_valid, vert=True, widths=0.4, patch_artist=True,
             boxprops=dict(facecolor="#aec7e8", alpha=0.7),
         )
         rng = np.random.default_rng(42)
         ax2.scatter(
-            np.ones_like(valid) + rng.uniform(-0.08, 0.08, len(valid)),
-            valid, s=30, alpha=0.6, c="#1f77b4", zorder=3,
+            np.ones_like(all_valid) + rng.uniform(-0.08, 0.08, len(all_valid)),
+            all_valid, s=20, alpha=0.4, c="#1f77b4", zorder=3,
         )
         ax2.axhline(cl_median, color="#d62728", ls="-", lw=1.2,
                      label=f"Median: {cl_median:.3e}")
@@ -458,9 +545,45 @@ def plot_sensitivity_analysis(
         ax2.legend(fontsize=8, loc="upper right")
 
     ax2.set_ylabel("Lidar Constant")
-    ax2.set_title("Distribution")
+    ax2.set_title("All Combinations")
     ax2.set_xticks([])
     ax2.grid(True, axis="y", alpha=0.25)
+
+    # -- Right: per time-sample comparison (only when cube is provided) --
+    if cl_cube is not None and n_panels == 3:
+        ax3 = axes[2]
+        n_t = cl_cube.shape[2]
+        labels = time_sample_labels or [str(i) for i in range(n_t)]
+        # Collect valid values per time sample
+        sample_data = []
+        for t in range(n_t):
+            vals = cl_cube[:, :, t].ravel()
+            sample_data.append(vals[np.isfinite(vals)])
+
+        positions = list(range(1, n_t + 1))
+        bp = ax3.boxplot(
+            sample_data, positions=positions, vert=True, widths=0.5,
+            patch_artist=True,
+        )
+        colours = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+                    "#8c564b", "#e377c2", "#7f7f7f"]
+        for i, patch in enumerate(bp["boxes"]):
+            patch.set_facecolor(colours[i % len(colours)])
+            patch.set_alpha(0.6)
+
+        ax3.axhline(cl_median, color="#d62728", ls="--", lw=1.0,
+                     label=f"Median: {cl_median:.3e}")
+        ax3.axhspan(
+            cl_median - cl_uncertainty, cl_median + cl_uncertainty,
+            color="#d62728", alpha=0.08,
+        )
+        ax3.set_xticks(positions)
+        ax3.set_xticklabels(labels, rotation=45, ha="right", fontsize=8)
+        ax3.set_xlabel("Time sample")
+        ax3.set_ylabel("Lidar Constant")
+        ax3.set_title("Time-Sample Spread")
+        ax3.legend(fontsize=8, loc="upper right")
+        ax3.grid(True, axis="y", alpha=0.25)
 
     fig.suptitle(title or "Sensitivity Analysis", fontsize=13)
     fig.tight_layout()

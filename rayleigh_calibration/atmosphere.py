@@ -327,28 +327,43 @@ def klett_inversion(
 
     lr_diff = lidar_ratio_aerosol - MOLECULAR_LIDAR_RATIO
 
-    for R in range(i_start, i_end):
-        # Integral from R0 to R of beta_mol * (LRaer - LRmol)
-        qt = np.sum(beta_mol[R:reference_index] * lr_diff * dz)
-        numerator = beta_att[R] * np.exp(-2 * qt)
+    # --- Vectorised Klett inversion over [i_start, i_end) ------------------
+    # Pre-compute the cumulative integral of beta_mol * lr_diff * dz from
+    # index 0 upward.  The integral from bin k to reference_index is then
+    #   cum[reference_index] - cum[k].
+    mol_dz = beta_mol * lr_diff * dz          # (n_bins,)
+    cum = np.zeros(n_bins + 1)                # cum[k] = sum(mol_dz[0:k])
+    np.cumsum(mol_dz, out=cum[1:])
 
-        # Calculate denominator (integral term)
-        denominator_sum = 0.0
-        for r in range(R, reference_index):
-            # Transmission factor from r to R0
-            T_factor = -2 * np.sum(beta_mol[r:reference_index] * lr_diff * dz)
-            denominator_sum += beta_att[r] * np.exp(T_factor) * lidar_ratio_aerosol * dz
+    # qt[R] = sum(beta_mol[R:ref] * lr_diff * dz) = cum[ref] - cum[R]
+    R_idx = np.arange(i_start, i_end)
+    qt = cum[reference_index] - cum[R_idx]     # (n_R,)
+    numerator = beta_att[R_idx] * np.exp(-2 * qt)  # (n_R,)
 
-        denominator = reference_value + 2 * denominator_sum
+    # T_factor[r] = -2 * (cum[ref] - cum[r])  for each bin r
+    T_factor_all = -2.0 * (cum[reference_index] - cum[i_start:reference_index])
+    weighted_all = beta_att[i_start:reference_index] * np.exp(T_factor_all) * lidar_ratio_aerosol * dz
 
-        beta_aer[R] = numerator / denominator - beta_mol[R]
-        beta_tot[R] = beta_aer[R] + beta_mol[R]
-        ext_aer[R] = max(0, beta_aer[R]) * lidar_ratio_aerosol
+    # denominator_sum[R] = sum over r in [R, reference_index) of weighted_all[r]
+    # Use reverse cumulative sum so that rev_cumsum[k] = sum(weighted_all[k:end])
+    rev_cumsum = np.cumsum(weighted_all[::-1])[::-1]  # length = ref - i_start
+    # For R_idx, the offset into weighted_all is R - i_start
+    denom_sum = np.empty(len(R_idx))
+    offset = R_idx - i_start
+    valid_off = offset < len(rev_cumsum)
+    denom_sum[valid_off] = rev_cumsum[offset[valid_off]]
+    denom_sum[~valid_off] = 0.0
 
-        # Fill below start index with first valid value
-        if R == i_start:
-            beta_aer[:i_start] = beta_aer[R]
-            beta_tot[:i_start] = beta_tot[R]
-            ext_aer[:i_start] = ext_aer[R]
+    denominator = reference_value + 2 * denom_sum
+
+    beta_aer[R_idx] = numerator / denominator - beta_mol[R_idx]
+    beta_tot[R_idx] = beta_aer[R_idx] + beta_mol[R_idx]
+    ext_aer[R_idx] = np.maximum(0, beta_aer[R_idx]) * lidar_ratio_aerosol
+
+    # Fill below start index with first valid value
+    if i_start > 0:
+        beta_aer[:i_start] = beta_aer[i_start]
+        beta_tot[:i_start] = beta_tot[i_start]
+        ext_aer[:i_start] = ext_aer[i_start]
 
     return beta_aer, beta_tot, ext_aer

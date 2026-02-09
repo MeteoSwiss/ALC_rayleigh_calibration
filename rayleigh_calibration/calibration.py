@@ -56,6 +56,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 LR_DELTAS = (-20, -10, 0, +10, +20)        # Lidar-ratio perturbations (sr)
 ALT_SHIFTS_M = (-200, -100, 0, +100, +200)  # Altitude-window shifts (m)
+N_TIME_SAMPLES = 4                          # Number of random time-subsets
+TIME_SUBSET_FRACTION = 0.7                  # Fraction of profiles kept per subset
 
 
 def _plot_dir(options: CalibrationOptions, info: InstrumentInfo, date_str: str) -> Path:
@@ -72,11 +74,12 @@ def _plot_tag(info: InstrumentInfo, date_str: str) -> str:
 
 @dataclass
 class _PerturbationResult:
-    """Lidar constant obtained for one (LR, altitude-shift) combination."""
+    """Lidar constant obtained for one (LR, altitude-shift, time-sample) combination."""
     lidar_ratio: float
     altitude_shift_m: float
     lidar_constant: float
     uncertainty_single: float  # single-config uncertainty (from CL profile scatter)
+    time_sample_idx: int = 0   # 0 = all profiles, 1..N = random subset
     # Optional diagnostic arrays (only stored for nominal run, used for plots)
     cl_profile: Optional[NDArray[np.float64]] = None
     signal_normalized: Optional[NDArray[np.float64]] = None
@@ -408,6 +411,54 @@ def calibrate_rayleigh(
         f"(R²={fit_result.r_squared:.4f})"
     )
 
+    # ── Pre-compute time subsets for sensitivity analysis ──
+    # Build now so they're available for visualization
+    rng = np.random.default_rng(42)
+    n_profiles = data.rcs.shape[0]
+    n_keep = max(3, int(n_profiles * TIME_SUBSET_FRACTION))
+
+    rcs_mean_samples = [rcs_mean]  # index 0: all profiles
+    time_subset_indices = [np.arange(n_profiles)]  # All profile indices for sample 0
+    
+    for _ in range(N_TIME_SAMPLES):
+        idx = rng.choice(n_profiles, size=n_keep, replace=False)
+        idx = np.sort(idx)  # Sort for visualization
+        rcs_mean_samples.append(np.nanmean(data.rcs[idx], axis=0))
+        time_subset_indices.append(idx)
+
+    # ── Plot: RCS with molecular window annotation ──
+    if options.plot_main or options.plot_all:
+        pdir = _plot_dir(options, info, date_str)
+        tag = _plot_tag(info, date_str)
+        # Calculate sensitivity range (window ± max altitude shift)
+        sens_min = fit_result.range_start_m + min(ALT_SHIFTS_M)
+        sens_max = fit_result.range_end_m + max(ALT_SHIFTS_M)
+        
+        # Build time subset info string
+        time_subset_text = (
+            f"Time subsets:\n"
+            f"  • Sample 0: all {data.rcs.shape[0]} profiles\n"
+            f"  • Samples 1–{N_TIME_SAMPLES}: random 70% ({int(data.rcs.shape[0] * TIME_SUBSET_FRACTION)} each)"
+        )
+        
+        try:
+            plot_rcs_timeseries(
+                hours_since_start=data.hours_since_start,
+                range_alc=data.range_alc,
+                rcs=data.rcs,
+                cbh=data.cbh,
+                no_cloud_value=info.instrument_type.no_cloud_value,
+                title=f"{info.site_name} ({info.wmo_id}) — {date_str} — RCS + Calibration Regions",
+                save_path=pdir / f"{tag}_rcs_annotated.png",
+                time_datetime=data.time_datetime,
+                molecular_window_range=(fit_result.range_start_m, fit_result.range_end_m),
+                sensitivity_range=(sens_min, sens_max),
+                time_subset_info=time_subset_text,
+                time_subset_indices=time_subset_indices,
+            )
+        except Exception as exc:
+            logger.warning(f"plot_rcs_timeseries (annotated) failed: {exc}")
+
     # ── Plot: Rayleigh window search diagnostics ──
     if options.plot_all and fit_result.search_diagnostics is not None:
         pdir = _plot_dir(options, info, date_str)
@@ -460,41 +511,50 @@ def calibrate_rayleigh(
         )
 
     # =========================================================================
-    # Steps 8-10: Sensitivity analysis over lidar-ratio and altitude window
+    # Steps 8-10: Sensitivity analysis over lidar-ratio, altitude window, and
+    #             time-profile subsets
     # =========================================================================
-    # Run Klett inversion + CL calculation for 25 combinations of
+    # Run Klett inversion + CL calculation for combinations of
     #   LR ∈ {LRaer-20, LRaer-10, LRaer, LRaer+10, LRaer+20}
     #   altitude shift ∈ {-200m, -100m, 0m, +100m, +200m}
+    #   time sample  ∈ {all profiles, + N_TIME_SAMPLES random subsets}
     #
-    # The best-estimate CL is the median of the 25 values, and the
+    # The best-estimate CL is the median of all values, and the
     # uncertainty is derived from their spread (half IQR × 2 ≈ robust 2σ).
     # =========================================================================
+    n_time_total = 1 + N_TIME_SAMPLES  # all profiles + random subsets
+    n_lr = len([d for d in LR_DELTAS if options.lidar_ratio_aerosol + d > 0])
+    n_alt = len(ALT_SHIFTS_M)
+    n_combos = n_lr * n_alt * n_time_total
     logger.info(
-        "Sensitivity analysis: 5 LR × 5 altitude shifts = 25 combinations"
+        f"Sensitivity analysis: {n_lr} LR × {n_alt} altitude shifts "
+        f"× {n_time_total} time samples = {n_combos} combinations"
     )
 
     perturbation_results: List[_PerturbationResult] = []
 
-    for lr_delta in LR_DELTAS:
-        lr = options.lidar_ratio_aerosol + lr_delta
-        if lr <= 0:
-            continue  # skip non-physical values
-        for alt_shift in ALT_SHIFTS_M:
-            pr = _compute_cl_for_perturbation(
-                rcs_mean=rcs_mean,
-                range_alc=data.range_alc,
-                beta_mol=mol_props.beta_mol,
-                fit_result=fit_result,
-                lidar_ratio_aerosol=lr,
-                altitude_shift_m=alt_shift,
-                subtract_background=options.subtract_background,
-                consider_points_lower_than_molecular=options.consider_points_lower_than_molecular,
-            )
-            if pr is not None:
-                perturbation_results.append(pr)
+    for t_idx, rcs_mean_t in enumerate(rcs_mean_samples):
+        for lr_delta in LR_DELTAS:
+            lr = options.lidar_ratio_aerosol + lr_delta
+            if lr <= 0:
+                continue  # skip non-physical values
+            for alt_shift in ALT_SHIFTS_M:
+                pr = _compute_cl_for_perturbation(
+                    rcs_mean=rcs_mean_t,
+                    range_alc=data.range_alc,
+                    beta_mol=mol_props.beta_mol,
+                    fit_result=fit_result,
+                    lidar_ratio_aerosol=lr,
+                    altitude_shift_m=alt_shift,
+                    subtract_background=options.subtract_background,
+                    consider_points_lower_than_molecular=options.consider_points_lower_than_molecular,
+                )
+                if pr is not None:
+                    pr.time_sample_idx = t_idx
+                    perturbation_results.append(pr)
 
     n_ok = len(perturbation_results)
-    logger.info(f"Successful perturbation runs: {n_ok}/25")
+    logger.info(f"Successful perturbation runs: {n_ok}/{n_combos}")
 
     if n_ok == 0:
         logger.warning("All perturbation runs failed")
@@ -616,8 +676,8 @@ def calibrate_rayleigh(
         # (a) Molecular fit diagnostic
         if pr_nominal is not None and pr_nominal.signal_normalized is not None:
             try:
-                # Molecular attenuated backscatter = beta_mol × range²
-                beta_att_mol = mol_props.beta_mol * (data.range_alc ** 2)
+                # Molecular attenuated backscatter = beta_mol × transmission
+                beta_att_mol = mol_props.beta_att_mol
                 plot_molecular_fit(
                     range_alc=data.range_alc,
                     altitude=data.altitude,
@@ -652,14 +712,19 @@ def calibrate_rayleigh(
 
         # (c) Sensitivity analysis heatmap
         try:
-            # Build LR × altitude-shift matrix
+            # Build LR × altitude-shift × time-sample cube
             lr_used = np.array(sorted({pr.lidar_ratio for pr in perturbation_results}))
             shifts_used = np.array(sorted({pr.altitude_shift_m for pr in perturbation_results}))
-            cl_matrix = np.full((len(lr_used), len(shifts_used)), np.nan)
+            ts_used = np.array(sorted({pr.time_sample_idx for pr in perturbation_results}))
+            cl_cube = np.full((len(lr_used), len(shifts_used), len(ts_used)), np.nan)
             lr_idx = {v: i for i, v in enumerate(lr_used)}
             sh_idx = {v: i for i, v in enumerate(shifts_used)}
+            ts_idx = {v: i for i, v in enumerate(ts_used)}
             for pr in perturbation_results:
-                cl_matrix[lr_idx[pr.lidar_ratio], sh_idx[pr.altitude_shift_m]] = pr.lidar_constant
+                cl_cube[lr_idx[pr.lidar_ratio], sh_idx[pr.altitude_shift_m], ts_idx[pr.time_sample_idx]] = pr.lidar_constant
+
+            # Median over time samples for the heatmap display
+            cl_matrix = np.nanmedian(cl_cube, axis=2)
 
             plot_sensitivity_analysis(
                 lr_values=lr_used,
@@ -667,6 +732,8 @@ def calibrate_rayleigh(
                 cl_matrix=cl_matrix,
                 cl_median=cl_median,
                 cl_uncertainty=uncertainty,
+                cl_cube=cl_cube,
+                time_sample_labels=["all"] + [f"subset {i}" for i in range(1, N_TIME_SAMPLES + 1)],
                 title=f"{plot_title_base} — Sensitivity",
                 save_path=pdir / f"{tag}_sensitivity.png",
             )

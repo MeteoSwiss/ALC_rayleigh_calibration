@@ -184,6 +184,8 @@ class CalibrationOptions:
             consider_points_lower_than_molecular=bool(data.get("consider_points_lower_than_molecular", 1)),
             threshold_quality=float(data.get("threshold_quality", 15)),
             use_std_atm=bool(data.get("use_std_atm", 1)),
+            range_start_m=float(data.get("range_start_m", 2000)),
+            range_end_m=float(data.get("range_end_m", 6000)),
         )
 
 

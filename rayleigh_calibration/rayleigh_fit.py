@@ -261,20 +261,27 @@ def calculate_lidar_constant(
     else:
         rcs_corrected = rcs_mean
 
-    # Calculate CL at each altitude using transmission correction
+    # Calculate CL at each altitude using transmission correction.
+    # Use cumulative trapezoidal integration instead of per-bin np.trapz.
     cl_profile = np.full_like(range_alc, np.nan)
 
-    for i in range(i_end):
-        # Two-way optical depth from surface to altitude i
-        if i > 0:
-            optical_depth = np.trapz(ext_tot[:i], range_alc[:i])
-        else:
-            optical_depth = 0
+    # Cumulative optical depth from surface to each bin
+    if i_end > 1:
+        dz_half = np.diff(range_alc[:i_end]) / 2.0
+        mid_sum = ext_tot[:i_end - 1] + ext_tot[1:i_end]
+        optical_depth = np.zeros(i_end)
+        np.cumsum(dz_half * mid_sum, out=optical_depth[1:])
+    else:
+        optical_depth = np.zeros(max(i_end, 1))
 
-        inv_transmission = np.exp(2 * optical_depth)
+    inv_transmission = np.exp(2 * optical_depth)
 
-        if beta_tot[i] > 0:
-            cl_profile[i] = rcs_corrected[i] / beta_tot[i] * inv_transmission
+    valid_mask = beta_tot[:i_end] > 0
+    cl_profile[:i_end] = np.where(
+        valid_mask,
+        rcs_corrected[:i_end] / np.where(valid_mask, beta_tot[:i_end], 1.0) * inv_transmission,
+        np.nan,
+    )
 
     # Calculate median CL in molecular region
     cl_molecular = cl_profile[i_start:i_end]
