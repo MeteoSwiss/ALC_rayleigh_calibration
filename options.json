@@ -9,6 +9,6 @@
     "LRaer": 52,
     "threshold_quality": 15,
     "use_std_atm": 1,
-    "plot_main": 0,
+    "plot_main": 1,
     "plot_all": 0
 }

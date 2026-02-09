@@ -16,6 +16,17 @@ from scipy.stats import linregress
 
 
 @dataclass
+class WindowSearchDiagnostics:
+    """Grid-search arrays produced by the molecular-window optimisation."""
+    range_bin_m: NDArray[np.float64]        # Center positions searched (m)
+    half_length_m: NDArray[np.float64]      # Half-lengths searched (m)
+    slopes: NDArray[np.float64]             # (n_centers, n_lengths)
+    intercepts: NDArray[np.float64]         # (n_centers, n_lengths)
+    r_squared: NDArray[np.float64]          # (n_centers, n_lengths)
+    sum_abs_intercept: NDArray[np.float64]  # (n_centers,)
+
+
+@dataclass
 class RayleighFitResult:
     """Result of Rayleigh fit optimization."""
     # Fit parameters
@@ -37,6 +48,9 @@ class RayleighFitResult:
 
     # Quality metrics
     relative_error: float        # Relative error between fit and median
+
+    # Optional diagnostics for plotting
+    search_diagnostics: Optional[WindowSearchDiagnostics] = None
 
     @property
     def is_valid(self) -> bool:
@@ -171,6 +185,16 @@ def find_optimal_molecular_window(
     else:
         relative_error = np.inf
 
+    # Store grid-search diagnostics for plotting
+    diagnostics = WindowSearchDiagnostics(
+        range_bin_m=center_bins.astype(float) * dz,
+        half_length_m=np.array(half_length_options_m, dtype=float),
+        slopes=slopes,
+        intercepts=intercepts,
+        r_squared=r_squared,
+        sum_abs_intercept=sum_abs_intercept,
+    )
+
     return RayleighFitResult(
         slope=best_slope,
         intercept=best_intercept,
@@ -184,6 +208,7 @@ def find_optimal_molecular_window(
         altitude_start=0,  # Will be set by caller
         altitude_end=0,    # Will be set by caller
         relative_error=relative_error,
+        search_diagnostics=diagnostics,
     )
 
 

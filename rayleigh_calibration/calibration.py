@@ -39,6 +39,13 @@ from .rayleigh_fit import (
     RayleighFitResult,
 )
 from .output import write_calibration_result
+from .plotting import (
+    plot_rcs_timeseries,
+    plot_molecular_fit,
+    plot_lidar_constant,
+    plot_rayleigh_window_search,
+    plot_sensitivity_analysis,
+)
 
 
 # Configure module logger
@@ -51,6 +58,18 @@ LR_DELTAS = (-20, -10, 0, +10, +20)        # Lidar-ratio perturbations (sr)
 ALT_SHIFTS_M = (-200, -100, 0, +100, +200)  # Altitude-window shifts (m)
 
 
+def _plot_dir(options: CalibrationOptions, info: InstrumentInfo, date_str: str) -> Path:
+    """Return (and create) the plot output directory for one station/date."""
+    d = options.folder_output / "plots" / info.wmo_id / date_str[:4]
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _plot_tag(info: InstrumentInfo, date_str: str) -> str:
+    """File-name prefix for a plot, e.g. '20260101_0-20000-0-06610'."""
+    return f"{date_str}_{info.wmo_id}"
+
+
 @dataclass
 class _PerturbationResult:
     """Lidar constant obtained for one (LR, altitude-shift) combination."""
@@ -58,6 +77,12 @@ class _PerturbationResult:
     altitude_shift_m: float
     lidar_constant: float
     uncertainty_single: float  # single-config uncertainty (from CL profile scatter)
+    # Optional diagnostic arrays (only stored for nominal run, used for plots)
+    cl_profile: Optional[NDArray[np.float64]] = None
+    signal_normalized: Optional[NDArray[np.float64]] = None
+    beta_att: Optional[NDArray[np.float64]] = None
+    beta_tot: Optional[NDArray[np.float64]] = None
+    ext_tot: Optional[NDArray[np.float64]] = None
 
 
 def _compute_cl_for_perturbation(
@@ -69,6 +94,7 @@ def _compute_cl_for_perturbation(
     altitude_shift_m: float,
     subtract_background: bool,
     consider_points_lower_than_molecular: bool,
+    return_diagnostics: bool = False,
 ) -> Optional[_PerturbationResult]:
     """
     Run Klett inversion + CL calculation for ONE (LR, altitude-shift) pair.
@@ -159,6 +185,11 @@ def _compute_cl_for_perturbation(
         altitude_shift_m=altitude_shift_m,
         lidar_constant=cl_result.lidar_constant,
         uncertainty_single=cl_result.uncertainty,
+        cl_profile=cl_result.cl_profile if return_diagnostics else None,
+        signal_normalized=signal_normalized if return_diagnostics else None,
+        beta_att=beta_att if return_diagnostics else None,
+        beta_tot=beta_tot if return_diagnostics else None,
+        ext_tot=ext_tot if return_diagnostics else None,
     )
 
 
@@ -261,6 +292,24 @@ def calibrate_rayleigh(
             message="No profiles in nighttime window",
         )
 
+    # ── Plot: RCS time-series (before cloud filtering) ──
+    if options.plot_main or options.plot_all:
+        pdir = _plot_dir(options, info, date_str)
+        tag = _plot_tag(info, date_str)
+        try:
+            plot_rcs_timeseries(
+                hours_since_start=data.hours_since_start,
+                range_alc=data.range_alc,
+                rcs=data.rcs,
+                cbh=data.cbh,
+                no_cloud_value=info.instrument_type.no_cloud_value,
+                title=f"{info.site_name} ({info.wmo_id}) — {date_str} — RCS",
+                save_path=pdir / f"{tag}_rcs_timeseries.png",
+                time_datetime=data.time_datetime,
+            )
+        except Exception as exc:
+            logger.warning(f"plot_rcs_timeseries failed: {exc}")
+
     # =========================================================================
     # Step 3: Filter cloudy profiles
     # =========================================================================
@@ -358,6 +407,27 @@ def calibrate_rayleigh(
         f"Optimal window: {fit_result.range_start_m:.0f}-{fit_result.range_end_m:.0f}m "
         f"(R²={fit_result.r_squared:.4f})"
     )
+
+    # ── Plot: Rayleigh window search diagnostics ──
+    if options.plot_all and fit_result.search_diagnostics is not None:
+        pdir = _plot_dir(options, info, date_str)
+        tag = _plot_tag(info, date_str)
+        diag = fit_result.search_diagnostics
+        try:
+            plot_rayleigh_window_search(
+                range_bin_m=diag.range_bin_m,
+                half_length_m=diag.half_length_m,
+                slopes=diag.slopes,
+                intercepts=diag.intercepts,
+                r_squared=diag.r_squared,
+                sum_abs_intercept=diag.sum_abs_intercept,
+                best_range_m=fit_result.center_range_m,
+                best_half_m=fit_result.half_length_m,
+                title=f"{info.site_name} — {date_str} — Window Search",
+                save_path=pdir / f"{tag}_window_search.png",
+            )
+        except Exception as exc:
+            logger.warning(f"plot_rayleigh_window_search failed: {exc}")
 
     # =========================================================================
     # Step 7: Validate Rayleigh fit
@@ -479,6 +549,7 @@ def calibrate_rayleigh(
         altitude_shift_m=0,
         subtract_background=options.subtract_background,
         consider_points_lower_than_molecular=options.consider_points_lower_than_molecular,
+        return_diagnostics=True,   # keep cl_profile etc. for plots
     )
 
     # Validation using the slope method
@@ -535,6 +606,72 @@ def calibrate_rayleigh(
             uncertainty=0,
             message=f"Uncertainty exceeds value: {uncertainty:.2e} > {cl_median:.2e}",
         )
+
+    # ── Plot: Molecular fit, CL profile, Sensitivity analysis ──
+    if options.plot_main or options.plot_all:
+        pdir = _plot_dir(options, info, date_str)
+        tag = _plot_tag(info, date_str)
+        plot_title_base = f"{info.site_name} ({info.wmo_id}) — {date_str}"
+
+        # (a) Molecular fit diagnostic
+        if pr_nominal is not None and pr_nominal.signal_normalized is not None:
+            try:
+                # Molecular attenuated backscatter = beta_mol × range²
+                beta_att_mol = mol_props.beta_mol * (data.range_alc ** 2)
+                plot_molecular_fit(
+                    range_alc=data.range_alc,
+                    altitude=data.altitude,
+                    rcs_mean=rcs_mean,
+                    signal_normalized=pr_nominal.signal_normalized,
+                    p_mol=mol_props.p_mol,
+                    beta_att_mol=beta_att_mol,
+                    fit_altitude_start=fit_result.altitude_start,
+                    fit_altitude_end=fit_result.altitude_end,
+                    title=f"{plot_title_base} — Molecular Fit",
+                    save_path=pdir / f"{tag}_molecular_fit.png",
+                )
+            except Exception as exc:
+                logger.warning(f"plot_molecular_fit failed: {exc}")
+
+        # (b) Lidar-constant profile
+        if pr_nominal is not None and pr_nominal.cl_profile is not None:
+            try:
+                plot_lidar_constant(
+                    range_alc=data.range_alc,
+                    cl_profile=pr_nominal.cl_profile,
+                    cl_median=cl_median,
+                    cl_slope=cl_slope,
+                    cl_uncertainty=uncertainty,
+                    fit_range_start=fit_result.range_start_m,
+                    fit_range_end=fit_result.range_end_m,
+                    title=f"{plot_title_base} — Lidar Constant",
+                    save_path=pdir / f"{tag}_lidar_constant.png",
+                )
+            except Exception as exc:
+                logger.warning(f"plot_lidar_constant failed: {exc}")
+
+        # (c) Sensitivity analysis heatmap
+        try:
+            # Build LR × altitude-shift matrix
+            lr_used = np.array(sorted({pr.lidar_ratio for pr in perturbation_results}))
+            shifts_used = np.array(sorted({pr.altitude_shift_m for pr in perturbation_results}))
+            cl_matrix = np.full((len(lr_used), len(shifts_used)), np.nan)
+            lr_idx = {v: i for i, v in enumerate(lr_used)}
+            sh_idx = {v: i for i, v in enumerate(shifts_used)}
+            for pr in perturbation_results:
+                cl_matrix[lr_idx[pr.lidar_ratio], sh_idx[pr.altitude_shift_m]] = pr.lidar_constant
+
+            plot_sensitivity_analysis(
+                lr_values=lr_used,
+                alt_shifts=shifts_used,
+                cl_matrix=cl_matrix,
+                cl_median=cl_median,
+                cl_uncertainty=uncertainty,
+                title=f"{plot_title_base} — Sensitivity",
+                save_path=pdir / f"{tag}_sensitivity.png",
+            )
+        except Exception as exc:
+            logger.warning(f"plot_sensitivity_analysis failed: {exc}")
 
     # =========================================================================
     # Step 11: Build result and write to NetCDF
