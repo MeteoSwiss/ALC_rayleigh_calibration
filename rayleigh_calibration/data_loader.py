@@ -8,7 +8,7 @@ for Rayleigh calibration.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date as date_type
 from pathlib import Path
 from typing import Optional, List, Tuple
 
@@ -31,8 +31,8 @@ class CeilometerData:
     range_alc: NDArray[np.float64]      # Range bins (m)
     altitude: float                      # Station altitude (m ASL)
     altitude_grid: NDArray[np.float64]  # Altitude of each range bin (m ASL)
-    latitude: float = 0.0                # Station latitude (degrees north)
-    longitude: float = 0.0               # Station longitude (degrees east)
+    latitude: float                      # Station latitude (degrees north)
+    longitude: float                     # Station longitude (degrees east)
 
     # Observations
     rcs: NDArray[np.float64]            # Range-corrected signal (time x range)
@@ -318,9 +318,11 @@ def filter_time_range(
     Solar time is computed from UTC using the station longitude:
         solar_hour = UTC_hour + longitude / 15.0
 
-    Keeps data from:
-    - Previous solar day where solar hour >= hour_min (evening)
-    - Current solar day where solar hour < hour_max (early morning)
+    For date YYYYMMDD (e.g., Feb 5), selects data from:
+    - Previous solar day (Feb 4) where solar hour >= hour_min (evening)
+    - Current solar day (Feb 5) where solar hour < hour_max (early morning)
+
+    This captures the night from Feb 4 20:00 to Feb 5 04:00 (solar time).
 
     Parameters
     ----------
@@ -336,44 +338,42 @@ def filter_time_range(
     CeilometerData
         Filtered data.
     """
-    current_date = datetime.strptime(date_str, '%Y%m%d')
+    current_date = datetime.strptime(date_str, '%Y%m%d').date()
     previous_date = current_date - timedelta(days=1)
+    next_date = current_date + timedelta(days=1)
 
     # Solar time offset in hours (positive east of Greenwich)
     solar_offset_hours = data.longitude / 15.0
 
-    # Build boolean mask for profiles to KEEP
-    keep_mask = np.zeros(len(data.time), dtype=bool)
+    # --- Vectorized computation (avoids slow Python loop) -----------------
+    # Extract UTC hour/day from each profile
+    n = len(data.time_datetime)
+    utc_hours = np.empty(n)
+    utc_days = np.empty(n, dtype='datetime64[D]')
 
     for i, dt in enumerate(data.time_datetime):
-        # Convert UTC to solar time
-        utc_hour = dt.hour + dt.minute / 60 + dt.second / 3600
-        solar_hour = utc_hour + solar_offset_hours
+        utc_hours[i] = dt.hour + dt.minute / 60.0 + dt.second / 3600.0
+        utc_days[i] = np.datetime64(date_type(dt.year, dt.month, dt.day))
 
-        # Compute the solar date by adjusting the UTC date
-        solar_date = dt
-        if solar_hour >= 24:
-            solar_hour -= 24
-            solar_date = dt + timedelta(days=1)
-        elif solar_hour < 0:
-            solar_hour += 24
-            solar_date = dt - timedelta(days=1)
+    # Solar hour and solar date
+    solar_hours = utc_hours + solar_offset_hours
+    solar_days = utc_days.copy()
 
-        is_previous_solar_day = (
-            solar_date.day == previous_date.day and
-            solar_date.month == previous_date.month and
-            solar_date.year == previous_date.year
-        )
-        is_current_solar_day = (
-            solar_date.day == current_date.day and
-            solar_date.month == current_date.month and
-            solar_date.year == current_date.year
-        )
+    wrap_fwd = solar_hours >= 24
+    wrap_bwd = solar_hours < 0
+    solar_hours[wrap_fwd] -= 24
+    solar_days[wrap_fwd] += np.timedelta64(1, 'D')
+    solar_hours[wrap_bwd] += 24
+    solar_days[wrap_bwd] -= np.timedelta64(1, 'D')
 
-        if is_previous_solar_day and solar_hour >= options.hour_min:
-            keep_mask[i] = True
-        elif is_current_solar_day and solar_hour < options.hour_max:
-            keep_mask[i] = True
+    prev_np = np.datetime64(previous_date)
+    curr_np = np.datetime64(current_date)
+
+    # Evening of previous solar day  OR  early morning of current solar day
+    keep_mask = (
+        ((solar_days == prev_np) & (solar_hours >= options.hour_min)) |
+        ((solar_days == curr_np) & (solar_hours < options.hour_max))
+    )
 
     # Apply mask
     return CeilometerData(

@@ -121,8 +121,14 @@ def calibrate_rayleigh(
     logger.info(f"Loaded {len(data.time)} profiles")
 
     # =========================================================================
-    # Step 2: Filter to nighttime window
+    # Step 2: Filter to nighttime window (solar time)
     # =========================================================================
+    solar_offset = data.longitude / 15.0
+    logger.info(
+        f"Station lon={data.longitude:.2f}° → solar time offset = "
+        f"{solar_offset:+.2f} h (solar midnight ≈ "
+        f"{(-solar_offset) % 24:05.2f} UTC)"
+    )
     data = filter_time_range(data, date_str, options)
     logger.info(f"After time filtering: {len(data.time)} profiles")
 
