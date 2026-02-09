@@ -1,0 +1,14 @@
+{
+    "folder_root": "/data/zue/E_PROFILE/ALC/L1_FILES/",
+    "folder_output": "/data/pay/REM/ACQ/E_PROFILE_ALC/Calibration/rayleigh-test-v9/",
+    "folder_ECMWF": "/data/ECMWF/",
+    "hour_min": 20,
+    "hour_max": 4,
+    "min_time_range": 3,
+    "z_low_cloud": 4000,
+    "LRaer": 52,
+    "threshold_quality": 15,
+    "use_std_atm": 1,
+    "plot_main": 0,
+    "plot_all": 0
+}

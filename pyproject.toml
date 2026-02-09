@@ -1,0 +1,82 @@
+[tool.poetry]
+name = "rayleigh-calibration"
+version = "2.0.0"
+description = "Rayleigh calibration tools for automated lidars and ceilometers"
+authors = ["E-PROFILE <contact@e-profile.eu>"]
+license = "MIT"
+readme = "README.md"
+packages = [{include = "rayleigh_calibration"}]
+keywords = ["lidar", "ceilometer", "calibration", "rayleigh", "atmospheric", "remote sensing"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Atmospheric Science",
+]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+numpy = "^1.20"
+scipy = "^1.7"
+netCDF4 = "^1.5"
+
+[tool.poetry.group.plotting.dependencies]
+matplotlib = "^3.4"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.0"
+pytest-cov = "^4.0"
+mypy = "^1.0"
+ruff = "^0.1"
+
+[tool.poetry.scripts]
+rayleigh-calibration = "rayleigh_calibration.main:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # Pyflakes
+    "I",     # isort
+    "B",     # flake8-bugbear
+    "C4",    # flake8-comprehensions
+    "UP",    # pyupgrade
+    "NPY",   # NumPy-specific rules
+]
+ignore = [
+    "E501",  # line too long (handled by formatter)
+    "B008",  # function call in default argument (needed for dataclass defaults)
+]
+
+[tool.ruff.isort]
+known-first-party = ["rayleigh_calibration"]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = [
+    "netCDF4.*",
+    "scipy.*",
+    "matplotlib.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --cov=rayleigh_calibration --cov-report=term-missing"
