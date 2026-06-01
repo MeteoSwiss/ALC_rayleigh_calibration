@@ -642,9 +642,16 @@ def calibrate_rayleigh(
         i_start=0,
         i_end=np.where(mol_mask_nominal)[0][-1],
     )
-    ext_tot_check = ext_aer_check + mol_props.beta_mol * MOLECULAR_LIDAR_RATIO
-    optical_depth_ref = np.trapz(ext_tot_check[:i_start_mol_nominal], data.range_alc[:i_start_mol_nominal])
-    inv_trans_ref = np.exp(2 * optical_depth_ref)
+    # The Rayleigh-fit slope corresponds to C_L * T_a^2 (aerosol two-way
+    # transmittance), because beta_a ~ 0 in the molecular window. To recover
+    # C_L we must divide out only the AEROSOL transmittance T_a^2, not the
+    # total transmittance T^2 = T_a^2 * T_m^2. Using the total optical depth
+    # (incl. molecular) overestimates C_L^slope and can cause false
+    # 'method disagreement' rejections (see report sec. 4).
+    optical_depth_aer_ref = np.trapz(
+        ext_aer_check[:i_start_mol_nominal], data.range_alc[:i_start_mol_nominal]
+    )
+    inv_trans_ref = np.exp(2 * optical_depth_aer_ref)
 
     cl_slope = fit_result.slope * inv_trans_ref
     error_pct = abs((cl_slope - cl_median) / cl_median * 100)

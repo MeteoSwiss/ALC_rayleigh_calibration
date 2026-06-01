@@ -338,23 +338,29 @@ def klett_inversion(
     # qt[R] = sum(beta_mol[R:ref] * lr_diff * dz) = cum[ref] - cum[R]
     R_idx = np.arange(i_start, i_end)
     qt = cum[reference_index] - cum[R_idx]     # (n_R,)
-    numerator = beta_att[R_idx] * np.exp(-2 * qt)  # (n_R,)
+    # Corrected Klett-Fernald sign: the exponent is +2 * integral(beta_mol * dS),
+    # not -2. The original Klett (1985) publication carries a sign error in the
+    # signal-variable substitute; the negative sign drives aerosol backscatter
+    # negative. See Speidel & Vogelmann, Appl. Opt. 62, 861 (2023), Eq. (10).
+    numerator = beta_att[R_idx] * np.exp(2 * qt)  # (n_R,)
 
-    # T_factor[r] = -2 * (cum[ref] - cum[r])  for each bin r
-    T_factor_all = -2.0 * (cum[reference_index] - cum[i_start:reference_index])
-    weighted_all = beta_att[i_start:reference_index] * np.exp(T_factor_all) * lidar_ratio_aerosol * dz
+    # T_factor[r] = +2 * (cum[ref] - cum[r]) over the full inversion range
+    # (same sign correction as above).
+    T_factor_all = 2.0 * (cum[reference_index] - cum[R_idx])
+    weighted_all = beta_att[R_idx] * np.exp(T_factor_all) * lidar_ratio_aerosol * dz
 
-    # denominator_sum[R] = sum over r in [R, reference_index) of weighted_all[r]
-    # Use reverse cumulative sum so that rev_cumsum[k] = sum(weighted_all[k:end])
-    rev_cumsum = np.cumsum(weighted_all[::-1])[::-1]  # length = ref - i_start
-    # For R_idx, the offset into weighted_all is R - i_start
-    denom_sum = np.empty(len(R_idx))
-    offset = R_idx - i_start
-    valid_off = offset < len(rev_cumsum)
-    denom_sum[valid_off] = rev_cumsum[offset[valid_off]]
-    denom_sum[~valid_off] = 0.0
+    # Denominator integral 2 * \int_R^Rc weighted dr, evaluated for every R in
+    # [i_start, i_end). With a forward cumulative sum, the signed integral from
+    # R to the reference index is cum_den[ref] - cum_den[R]: positive below the
+    # reference and negative above it. This evaluates the full Klett denominator
+    # over the whole window instead of truncating it to the constant of
+    # integration above reference_idx (the truncation artificially inflated C_L
+    # in the upper part of the window; see report sec. 2.2).
+    cum_den = np.zeros(n_bins + 1)            # cum_den[k] = sum(weighted bins [i_start, k))
+    np.cumsum(weighted_all, out=cum_den[i_start + 1:i_end + 1])
+    denom_int = cum_den[reference_index] - cum_den[R_idx]
 
-    denominator = reference_value + 2 * denom_sum
+    denominator = reference_value + 2 * denom_int
 
     beta_aer[R_idx] = numerator / denominator - beta_mol[R_idx]
     beta_tot[R_idx] = beta_aer[R_idx] + beta_mol[R_idx]
