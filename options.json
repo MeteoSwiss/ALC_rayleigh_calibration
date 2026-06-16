@@ -1,4 +1,6 @@
 {
+    "_comment_data_level": "Input product: 'L1' (rcs_0 daily), 'L2_daily' or 'L2_monthly' (attenuated_backscatter_0 reconstructed). folder_root must match.",
+    "data_level": "L1",
     "folder_root": "/data/zue/E_PROFILE/ALC/L1_FILES/",
     "folder_output": "/data/zue/E_PROFILE/ALC/Calibration/rayleigh-test-v13/",
     "folder_ECMWF": "/data/ECMWF/",
@@ -14,5 +16,9 @@
     "threshold_quality": 15,
     "use_std_atm": 1,
     "plot_main": 1,
-    "plot_all": 0  
+    "plot_all": 0,
+    "_comment_wv": "Water-vapor correction for 910 nm instruments (CL31/CL51/CL61). A 910 nm night without matching CAMS is skipped. 1064 nm (CHM15k) is unaffected.",
+    "apply_wv_correction": 1,
+    "cams_folder": "D:/CAMS/",
+    "abs_cs_lookup_table": "C:/Users/hervo/OneDrive/Documents/MATLAB/MDA/monitoring_alc_monthly/abs_cross_647_full_levels_1000.nc"
 }

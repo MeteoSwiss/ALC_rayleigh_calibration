@@ -14,6 +14,30 @@ from typing import Optional
 import json
 
 
+class DataLevel(str, Enum):
+    """Input data product the calibration reads from.
+
+    - ``L1``        : native L1 daily files with the range-corrected signal
+                      ``rcs_0`` (e.g. ``D:/E-PROFILE_L1``, ``F:/E_PROFILE_ALC/L1_FILES``).
+                      Layout: ``<root>/<WMO>/YYYY/MM/L1_<WMO>_<id><YYYYMMDD>.nc``.
+    - ``L2_daily``  : daily L2 files with ``attenuated_backscatter_0`` +
+                      ``calibration_constant_0`` (e.g. ``D:/E-PROFILE_L2_2021-2025``).
+                      Layout: ``<root>/<WMO>/YYYY/MM/L2_<WMO>_<id><YYYYMMDD>.nc``.
+    - ``L2_monthly``: monthly L2 files, same variables as ``L2_daily`` but one file
+                      per month (e.g. ``A:/E-PROFILE_L2_monthly``).
+                      Layout: ``<root>/<WMO>/YYYY/L2_<WMO>_<id><YYYYMM>.nc``.
+
+    For both L2 levels the range-corrected signal is reconstructed as
+    ``rcs = attenuated_backscatter_0 * calibration_constant_0 * 1e-6`` (fixed factor,
+    matching the MATLAB reference ``loadL2Data.m``; the stored attenuated backscatter is
+    always micro-scaled even when the ``units`` attribute mislabels it), recovering the
+    L1-equivalent signal so the rest of the pipeline is unchanged.
+    """
+    L1 = "L1"
+    L2_DAILY = "L2_daily"
+    L2_MONTHLY = "L2_monthly"
+
+
 class InstrumentType(str, Enum):
     """Supported ceilometer/lidar instrument types."""
     CHM15k = "CHM15k"
@@ -128,6 +152,10 @@ class CalibrationOptions:
     folder_root: Path = field(default_factory=lambda: Path("/data/zue/E_PROFILE/ALC/L1_FILES/"))
     folder_output: Path = field(default_factory=lambda: Path("/data/pay/REM/ACQ/E_PROFILE_ALC/Calibration/rayleigh/"))
 
+    # Input data product to read (see DataLevel). folder_root must point at the
+    # matching archive. L2 levels reconstruct rcs from attenuated backscatter.
+    data_level: DataLevel = DataLevel.L1
+
     # Time selection (hours UTC)
     hour_min: int = 20  # Start hour on previous day
     hour_max: int = 4   # End hour on current day
@@ -154,6 +182,13 @@ class CalibrationOptions:
     # Atmosphere model
     use_std_atm: bool = True
 
+    # Water-vapor correction (910 nm instruments only). Requires monthly CAMS +
+    # the HITRAN cross-section LUT. A 910 nm night without a matching CAMS month is
+    # skipped (never calibrated without a valid WV correction).
+    apply_wv_correction: bool = False
+    cams_folder: Path = field(default_factory=lambda: Path("D:/CAMS/"))
+    abs_cs_lookup_table: Path = field(default_factory=lambda: Path(""))
+
     # Rayleigh fit window search parameters (not typically changed)
     half_length_options_m: tuple = field(default_factory=lambda: tuple(range(250, 2000, 240)))
     range_start_m: float = 2000.0
@@ -170,6 +205,7 @@ class CalibrationOptions:
             folder_ecmwf=Path(data.get("folder_ECMWF", "E:/ECMWF/")),
             folder_root=Path(data.get("folder_root", "/data/zue/E_PROFILE/ALC/L1_FILES/")),
             folder_output=Path(data.get("folder_output", "/data/pay/REM/ACQ/E_PROFILE_ALC/Calibration/rayleigh/")),
+            data_level=DataLevel(data.get("data_level", "L1")),
             hour_min=data.get("hour_min", 20),
             hour_max=data.get("hour_max", 4),
             min_time_range=data.get("min_time_range", 3),
@@ -186,6 +222,9 @@ class CalibrationOptions:
             use_std_atm=bool(data.get("use_std_atm", 1)),
             range_start_m=float(data.get("range_start_m", 2000)),
             range_end_m=float(data.get("range_end_m", 6000)),
+            apply_wv_correction=bool(data.get("apply_wv_correction", 0)),
+            cams_folder=Path(data.get("cams_folder", "D:/CAMS/")),
+            abs_cs_lookup_table=Path(data.get("abs_cs_lookup_table", "")),
         )
 
 

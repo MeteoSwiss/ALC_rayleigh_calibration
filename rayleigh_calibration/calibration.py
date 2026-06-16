@@ -21,6 +21,7 @@ from .config import InstrumentInfo, CalibrationOptions, CalibrationResult
 from .data_loader import (
     build_file_paths,
     load_l1_data,
+    load_data,
     filter_time_range,
     filter_cloudy_profiles,
     CeilometerData,
@@ -31,6 +32,12 @@ from .atmosphere import (
     calculate_molecular_properties,
     klett_inversion,
     MOLECULAR_LIDAR_RATIO,
+)
+from .water_vapor import (
+    in_water_vapor_band,
+    laser_spectrum_for,
+    cams_water_vapor_profile,
+    two_way_wv_transmission,
 )
 from .rayleigh_fit import (
     find_optimal_molecular_window,
@@ -242,14 +249,10 @@ def calibrate_rayleigh(
     # =========================================================================
     # Step 1: Load L1 data
     # =========================================================================
-    file_current, file_previous = build_file_paths(date_str, info, options)
+    candidate_files = build_file_paths(date_str, info, options)
 
-    # Build file list from existing files
-    file_list = []
-    if file_previous.exists():
-        file_list.append(file_previous)
-    if file_current.exists():
-        file_list.append(file_current)
+    # Keep only files that exist (chronological order preserved)
+    file_list = [f for f in candidate_files if f.exists()]
 
     if not file_list:
         logger.warning(f"No data files found for {date_str}")
@@ -260,9 +263,9 @@ def calibrate_rayleigh(
             message="No data files found",
         )
 
-    logger.info(f"Loading {len(file_list)} files")
+    logger.info(f"Loading {len(file_list)} {options.data_level.value} file(s)")
 
-    data = load_l1_data(file_list, info.instrument_type)
+    data = load_data(file_list, info.instrument_type, options.data_level)
     if data is None:
         logger.warning("Failed to load data")
         return CalibrationResult(
@@ -370,6 +373,40 @@ def calibrate_rayleigh(
         wavelength_m,
     )
 
+    # --- Water-vapor correction for 910 nm instruments (M. Hervo rule: a 910 nm
+    # night is only calibrated when it can be water-vapor corrected). At 905-911 nm
+    # H2O absorption attenuates the molecular-reference signal; folding the two-way
+    # WV transmission into the molecular model removes the resulting bias in C_L. ---
+    nominal_wl_nm = info.instrument_type.wavelength_nm
+    if options.apply_wv_correction and in_water_vapor_band(nominal_wl_nm):
+        cams_file = Path(options.cams_folder) / f"CAMS_Beta_{date_str[:6]}.nc"
+        if not cams_file.exists():
+            logger.warning(f"No CAMS for {date_str[:6]}; skipping WV-required 910 nm night")
+            return CalibrationResult(
+                lidar_constant=-1, flag=-4, uncertainty=0,
+                message="No CAMS for water-vapor correction",
+            )
+        night = np.datetime64(f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}")
+        t_start = night - np.timedelta64(24 - int(options.hour_min), "h")
+        t_end = night + np.timedelta64(int(options.hour_max), "h")
+        lam0_nm, fwhm_nm = laser_spectrum_for(info.instrument_type.value, nominal_wl_nm)
+        prof = cams_water_vapor_profile(cams_file, info.latitude, info.longitude, t_start, t_end)
+        if prof is not None:
+            h_wv, n_wv = prof
+            wv_alt_grid = info.altitude + data.range_alc        # ASL, aligned to range_alc
+            t2_wv = two_way_wv_transmission(
+                wv_alt_grid, info.altitude, h_wv, n_wv,
+                Path(options.abs_cs_lookup_table), lam0_nm, fwhm_nm,
+            )
+            # Remove WV absorption from the measured range-corrected signal so the
+            # downstream fit / Klett / lidar-constant recover a WV-free CL:
+            #   rcs / T2_wv = CL * beta_tot * T2_scattering.
+            if t2_wv.shape[0] == data.rcs.shape[1]:
+                data.rcs = data.rcs / t2_wv[None, :]
+                logger.info(f"WV correction applied to RCS (median T2_wv={np.nanmedian(t2_wv):.3f})")
+            else:
+                logger.warning("WV transmission length mismatch; correction skipped")
+
     logger.info(f"Time elapsed: {timing.time() - start_time:.1f}s")
 
     # =========================================================================
@@ -415,7 +452,9 @@ def calibrate_rayleigh(
     # Build now so they're available for visualization
     rng = np.random.default_rng(42)
     n_profiles = data.rcs.shape[0]
-    n_keep = max(3, int(n_profiles * TIME_SUBSET_FRACTION))
+    # Cap at n_profiles: on nights with very few profiles, max(3, ...) could exceed the
+    # population and rng.choice(replace=False) would raise "larger sample than population".
+    n_keep = min(n_profiles, max(3, int(n_profiles * TIME_SUBSET_FRACTION)))
 
     rcs_mean_samples = [rcs_mean]  # index 0: all profiles
     time_subset_indices = [np.arange(n_profiles)]  # All profile indices for sample 0
