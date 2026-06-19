@@ -142,7 +142,7 @@ def plot_timeseries_grid(all_results, insts):
             if dates:
                 ax.plot(dates, cls, "-o", ms=2.5, lw=0.7, color=METHOD_COLORS[m])
         # robust y-range from the stable methods so main spikes clip
-        stable = [pn[ds][sm].cl for sm in ("improved", "optimal", "earlinet", "matlab", "bellini")
+        stable = [pn[ds][sm].cl for sm in ("eprof_v1.2", "eprof_v2", "earlinet", "eprof_v0.25", "bellini")
                   for ds in pn if calibrates(pn[ds][sm]) and np.isfinite(pn[ds][sm].cl) and pn[ds][sm].cl > 0]
         if len(stable) >= 3:
             lo, hi = np.nanpercentile(stable, [3, 97])

@@ -6,7 +6,7 @@ v1.0 = the same 'main' molecular window as E-PROF v1.1, but with the historical 
 re-enabled (options.sign_error_v10=True -> Klett sign error + total-OD reference). It is
 run on the SAME fit-nights already stored in each results_<label>.json (the 10 CHM15k +
 4 Mini-MPL suitable instruments; the 910 nm instruments are excluded), and injected back
-into those JSONs under the method key 'eprof_v10' so the comparison/precision tooling
+into those JSONs under the method key 'eprof_v1.0' so the comparison/precision tooling
 picks it up alongside the other versions.
 """
 from __future__ import annotations
@@ -33,7 +33,7 @@ def opt():
     o.folder_root = ROOT
     o.data_level = DataLevel.L2_MONTHLY
     o.molecular_source = "standard"
-    o.molecular_method = "main"      # v1.0 uses the legacy 'main' window (= v1.1's window)
+    o.molecular_method = "eprof_v1.1"  # v1.0 uses the legacy main window (= v1.1's window)
     o.sign_error_v10 = True          # ... but with the pre-a4e7140 sign-error math
     o.plot_main = False
     o.plot_all = False
@@ -76,7 +76,7 @@ def main():
                 row = to_list(r)
             except Exception:
                 row = list(FAIL)
-            data[ds]["eprof_v10"] = row
+            data[ds]["eprof_v1.0"] = row
             if row[0]:
                 ncal += 1
             total += 1

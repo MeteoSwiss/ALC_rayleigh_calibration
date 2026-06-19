@@ -31,30 +31,27 @@ import matplotlib.dates as mdates
 
 from calibration import calibrate_rayleigh, CalibrationOptions, InstrumentInfo, DataLevel
 from calibration.config import InstrumentType
-from calibration.rayleigh.molecular_methods import METHODS, compute_window_grid, select_molecular_window
+from calibration.rayleigh.molecular_methods import (
+    METHODS, METHOD_LABELS, compute_window_grid, select_molecular_window)
 
 OUT = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/figs_paper_validation/molecular_methods")
 OUT.mkdir(parents=True, exist_ok=True)
 HALF = tuple(range(250, 2000, 240))
 QC_THR = 15.0  # pipeline threshold_quality: rel_error > this -> flag -2
 
-METHOD_COLORS = {"eprof_v10": "#000000", "main": "#7f7f7f", "improved": "#1f77b4",
-                 "matlab": "#2ca02c", "earlinet": "#9467bd",
-                 "optimal": "#d62728", "bellini": "#8c564b"}
-# The three E-PROFILE production versions are renamed to their release numbers:
-#   main -> v1.1 (sign-fixed legacy), improved -> v1.2 (production), optimal -> v2.
-# v1.0 (eprof_v10) is the historical pre-a4e7140 sign-error calibration (run with the
-# same 'main' window but options.sign_error_v10=True). matlab/earlinet/bellini
-# are the external reference methods and keep their own names.
-METHOD_LABEL = {"eprof_v10": "E-PROF v1.0", "main": "E-PROF v1.1",
-                "improved": "E-PROF v1.2", "optimal": "E-PROF v2",
-                "matlab": "MATLAB Auto_Calib_25",
-                "earlinet": "EARLINET/SCC-type", "bellini": "Bellini/ALICENET"}
-# Ordered tuple for display/precision/longrun aggregation — includes eprof_v10 for historical
+METHOD_COLORS = {"eprof_v1.0": "#000000", "eprof_v1.1": "#7f7f7f", "eprof_v1.2": "#1f77b4",
+                 "eprof_v0.25": "#2ca02c", "earlinet": "#9467bd",
+                 "eprof_v2": "#d62728", "bellini": "#8c564b"}
+# Methods are keyed by E-PROF calibration version (labels from molecular_methods.METHOD_LABELS):
+#   eprof_v1.1 (sign-corrected legacy main), eprof_v1.2 (production "improved"), eprof_v2
+#   ("optimal"), eprof_v0.25 (MATLAB Auto_Calib). eprof_v1.0 is the historical pre-a4e7140
+#   sign-error calibration (same v1.1 window + options.sign_error_v10=True).
+METHOD_LABEL = dict(METHOD_LABELS)
+# Ordered tuple for display/precision/longrun aggregation — includes eprof_v1.0 for historical
 # comparison. METHODS (in molecular_methods.py) only lists live selectable methods.
 # (calipso was dropped — CALIOP "highest clean layer" needs a stratosphere a ground-up ALC lacks.)
-METHODS_DISPLAY = ("eprof_v10", "main", "improved", "optimal",
-                   "matlab", "earlinet", "bellini")
+METHODS_DISPLAY = ("eprof_v1.0", "eprof_v1.1", "eprof_v1.2", "eprof_v2",
+                   "eprof_v0.25", "earlinet", "bellini")
 
 T = InstrumentType
 INSTRUMENTS = [
@@ -92,8 +89,8 @@ def run_methods(signal, p_mol, rng, stack):
                                range_end_m=6000, increment_bins=8, signal_stack=stack)
     out = {}
     for m in METHODS:
-        if m == "optimal":
-            out[m] = select_molecular_window("optimal", signal, p_mol, rng, HALF, signal_stack=stack)
+        if m == "eprof_v2":
+            out[m] = select_molecular_window("eprof_v2", signal, p_mol, rng, HALF, signal_stack=stack)
         else:
             out[m] = select_molecular_window(m, signal, p_mol, rng, HALF, grid=grid)
     return out
@@ -136,8 +133,8 @@ def run_instrument(inst):
 # ----------------------------------------------------------------------------
 # DETAIL figures
 # ----------------------------------------------------------------------------
-SHORT = {"eprof_v10": "v1.0", "main": "main", "improved": "impr", "matlab": "matl",
-         "earlinet": "earl", "optimal": "opt", "bellini": "bell"}
+SHORT = {"eprof_v1.0": "v1.0", "eprof_v1.1": "v1.1", "eprof_v1.2": "v1.2", "eprof_v0.25": "v0.25",
+         "earlinet": "earl", "eprof_v2": "v2", "bellini": "bell"}
 
 
 def _cl_panel(ax, res):
@@ -244,7 +241,7 @@ def plot_pcolor(label, detail, per_night):
                                                            vmax=max(vhi, vlo * 10)))
         ax.set_ylim(0, 7)
         res = per_night[ds]
-        opt = res.get("optimal")
+        opt = res.get("eprof_v2")
         if opt is not None and opt.cell_flag is not None and np.any(opt.cell_flag):
             ax.contourf(hours, rng_km, opt.cell_flag.T.astype(float), levels=[0.5, 1.5],
                         colors="none", hatches=["xxx"], zorder=4)
@@ -383,7 +380,7 @@ def plot_timeseries(all_results):
         # Robust y-range from the stable (gated) methods so they stay readable; the wild
         # main excursions then clip at the top rather than compressing everything.
         stable = []
-        for sm in ("improved", "optimal", "earlinet", "matlab", "bellini"):
+        for sm in ("eprof_v1.2", "eprof_v2", "earlinet", "eprof_v0.25", "bellini"):
             for ds in pn:
                 w = pn[ds][sm]
                 if calibrates(w) and np.isfinite(w.cl) and w.cl > 0:
