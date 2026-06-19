@@ -103,16 +103,17 @@ class InstrumentInfo:
     latitude: float
     longitude: float
     altitude: float
-    calibrated: bool = True
-    reference: bool = False
-    serial: str = ""
-    focal_length: float = 5.0
-    network: str = ""
-    status: bool = True
+    calibrated: bool = True       # used by the pipeline (skip uncalibrated instruments)
+    serial: str = ""              # carried from the file (instrument_serial_number)
 
     @classmethod
     def from_dict(cls, data: dict) -> InstrumentInfo:
-        """Create InstrumentInfo from a dictionary (e.g., from JSON)."""
+        """Create InstrumentInfo from a dictionary (e.g., from instruments.json).
+
+        Only the fields the calibration code uses are read. The legacy Reference/FLength/
+        NWS/Status fields were dropped from instruments.json (not in the source files and
+        not used); ``.get`` defaults keep older manifests loading unchanged.
+        """
         return cls(
             site_name=data["SiteName"],
             wmo_id=data["WMO"],
@@ -121,30 +122,22 @@ class InstrumentInfo:
             latitude=float(data["Latitude"]),
             longitude=float(data["Longitude"]),
             altitude=float(data.get("Altitude", 0)),
-            calibrated=data.get("Calibrated", "1") == "1",
-            reference=data.get("Reference", "0") == "1",
+            calibrated=str(data.get("Calibrated", "1")) == "1",
             serial=data.get("Serial", ""),
-            focal_length=float(data.get("FLength", 5)),
-            network=data.get("NWS", ""),
-            status=data.get("Status", "1") == "1",
         )
 
     def to_legacy_dict(self) -> dict:
-        """Convert back to legacy dictionary format for compatibility."""
+        """Convert back to the instruments.json dictionary format."""
         return {
-            "SiteName": self.site_name,
             "WMO": self.wmo_id,
             "Identifier": self.identifier,
             "Type": self.instrument_type.value,
+            "SiteName": self.site_name,
             "Latitude": self.latitude,
             "Longitude": self.longitude,
             "Altitude": self.altitude,
-            "Calibrated": "1" if self.calibrated else "0",
-            "Reference": "1" if self.reference else "0",
             "Serial": self.serial,
-            "FLength": str(self.focal_length),
-            "NWS": self.network,
-            "Status": "1" if self.status else "0",
+            "Calibrated": "1" if self.calibrated else "0",
         }
 
 
@@ -243,11 +236,12 @@ class CalibrationOptions:
     min_window_start_m: float = 2000.0
     min_window_r2: float = 0.5
     max_window_rel_error: float = 50.0
-    # Molecular-window detection strategy (see molecular_methods.py): 'improved'
-    # (default, production), 'main' (legacy, degenerate — for comparison), 'matlab'
-    # (Auto_Calib_25), 'calipso', 'earlinet', 'optimal'. The min_window_*/max_window_*
-    # gates above apply to 'improved'; other methods use their own documented defaults.
-    molecular_method: str = "improved"
+    # Molecular-window detection strategy, keyed by E-PROF version (see molecular_methods.py):
+    # 'eprof_v1.2' (default, production = improved), 'eprof_v1.1' (legacy main, sign-corrected),
+    # 'eprof_v0.25' (MATLAB Auto_Calib_25), 'earlinet', 'eprof_v2' (optimal), 'bellini'.
+    # Legacy aliases (improved/main/matlab/optimal) are still accepted. The min_window_*/
+    # max_window_* gates above apply to 'eprof_v1.2'; other methods use their own defaults.
+    molecular_method: str = "eprof_v1.2"
 
     # E-PROF v1.0 baseline ONLY: reproduce the pre-a4e7140 calibration (the Klett
     # sign error + total-OD reference). Default False = the production, corrected
@@ -291,7 +285,7 @@ class CalibrationOptions:
             min_window_start_m=float(data.get("min_window_start_m", 2000)),
             min_window_r2=float(data.get("min_window_r2", 0.5)),
             max_window_rel_error=float(data.get("max_window_rel_error", 50.0)),
-            molecular_method=str(data.get("molecular_method", "improved")),
+            molecular_method=str(data.get("molecular_method", "eprof_v1.2")),
             sign_error_v10=bool(data.get("sign_error_v10", 0)),
             apply_wv_correction=bool(data.get("apply_wv_correction", 0)),
             cams_folder=Path(data.get("cams_folder", "D:/CAMS/")),

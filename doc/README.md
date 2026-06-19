@@ -65,6 +65,7 @@ Analysis & validation reports for the E-PROFILE ALC paper (M. Hervo, MeteoSwiss,
 ### Calibration stability & variability
 | Report | Summary |
 |---|---|
+| `l1_2026_variability_report.md` (+ `_embedded`) | Per-instrument night-to-night variability from **L1 2026** for 10 CHM15k + 4 Mini-MPL + **10 CL61** (the long-run study had no CL61). Methods renamed to **E-PROF versions** (v0.25/v1.0/v1.1/v1.2/v2); **E-PROF v2** most precise (σ_SD 9.5 %), CL61 median σ_SD 7.7 %. Includes **E-PROF v1.0 (sign error)** — same C_L stability as v1.1 — and an independent **liquid-cloud cross-check** of the CL61 (agrees at ~10 %, both flag Zeebrugge). **`calipso` dropped** (no stratospheric molecular reference for a ground-up ALC) |
 | `calibration_stability_report.md` | Long-term stability drivers; instrumental drift dominates (shown via WV-insensitive 1064 nm CHM15k) |
 | `calibration_short_term_variability_report.md` | Daily/per-night scatter is mostly measurement noise; irreducible instrumental floor 8–20 % |
 | `cl61_calibration_verification_report.md` | CL61 network (9 instruments): Rayleigh vs liquid-cloud, ±WV, ±Kalman, on L1 & L2 |

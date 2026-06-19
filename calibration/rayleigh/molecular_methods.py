@@ -4,24 +4,30 @@ Pluggable molecular-window detection for Rayleigh calibration.
 Six interchangeable strategies choose the aerosol-free molecular reference window
 from one time-collapsed, range-normalized profile (signal = RCS / r^2). They share
 a single grid search (:func:`compute_window_grid`) and differ only in the eligibility
-mask and the selection rule:
+mask and the selection rule.
 
-  "main"      Legacy main-branch rule: center = min Σ|intercept| (free intercept),
-              half = max R²; NO R² floor. Reproduced for comparison — known degenerate
-              (selects the high-altitude noise region where signal→0 ⇒ intercept→0 and
-              R²→0). See find_optimal_molecular_window docstring.
-  "improved"  Production fix: eligible windows (start above aerosol, R²≥floor, slope>0,
-              |b|<a, slope≈median ratio) then MAX R².
-  "matlab"    Auto_Calib_25/Rayleigh/rayleigh_fit.m (Hervo & Poltera 2014): intercept
-              FORCED to 0, center = min Σ RMSE, half = max R²; reject R²<min_r2; centers
-              capped at 5000 m.
-  "calipso"   CALIOP L1-style: SNR gate + scattering ratio ≈ 1 (least aerosol), pick the
-              HIGHEST clean window. Adapted — ceilometers have no stratosphere, so "highest
-              clean layer in range" replaces the 30–40 km molecular band.
+(A seventh "calipso"/CALIOP-style strategy — normalize to the *highest* clean layer —
+was removed: it is physically appropriate only for a *down-looking satellite*, which
+always has a pure-Rayleigh stratosphere beneath the aerosol, not for a ground-up
+ceilometer whose high-altitude signal is photon noise, so it chased noise and was the
+least precise strategy. See doc/reports for the drop rationale.)
+
+Method keys are the E-PROF calibration versions (display labels in parentheses):
+
+  "eprof_v1.1"   E-PROF v1.1 (sign cor) — legacy main-branch window rule: center =
+              min Σ|intercept| (free intercept), half = max R²; NO R² floor. Kept for
+              comparison; known degenerate (selects high-altitude noise where signal→0 ⇒
+              intercept→0 and R²→0). E-PROF v1.0 (sign error) is THIS window run through the
+              full pipeline with the historical Klett sign error (config.sign_error_v10).
+  "eprof_v1.2"   E-PROF v1.2 (improved) — production fix: eligible windows (start above
+              aerosol, R²≥floor, slope>0, |b|<a, slope≈median ratio) then MAX R².
+  "eprof_v0.25"  E-PROF v0.25 (MATLAB) — Auto_Calib_25/Rayleigh/rayleigh_fit.m (Hervo &
+              Poltera 2014): intercept FORCED to 0, center = min Σ RMSE, half = max R²;
+              reject R²<min_r2; centers capped at 5000 m.
   "earlinet"  EARLINET / Single Calculus Chain (Mattis, D'Amico, Baars et al. 2016;
               Freudenthaler et al. 2018): Rayleigh-shape residual gate + SNR gate +
               scattering ratio ≤ 1.1, pick the LOWEST qualifying window (best SNR).
-  "optimal"   Combination of the best ideas: all physical gates + TEMPORAL-variability
+  "eprof_v2"  E-PROF v2 (optimal) — best-of: all physical gates + TEMPORAL-variability
               aerosol rejection (molecular scattering is steady in time — it only tracks
               T/p — whereas aerosol advects and fluctuates; the ONLY method that uses the
               full profile time series, not just the night mean) + a composite quality
@@ -35,9 +41,11 @@ mask and the selection rule:
               M_Ray = (adjR² + (1-|b|))/std(b), with border-residual-sign and an E_CL
               relative-uncertainty gate (see _select_bellini).
 
+Legacy aliases (main/improved/matlab/optimal/eprof_v10) are still accepted on input.
+
 References: Wiegner & Geiß (2012, AMT 5, 1953); Mattis, D'Amico, Baars et al. (2016,
 AMT 9, 3009); Freudenthaler et al. (2018, amt-2017-395); Baars et al. (2016, ACP 16,
-5111); CALIOP L1 ATBD (Powell et al. 2009); Bellini et al. (2024, AMT 17, 6119, ALICENET);
+5111); Bellini et al. (2024, AMT 17, 6119, ALICENET);
 EarthCARE ATLID is HSRL (direct molecular channel — no window search needed; see report).
 """
 from __future__ import annotations
@@ -50,18 +58,41 @@ from numpy.typing import NDArray
 from scipy.stats import linregress
 
 
-METHODS = ("main", "improved", "matlab", "calipso", "earlinet", "optimal", "bellini")
+# Live selectable methods, keyed by E-PROF calibration version.
+METHODS = ("eprof_v1.1", "eprof_v1.2", "eprof_v0.25", "earlinet", "eprof_v2", "bellini")
+
+# Human-readable display labels (figures, reports, tables).
+METHOD_LABELS: Dict[str, str] = {
+    "eprof_v1.0": "E-PROF v1.0 (sign error)",
+    "eprof_v1.1": "E-PROF v1.1 (sign cor)",
+    "eprof_v1.2": "E-PROF v1.2 (improved)",
+    "eprof_v0.25": "E-PROF v0.25 (MATLAB)",
+    "eprof_v2": "E-PROF v2",
+    "earlinet": "EARLINET/SCC",
+    "bellini": "Bellini/ALICENET",
+}
+
+# Back-compat: old method names accepted on input and mapped to the E-PROF version keys.
+ALIASES: Dict[str, str] = {
+    "main": "eprof_v1.1", "improved": "eprof_v1.2", "matlab": "eprof_v0.25",
+    "optimal": "eprof_v2", "eprof_v10": "eprof_v1.0",
+}
+
+
+def resolve_method(method: str) -> str:
+    """Map a method name (E-PROF key or legacy alias) to its canonical E-PROF key."""
+    m = method.lower()
+    return ALIASES.get(m, m)
+
 
 # Per-method default parameters. Overridable via select_molecular_window(**params).
 DEFAULT_PARAMS: Dict[str, Dict[str, Any]] = {
-    "main":     dict(),
-    "improved": dict(min_window_start_m=2000.0, min_r2=0.5, max_rel_error=50.0),
-    "matlab":   dict(min_r2=0.5, range_end_cap_m=5000.0),
-    "calipso":  dict(min_window_start_m=1000.0, max_ratio_std=0.30, ratio_tol=0.03,
-                     max_rel_error=15.0),
+    "eprof_v1.1":  dict(),
+    "eprof_v1.2":  dict(min_window_start_m=2000.0, min_r2=0.5, max_rel_error=50.0),
+    "eprof_v0.25": dict(min_r2=0.5, range_end_cap_m=5000.0),
     "earlinet": dict(min_window_start_m=2000.0, max_residual_pct=10.0,
                      max_ratio_std=0.30, max_scattering_ratio=1.1, max_rel_error=15.0),
-    "optimal":  dict(min_window_start_m=2000.0, min_r2=0.5, max_residual_pct=12.0,
+    "eprof_v2": dict(min_window_start_m=2000.0, min_r2=0.5, max_residual_pct=12.0,
                      max_scattering_ratio=1.1, max_ratio_std=0.30, max_temporal_cv=0.5,
                      max_rel_error=15.0, w_ratio=0.25, w_resid=0.20, w_snr=0.10,
                      w_npts=0.10, w_tvar=0.35, w_rel=0.20,
@@ -333,7 +364,7 @@ def flag_contaminated_cells(
 
 
 # ---------------------------------------------------------------------------
-# The six selectors
+# The selectors
 # ---------------------------------------------------------------------------
 def _select_main(g: WindowGrid, **_) -> MethodWindow:
     """Legacy: center = min Σ|intercept|, half = max R². No floor (degenerate)."""
@@ -383,33 +414,6 @@ def _select_matlab(g: WindowGrid, min_r2=0.5, range_end_cap_m=5000.0, **_) -> Me
     w.slope = float(g.slope0[i, j])
     w.intercept = 0.0
     return w
-
-
-def _select_calipso(g: WindowGrid, min_window_start_m=1000.0, max_ratio_std=0.30,
-                    ratio_tol=0.03, max_rel_error=15.0, **_) -> MethodWindow:
-    """CALIOP-style: SNR-gated, scattering ratio ≈ 1 (least aerosol), pick HIGHEST.
-
-    max_rel_error keeps the selected window proportional to molecular (matches the
-    pipeline's threshold_quality), so the choice also passes downstream QC.
-    """
-    elig = (
-        np.isfinite(g.scattering_ratio)
-        & (g.start_m >= min_window_start_m)
-        & (g.slope > 0)
-        & (g.ratio_std <= max_ratio_std)
-        & (np.isfinite(g.rel_error) & (g.rel_error <= max_rel_error))
-    )
-    if not np.any(elig):
-        return _fail(g, "calipso", elig, "no SNR-clean window")
-    r_min = float(np.min(g.scattering_ratio[elig]))
-    near_clean = elig & (g.scattering_ratio <= r_min * (1.0 + ratio_tol))
-    # Among the cleanest (R≈1) windows, take the HIGHEST center (CALIPSO philosophy).
-    ci = np.where(np.any(near_clean, axis=1), g.center_m, -np.inf)
-    i = int(np.argmax(ci))
-    # widest valid half at that center (more averaging)
-    halves = np.where(near_clean[i, :], g.half_m, -np.inf)
-    j = int(np.argmax(halves))
-    return _pack(g, i, j, "calipso", elig, f"highest clean layer (R~{r_min:.2f})")
 
 
 def _select_earlinet(g: WindowGrid, min_window_start_m=2000.0, max_residual_pct=10.0,
@@ -590,13 +594,13 @@ def _select_bellini(g: WindowGrid, min_window_start_m=3000.0, max_window_end_m=7
     return _pack(g, i, j, "bellini", keep, "ALICENET: max M_Ray (adjR2 + BG no-autocorr + border-sign)")
 
 
+# Keyed by E-PROF version; the private selectors keep their algorithm names.
 _SELECTORS = {
-    "main": _select_main,
-    "improved": _select_improved,
-    "matlab": _select_matlab,
-    "calipso": _select_calipso,
+    "eprof_v1.1": _select_main,
+    "eprof_v1.2": _select_improved,
+    "eprof_v0.25": _select_matlab,
     "earlinet": _select_earlinet,
-    "optimal": _select_optimal,
+    "eprof_v2": _select_optimal,
     "bellini": _select_bellini,
 }
 
@@ -620,17 +624,17 @@ def select_molecular_window(
     Pass ``signal_stack`` (n_profiles × n_range) to enable the "optimal" method's
     temporal-variability aerosol rejection. Extra keyword args override DEFAULT_PARAMS.
     """
-    method = method.lower()
+    method = resolve_method(method)
     if method not in _SELECTORS:
         raise ValueError(f"Unknown molecular method '{method}'; choose from {METHODS}")
     merged = dict(DEFAULT_PARAMS.get(method, {}))
     merged.update(params)
 
-    # "optimal" does TIME-RESOLVED aerosol/cloud flagging: it excludes contaminated cells
-    # (e.g. aerosol only at the start of the night, a cloud only at the end), then fits the
+    # E-PROF v2 ("optimal") does TIME-RESOLVED aerosol/cloud flagging: it excludes contaminated
+    # cells (e.g. aerosol only at the start of the night, a cloud only at the end), then fits the
     # molecular window on the time-cleaned mean profile -> it uses the clean part of an
     # otherwise-contaminated night. The other methods use the full night mean.
-    if (method == "optimal" and signal_stack is not None
+    if (method == "eprof_v2" and signal_stack is not None
             and np.ndim(signal_stack) == 2 and np.shape(signal_stack)[0] >= 5):
         flag = flag_contaminated_cells(
             signal_stack, p_mol, range_alc,
