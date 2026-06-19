@@ -8,6 +8,7 @@ the entire calibration process.
 from __future__ import annotations
 
 import logging
+import warnings
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -248,6 +249,16 @@ def calibrate_rayleigh(
         std_atm_file = DEFAULT_STANDARD_ATMOSPHERE
 
     logger.info(f"Starting Rayleigh calibration for {info.site_name} on {date_str}")
+
+    # Suitability warning: CL31/CL51 have signal distortion/saturation that makes the molecular
+    # Rayleigh fit unreliable (they are normally calibrated by the liquid-cloud method). The fit
+    # still RUNS so a whole network can be processed in one pass — warn that the result is only
+    # indicative.
+    if not info.instrument_type.supports_calibration:
+        warnings.warn(
+            f"{info.instrument_type.value}: Rayleigh calibration is not well-suited to this "
+            "instrument (CL31/CL51 signal distortion/saturation); the result is indicative only.",
+            UserWarning)
 
     # =========================================================================
     # Step 1: Load L1 data

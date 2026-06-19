@@ -262,65 +262,37 @@ def _normalize_beta_units(units: Optional[str]) -> str:
 
 
 def _beta_conversion_factor(instrument: str, units: Optional[str]) -> float:
-    """Return the conversion factor to sr^-1 m^-1 for a beta-like variable.
+    """Scale factor to bring a beta-like variable onto the cloud calibration's working scale.
 
-    Supported combinations are intentionally strict:
-    - CL31/CL51 L1:  m^2*counts/s or 1e-8 sr^-1.m^-1  -> 1e-8
-    - CL31/CL51/CL61 L2: 1e-6*1/(m*sr)               -> 1e-6
-    - CL61 raw:      1/(m*sr)                        -> 1
+    The O'Connor calibration coefficient C absorbs the absolute scale of the input, so the
+    range-corrected RAW L1 signals (CL31/CL51 volts, CHM15k counts, Mini-MPL photon rate), the
+    physical ``1/(m*sr)`` backscatter (CL61 L1) and the stored L2 product all use factor 1 — C is
+    then expressed on the input's scale. Only the explicitly 1e-8-scaled CL31/CL51 backscatter
+    form carries a different factor.
 
-    Any other combination raises ValueError.
+    UNKNOWN units are accepted with a WARNING (factor 1) instead of being rejected, so EVERY
+    instrument x data-level combination runs. Pair this with the suitability warning in
+    :func:`liquid_cloud_calibration_from_data` for combinations the O'Connor method is not
+    validated for (CL31/CL51 distortion; non-910 nm CHM15k / Mini-MPL).
     """
-    inst = instrument.strip().upper()
     u = _normalize_beta_units(units)
-
-    raw_forms = (
-        "1/(m*sr)",
-        "1/(sr*m)",
-        "1/(m.sr)",
-        "1/(sr.m)",
-        "sr^-1*m^-1",
-        "sr^-1.m^-1",
-        "m^-1*sr^-1",   # E-PROFILE L1 (physical 1/(m*sr), e.g. CL61 L1 'beta'/'rcs_0')
-        "m^-1.sr^-1",
+    # explicitly 1e-8-scaled backscatter (legacy CL31/CL51 L1 form)
+    if any(f in u for f in ("1e-8sr^-1.m^-1", "1e-8sr^-1*m^-1", "1e-8*sr^-1.m^-1", "1e-8*sr^-1*m^-1")):
+        return 1e-8
+    known = (
+        # physical 1/(m*sr) backscatter (CL61 L1) and the stored 1e-6*1/(m*sr) L2 product
+        "1/(m*sr)", "1/(sr*m)", "1/(m.sr)", "1/(sr.m)",
+        "sr^-1*m^-1", "sr^-1.m^-1", "m^-1*sr^-1", "m^-1.sr^-1",
+        # range-corrected raw L1 signal: CL31/CL51 volts, CHM15k counts, Mini-MPL photon rate
+        "v*m^2", "v*m2", "m^2*counts/s", "m2*counts/s", "counts",
+        "mhz.km^2.uj^-1", "mhz*km^2*uj^-1", "mhz.km^2*uj^-1",
     )
-    l1_forms = (
-        "m^2*counts/s",
-        "1e-8sr^-1.m^-1",
-        "1e-8sr^-1*m^-1",
-        "1e-8*sr^-1.m^-1",
-        "1e-8*sr^-1*m^-1",
-    )
-    l2_forms = (
-        "1e-6*1/(m*sr)",
-        "1e-6*1/(sr*m)",
-        "1e-6*sr^-1.m^-1",
-        "1e-6*sr^-1*m^-1",
-        "1e-6sr^-1.m^-1",
-        "1e-6sr^-1*m^-1",
-    )
-
-    if inst in ("CL31", "CL51"):
-        if any(form in u for form in l1_forms):
-            return 1e-8
-        if any(form in u for form in l2_forms):
-            return 1e-6
-        raise ValueError(
-            f"Unsupported beta units for {inst}: {units!r}. Expected L1 units "
-            "(m^2*counts/s or 1e-8 sr^-1.m^-1) or L2 units (1e-6*1/(m*sr)).")
-
-    if inst == "CL61":
-        if any(form in u for form in raw_forms):
-            return 1.0
-        if any(form in u for form in l2_forms):
-            return 1e-6
-        raise ValueError(
-            f"Unsupported beta units for {inst}: {units!r}. Expected raw units "
-            "1/(m*sr) or L2 units 1e-6*1/(m*sr).")
-
-    raise ValueError(
-        f"Unsupported instrument for beta conversion: {instrument!r}. "
-        "Expected CL31, CL51 or CL61.")
+    if any(f in u for f in known):
+        return 1.0
+    warnings.warn(
+        f"Unrecognized beta units {units!r} for {instrument}: using conversion factor 1.0 "
+        "(the liquid-cloud coefficient is then on the input's arbitrary scale).", UserWarning)
+    return 1.0
 
 
 # ===========================================================================
@@ -1473,6 +1445,20 @@ def liquid_cloud_calibration_from_data(data: CeiloData, config: CloudCalConfig) 
     (idempotently) so wavelength/FWHM match it. Behaviour is identical to the file-based
     entry point, which now simply reads then delegates here."""
     config = set_defaults(config)
+
+    # Suitability warning: the O'Connor liquid-cloud calibration is validated for the 910 nm
+    # CL61. It still RUNS for the other instruments (so a whole network can be processed in one
+    # pass), but the result is only indicative — warn so the unsuitable combination is flagged.
+    _inst = config.instrument.strip().upper()
+    if _inst in ("CL31", "CL51"):
+        warnings.warn(
+            f"{config.instrument}: liquid-cloud calibration is not well-suited to CL31/CL51 "
+            "(signal distortion / saturation); the coefficient is indicative only.", UserWarning)
+    elif _inst not in ("CL61",):
+        warnings.warn(
+            f"{config.instrument}: the liquid-cloud lidar ratio (18.8 sr, ~910 nm) does not apply "
+            f"at {config.wavelength:.0f} nm; the coefficient is on the input's scale and "
+            "indicative only.", UserWarning)
 
     # --- Optional pre-averaging (time/range) to speed up high-res files ---
     # Applied BEFORE the WV correction and the per-profile filters (the costly steps),
