@@ -68,6 +68,9 @@ figs_paper_validation/
 # Delete this line to version the PDFs in git.
 doc/*.pdf
 
+# Diagnostic plots produced by the sample-data tests
+tests/sample_plots/
+
 # Logs
 *.log
 

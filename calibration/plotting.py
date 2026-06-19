@@ -669,10 +669,10 @@ def plot_rayleigh_diagnostics_compact(
       # Last row left 2 cols: RCS pcolor with non-used profiles faded
     ax_r = fig.add_subplot(gs[3, 0:2])
 
-    # Last row right 2 cols: sensitivity three subpanels
-    ax_s1 = fig.add_subplot(3,3)
-    ax_s2 = fig.add_subplot(3,4)
-    ax_s3 = fig.add_subplot(3,5)
+    # Last row, right three cells: sensitivity subpanels
+    ax_s1 = fig.add_subplot(gs[3, 2])
+    ax_s2 = fig.add_subplot(gs[3, 3])
+    ax_s3 = fig.add_subplot(gs[3, 4])
 
   
 

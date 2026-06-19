@@ -13,7 +13,6 @@ instruments (see ``examples/data/README.md``).
 """
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -27,6 +26,8 @@ from calibration.cloud import liquid_cloud_calibration, CloudCalConfig
 REPO = Path(__file__).resolve().parent.parent
 DATA = REPO / "examples" / "data"
 OPTIONS = REPO / "options.json"
+# Diagnostic plots are written here (git-ignored) so they can be inspected after a run.
+PLOTS = REPO / "tests" / "sample_plots"
 
 # CAMS lives outside the repo (large, machine-specific). 910 nm tests skip if absent.
 CAMS = Path(CalibrationOptions.from_json(OPTIONS).cams_folder) if OPTIONS.exists() else Path("D:/CAMS")
@@ -91,13 +92,17 @@ def test_rayleigh_sample(typ, wmo, date, itype, need_cams):
     o.folder_root = DATA / "L2"
     o.cams_folder = CAMS
     o.abs_cs_lookup_table = Path("")          # use the bundled WV LUT
-    o.folder_output = Path(tempfile.mkdtemp())
-    for k in ("plot_main", "plot_all"):
-        if hasattr(o, k):
-            setattr(o, k, 0)
+    o.folder_output = PLOTS
+    o.plot_main = True                        # generate (and save) the diagnostic plots
     res = calibrate_rayleigh(date, _info(wmo, itype, _l2(wmo, date)), o)
     assert res.flag in (1, 1.0, 0.5), f"{typ} flag={res.flag} ({res.flag_meaning})"
     assert res.lidar_constant > 0
+    # the diagnostic plots must be produced and visible (incl. the compact dashboard)
+    pdir = PLOTS / "plots" / wmo / date[:4]
+    pngs = list(pdir.glob("*.png"))
+    assert pngs, f"{typ}: no diagnostic plots were written under {pdir}"
+    assert any("rayleigh_diag_compact" in p.name for p in pngs), \
+        f"{typ}: compact Rayleigh diagnostic plot missing in {pdir} (got {[p.name for p in pngs]})"
 
 
 # --------------------------------------------------------------------------- #
