@@ -711,9 +711,10 @@ def compute_wv_transmission(data: CeiloData, config: CloudCalConfig) -> NDArray:
     calibrate this period").
     """
     lut_path = config.abs_cs_lookup_table
-    if not lut_path:
-        raise ValueError(
-            "config.abs_cs_lookup_table must be set to abs_cross_647_full_levels_1000.nc")
+    if not lut_path or str(lut_path).strip() in ("", "."):
+        # Fall back to the 910 nm WV LUT bundled as package data (same as the Rayleigh path).
+        from ..water_vapor_correction.water_vapor import DEFAULT_ABS_CROSS_SECTION
+        lut_path = str(DEFAULT_ABS_CROSS_SECTION)
     if not Path(lut_path).is_file():
         raise FileNotFoundError(f"Absorption cross-section lookup table not found: {lut_path}")
     if np.isnan(data.station_latitude) or np.isnan(data.station_longitude):
@@ -1518,7 +1519,8 @@ def liquid_cloud_calibration_from_data(data: CeiloData, config: CloudCalConfig) 
         cal_mode = calculate_mode(valid_C)
 
     res = CloudCalResults()
-    res.calibration_factor = 1.0 / cal_median
+    # No valid in-cloud profiles (cal_median 0/NaN) -> report NaN rather than crash.
+    res.calibration_factor = (1.0 / cal_median) if (np.isfinite(cal_median) and cal_median != 0.0) else float("nan")
     res.calibration_coefficient = cal_median
     res.lidar_ratios = S_consistent[valid_idx]
     res.cal_mean = cal_mean
