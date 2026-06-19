@@ -656,7 +656,7 @@ def plot_rayleigh_diagnostics_compact(
     """Wide Rayleigh dashboard: molecular, window, sensitivity and an annotated RCS panel."""
     plt = _get_plt()
 
-    fig = plt.figure(figsize=(26, 13))
+    fig = plt.figure(figsize=(26, 13), layout="constrained")
     gs = fig.add_gridspec(4, 5, hspace=0.45, wspace=0.4)
 
     # Rows 1-3 left: molecular fit three panels (stacked)
@@ -837,6 +837,5 @@ def plot_rayleigh_diagnostics_compact(
     ax_r.legend(loc="upper right", fontsize=7, framealpha=0.85, ncol=2)
 
     fig.suptitle(title or "Rayleigh Diagnostics", fontsize=14)
-    fig.tight_layout()
-    _save_and_close(fig, save_path)
+    _save_and_close(fig, save_path)  # constrained layout solves on save (no tight_layout)
     return fig
