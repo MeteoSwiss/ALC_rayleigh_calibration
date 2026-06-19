@@ -647,14 +647,17 @@ def plot_rayleigh_diagnostics_compact(
     hours_since_start: NDArray[np.float64],
     rcs: NDArray[np.float64],
     used_profile_indices: Optional[NDArray[np.int64]] = None,
+    cloud_base_height: Optional[NDArray[np.float64]] = None,
+    no_cloud_value: float = -9.0,
+    z_low_cloud: Optional[float] = None,
     title: str = "",
     save_path: Optional[Path] = None,
 ) -> "Figure":
-    """Single 4x4 Rayleigh dashboard with molecular, window, sensitivity and RCS panels."""
+    """Wide Rayleigh dashboard: molecular, window, sensitivity and an annotated RCS panel."""
     plt = _get_plt()
 
-    fig = plt.figure(figsize=(20, 16))
-    gs = fig.add_gridspec(4, 5, hspace=0.4, wspace=0.35)
+    fig = plt.figure(figsize=(26, 13))
+    gs = fig.add_gridspec(4, 5, hspace=0.45, wspace=0.4)
 
     # Rows 1-3 left: molecular fit three panels (stacked)
     ax_m1 = fig.add_subplot(gs[0:2, 0])
@@ -666,13 +669,13 @@ def plot_rayleigh_diagnostics_compact(
     ax_w2 = fig.add_subplot(gs[1, 3:5])
     ax_w3 = fig.add_subplot(gs[2, 3:5])
     
-      # Last row left 2 cols: RCS pcolor with non-used profiles faded
-    ax_r = fig.add_subplot(gs[3, 0:2])
+    # Row 2, left three cols: annotated RCS pcolor (one row above the sensitivity panels)
+    ax_r = fig.add_subplot(gs[2, 0:3])
 
-    # Last row, right three cells: sensitivity subpanels
-    ax_s1 = fig.add_subplot(gs[3, 2])
-    ax_s2 = fig.add_subplot(gs[3, 3])
-    ax_s3 = fig.add_subplot(gs[3, 4])
+    # Bottom row, left three cols: sensitivity subpanels
+    ax_s1 = fig.add_subplot(gs[3, 0])
+    ax_s2 = fig.add_subplot(gs[3, 1])
+    ax_s3 = fig.add_subplot(gs[3, 2])
 
   
 
@@ -769,7 +772,7 @@ def plot_rayleigh_diagnostics_compact(
     ax_s3.set_ylabel("Lidar constant")
     ax_s3.grid(True, axis="y", alpha=0.25)
 
-    # --- RCS panel with non-used profiles faded (instead of removed) ---
+    # --- Annotated RCS pcolor: molecular layer, cloud detections, profile usage ---
     rcs_plot = np.asarray(rcs, dtype=float).copy().T
     rcs_plot[rcs_plot <= 0] = np.nan
     log_rcs = np.log10(rcs_plot)
@@ -779,26 +782,59 @@ def plot_rayleigh_diagnostics_compact(
     else:
         vmin, vmax = 0.0, 6.0
 
-    hm = ax_r.pcolormesh(hours_since_start, range_alc * 1e-3, log_rcs, shading="auto", cmap="viridis", vmin=vmin, vmax=vmax)
+    hm = ax_r.pcolormesh(hours_since_start, range_alc * 1e-3, log_rcs,
+                         shading="auto", cmap="viridis", vmin=vmin, vmax=vmax)
     plt.colorbar(hm, ax=ax_r, pad=0.01).set_label(r"log$_{10}$(RCS)")
 
-    if used_profile_indices is not None and used_profile_indices.size > 0:
-        used = np.zeros(hours_since_start.size, dtype=bool)
+    n_t = int(hours_since_start.size)
+    dt = float(np.median(np.diff(hours_since_start))) if n_t > 1 else 1.0
+
+    # per-profile low-cloud flag: a cloud base below the molecular window (or z_low_cloud)
+    cbh0 = None
+    flagged = np.zeros(n_t, dtype=bool)
+    if cloud_base_height is not None:
+        cbh = np.asarray(cloud_base_height, dtype=float)
+        cbh0 = cbh[:, 0] if cbh.ndim > 1 else cbh
+        cbh0 = np.where((cbh0 == no_cloud_value) | (cbh0 <= 0), np.nan, cbh0)
+        z_cut = z_low_cloud if z_low_cloud is not None else (best_range_m - best_half_m)
+        flagged = np.isfinite(cbh0) & (cbh0 < z_cut)
+
+    used = np.zeros(n_t, dtype=bool)
+    if used_profile_indices is not None and np.size(used_profile_indices) > 0:
         used[np.asarray(used_profile_indices, dtype=int)] = True
-        not_used = ~used
-        for i in np.where(not_used)[0]:
-            if i < hours_since_start.size - 1:
-                x0 = hours_since_start[i]
-                x1 = hours_since_start[i + 1]
-            else:
-                x0 = hours_since_start[i]
-                x1 = x0 + np.median(np.diff(hours_since_start)) if hours_since_start.size > 1 else x0 + 1
-            ax_r.axvspan(x0, x1, color="white", alpha=0.45, linewidth=0)
+    not_used = ~used
+
+    # shade the NOT-used profiles: cloud-flagged (red) vs not-flagged-but-unused (grey)
+    seen_flag = seen_unused = False
+    for i in np.where(not_used)[0]:
+        x0 = hours_since_start[i]
+        x1 = hours_since_start[i + 1] if i < n_t - 1 else x0 + dt
+        if flagged[i]:
+            ax_r.axvspan(x0, x1, color="red", alpha=0.18, lw=0,
+                         label=None if seen_flag else "flagged (cloud)")
+            seen_flag = True
+        else:
+            ax_r.axvspan(x0, x1, color="0.55", alpha=0.35, lw=0,
+                         label=None if seen_unused else "not flagged, not used")
+            seen_unused = True
+
+    # cloud detections (lowest cloud base over time)
+    if cbh0 is not None and np.any(np.isfinite(cbh0)):
+        ax_r.scatter(hours_since_start, cbh0 * 1e-3, s=7, c="white",
+                     edgecolors="k", linewidths=0.2, zorder=5, label="cloud base")
+
+    # molecular layer = the Rayleigh fit window (range AGL)
+    z_lo = (best_range_m - best_half_m) * 1e-3
+    z_hi = (best_range_m + best_half_m) * 1e-3
+    ax_r.axhspan(z_lo, z_hi, color="gold", alpha=0.20, zorder=4)
+    ax_r.axhline(z_lo, color="gold", lw=1.6, zorder=4)
+    ax_r.axhline(z_hi, color="gold", lw=1.6, zorder=4, label="molecular layer")
 
     ax_r.set_xlabel("Hours since start")
     ax_r.set_ylabel("Range (km)")
-    ax_r.set_title("RCS (non-used profiles faded)")
+    ax_r.set_title("RCS — molecular layer, cloud detections, used vs flagged / unused")
     ax_r.grid(True, alpha=0.2)
+    ax_r.legend(loc="upper right", fontsize=7, framealpha=0.85, ncol=2)
 
     fig.suptitle(title or "Rayleigh Diagnostics", fontsize=14)
     fig.tight_layout()

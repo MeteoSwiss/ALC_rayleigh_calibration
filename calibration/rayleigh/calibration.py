@@ -837,6 +837,9 @@ def calibrate_rayleigh(
                     hours_since_start=data.hours_since_start,
                     rcs=data.rcs,
                     used_profile_indices=np.asarray(keep_idx, dtype=int),
+                    cloud_base_height=data.cbh,
+                    no_cloud_value=info.instrument_type.no_cloud_value,
+                    z_low_cloud=options.z_low_cloud,
                     title=f"{plot_title_base} — Rayleigh diagnostics (compact)",
                     save_path=pdir / f"{tag}_rayleigh_diag_compact.png",
                 )
