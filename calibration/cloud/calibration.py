@@ -63,6 +63,7 @@ from netCDF4 import Dataset
 
 # Re-use the verified-equivalent pieces from the Rayleigh WV module.
 from ..water_vapor_correction.water_vapor import wv_t2eff_core, load_abs_cross_section, _A137, _B137
+from ..io.cams import ensure_cams_file
 
 # --- Constants matching the MATLAB exactly ---------------------------------
 S_THEORETICAL = 18.8                     # sr, liquid-water lidar ratio (O'Connor 2004)
@@ -114,6 +115,11 @@ class CloudCalConfig:
     abs_cs_lookup_table: str = ""
     station_latitude: float = float("nan")
     station_longitude: float = float("nan")
+    # Auto-download a missing CAMS file from the ADS (off by default). 'day' fetches just
+    # the file's day (CAMS_Beta_<YYYYMMDD>.nc), 'month' the whole month. Needs cdsapi +
+    # cfgrib + ADS credentials in ~/.cdsapirc.
+    auto_download_cams: bool = False
+    cams_download_scope: str = "day"
 
     # NB: aerosol_lidar_ratio is NOT defined in MATLAB set_defaults(); the runner sets it
     # to 50. apply_transmission_correction uses it, so it must be provided when that flag
@@ -720,21 +726,31 @@ def compute_wv_transmission(data: CeiloData, config: CloudCalConfig) -> NDArray:
     if np.isnan(data.station_latitude) or np.isnan(data.station_longitude):
         raise ValueError("Station latitude/longitude required for water vapor correction")
 
+    # CAMS lookup date (YYYYMMDD): the day of the first profile, so a daily CAMS file
+    # (CAMS_Beta_<YYYYMMDD>.nc) resolves/auto-downloads as well as a monthly one. An
+    # explicit config.date_str override (YYYYMM or YYYYMMDD) takes precedence.
+    day8 = str(data.time[0].astype("datetime64[D]")).replace("-", "")
     if config.date_str:
-        date_str = config.date_str
+        cams_date = config.date_str if len(config.date_str) >= 8 else config.date_str + day8[len(config.date_str):8]
     else:
-        # datestr(data.time(1),'yyyymm')
-        t0 = data.time[0].astype("datetime64[M]")
-        date_str = str(t0).replace("-", "")[:6]
+        cams_date = day8
 
     # --- load absorption cross-section LUT ---
     abs_cs_wl, abs_cs_height, abscs_full = load_abs_cross_section(Path(lut_path))
     # abscs_full: (n_wl, n_height)
 
     # --- CAMS T/RH -> nw and geopotential, all time steps ---
-    cams_file = str(Path(config.cams_folder) / f"CAMS_Beta_{date_str}.nc")
-    if not Path(cams_file).is_file():
-        raise FileNotFoundError(f"No CAMS file: {cams_file}")
+    cams_path = ensure_cams_file(
+        config.cams_folder, cams_date,
+        auto_download=getattr(config, "auto_download_cams", False),
+        scope=getattr(config, "cams_download_scope", "day"),
+    )
+    if cams_path is None:
+        raise FileNotFoundError(
+            f"No CAMS file for {cams_date} in {config.cams_folder} "
+            f"(looked for monthly CAMS_Beta_{cams_date[:6]}.nc or daily CAMS_Beta_{cams_date[:8]}.nc)"
+        )
+    cams_file = str(cams_path)
     time_cams, cams_z, _cams_T, nw_all = _cams_levels_all_times(
         cams_file, data.station_latitude, data.station_longitude)
 

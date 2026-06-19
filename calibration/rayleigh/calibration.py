@@ -48,6 +48,7 @@ from .rayleigh_fit import (
     RayleighFitResult,
 )
 from ..io.output import write_calibration_result
+from ..io.cams import ensure_cams_file
 from ..plotting import (
     plot_rcs_timeseries,
     plot_rayleigh_diagnostics_compact,
@@ -370,8 +371,13 @@ def calibrate_rayleigh(
         # at the site instead of the US Standard 1976 atmosphere. Same CAMS archive
         # as the WV correction; a night without a matching CAMS month cannot use
         # this option and is skipped (consistent with the WV rule).
-        cams_mol_file = Path(options.cams_folder) / f"CAMS_Beta_{date_str[:6]}.nc"
-        if not cams_mol_file.exists():
+        cams_mol_file = ensure_cams_file(
+            options.cams_folder, date_str,
+            auto_download=getattr(options, "auto_download_cams", False),
+            scope=getattr(options, "cams_download_scope", "day"),
+            log=logger,
+        )
+        if cams_mol_file is None:
             logger.warning(
                 f"No CAMS for {date_str[:6]}; cannot build CAMS molecular profile"
             )
@@ -416,8 +422,13 @@ def calibrate_rayleigh(
     # WV transmission into the molecular model removes the resulting bias in C_L. ---
     nominal_wl_nm = info.instrument_type.wavelength_nm
     if options.apply_wv_correction and in_water_vapor_band(nominal_wl_nm):
-        cams_file = Path(options.cams_folder) / f"CAMS_Beta_{date_str[:6]}.nc"
-        if not cams_file.exists():
+        cams_file = ensure_cams_file(
+            options.cams_folder, date_str,
+            auto_download=getattr(options, "auto_download_cams", False),
+            scope=getattr(options, "cams_download_scope", "day"),
+            log=logger,
+        )
+        if cams_file is None:
             logger.warning(f"No CAMS for {date_str[:6]}; skipping WV-required 910 nm night")
             return CalibrationResult(
                 lidar_constant=-1, flag=-4, uncertainty=0,

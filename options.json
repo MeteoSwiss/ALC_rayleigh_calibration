@@ -35,5 +35,8 @@
     "plot_main": 1,
     "plot_all": 0,
     "_comment_wv": "Water-vapor correction for 910 nm instruments (CL31/CL51/CL61). A 910 nm night without matching CAMS is skipped. 1064 nm (CHM15k) is unaffected.",
-    "apply_wv_correction": 1
+    "apply_wv_correction": 1,
+    "_comment_cams_download": "Auto-download a missing CAMS file from the ADS instead of skipping the night (needs cdsapi + cfgrib + ADS credentials in ~/.cdsapirc; the Atmosphere Data Store endpoint is selected automatically). 0=off (default; calibration stays offline). cams_download_scope: 'day' = fetch just the night CAMS_Beta_<YYYYMMDD>.nc (light; the only choice valid for a recent date whose month is not yet complete); 'month' = the whole completed CAMS_Beta_<YYYYMM>.nc (heavy but reused by every night that month). Either file is accepted on read.",
+    "auto_download_cams": 0,
+    "cams_download_scope": "day"
 }

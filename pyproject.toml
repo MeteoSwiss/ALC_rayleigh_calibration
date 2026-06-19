@@ -23,10 +23,14 @@ dependencies = [
     "numpy>=1.20",
     "scipy>=1.7",
     "netCDF4>=1.5",
+    "xarray>=2022.3",   # CAMS model-level reading (water-vapor correction / CAMS molecular profile)
 ]
 
 [project.optional-dependencies]
 plotting = ["matplotlib>=3.4"]
+# CAMS auto-download from the ADS. cfgrib pulls the eccodes wheel (binary library
+# bundled, incl. Windows), so the GRIB->netCDF conversion runs in pure Python — no conda.
+download = ["cdsapi>=0.7.0", "cfgrib>=0.9.10"]
 dev = ["pytest>=7.0", "pytest-cov>=4.0", "mypy>=1.0", "ruff>=0.1"]
 
 [project.scripts]

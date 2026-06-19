@@ -218,6 +218,15 @@ class CalibrationOptions:
     apply_wv_correction: bool = False
     cams_folder: Path = field(default_factory=lambda: Path("D:/CAMS/"))
     abs_cs_lookup_table: Path = field(default_factory=lambda: Path(""))
+    # Auto-download a missing CAMS file from the ADS instead of skipping the night.
+    # Off by default (calibration stays offline and reproducible). When on, a missing
+    # CAMS_Beta_*.nc is fetched via calibration.io.download_cams_beta (needs cdsapi +
+    # cfgrib + ADS credentials in ~/.cdsapirc; the ADS endpoint is selected automatically).
+    auto_download_cams: bool = False
+    # What to fetch on a miss: 'day' (CAMS_Beta_<YYYYMMDD>.nc, just the night — light,
+    # and the only choice valid for a recent date whose month is not yet complete) or
+    # 'month' (CAMS_Beta_<YYYYMM>.nc, the whole completed month — heavy but reused all month).
+    cams_download_scope: str = "day"
 
     # Rayleigh fit window search parameters (not typically changed)
     half_length_options_m: tuple = field(default_factory=lambda: tuple(range(250, 2000, 240)))
@@ -287,6 +296,8 @@ class CalibrationOptions:
             apply_wv_correction=bool(data.get("apply_wv_correction", 0)),
             cams_folder=Path(data.get("cams_folder", "D:/CAMS/")),
             abs_cs_lookup_table=Path(data.get("abs_cs_lookup_table", "")),
+            auto_download_cams=bool(data.get("auto_download_cams", 0)),
+            cams_download_scope=str(data.get("cams_download_scope", "day")),
         )
 
 
