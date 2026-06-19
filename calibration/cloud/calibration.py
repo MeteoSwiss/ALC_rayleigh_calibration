@@ -281,6 +281,8 @@ def _beta_conversion_factor(instrument: str, units: Optional[str]) -> float:
         "1/(sr.m)",
         "sr^-1*m^-1",
         "sr^-1.m^-1",
+        "m^-1*sr^-1",   # E-PROFILE L1 (physical 1/(m*sr), e.g. CL61 L1 'beta'/'rcs_0')
+        "m^-1.sr^-1",
     )
     l1_forms = (
         "m^2*counts/s",
