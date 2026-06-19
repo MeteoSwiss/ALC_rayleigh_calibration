@@ -182,8 +182,17 @@ def find_optimal_molecular_window(
         "earlinet"/"eprof_v2"/"bellini", dispatched to
         :mod:`calibration.rayleigh.molecular_methods`.
     """
-    from .molecular_methods import resolve_method, select_molecular_window
+    import warnings
+    from .molecular_methods import resolve_method, select_molecular_window, METHODS
     method = resolve_method(method)
+    # Graceful fallback: an unrecognized molecular_method (e.g. a typo, or an options.json edited
+    # against newer code while an older calibration module is still imported) warns and falls back
+    # to the production default instead of hard-failing the whole calibration.
+    if method != "eprof_v1.2" and method not in METHODS:
+        warnings.warn(
+            f"Unknown molecular_method {method!r}; falling back to the default 'eprof_v1.2' "
+            f"(valid: 'eprof_v1.2' or one of {METHODS}).", UserWarning)
+        method = "eprof_v1.2"
     # E-PROF v1.2 ("improved") keeps the in-line implementation below (the production path,
     # unchanged); every other version is dispatched to the pluggable selectors.
     if method != "eprof_v1.2":

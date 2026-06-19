@@ -271,9 +271,8 @@ def _beta_conversion_factor(instrument: str, units: Optional[str]) -> float:
     form carries a different factor.
 
     UNKNOWN units are accepted with a WARNING (factor 1) instead of being rejected, so EVERY
-    instrument x data-level combination runs. Pair this with the suitability warning in
-    :func:`liquid_cloud_calibration_from_data` for combinations the O'Connor method is not
-    validated for (CL31/CL51 distortion; non-910 nm CHM15k / Mini-MPL).
+    instrument x data-level combination runs (the liquid-cloud method itself is suitable for all
+    elastic ceilometers/lidars, including the CL31/CL51 for which it is the primary method).
     """
     u = _normalize_beta_units(units)
     # explicitly 1e-8-scaled backscatter (legacy CL31/CL51 L1 form)
@@ -1446,19 +1445,10 @@ def liquid_cloud_calibration_from_data(data: CeiloData, config: CloudCalConfig) 
     entry point, which now simply reads then delegates here."""
     config = set_defaults(config)
 
-    # Suitability warning: the O'Connor liquid-cloud calibration is validated for the 910 nm
-    # CL61. It still RUNS for the other instruments (so a whole network can be processed in one
-    # pass), but the result is only indicative — warn so the unsuitable combination is flagged.
-    _inst = config.instrument.strip().upper()
-    if _inst in ("CL31", "CL51"):
-        warnings.warn(
-            f"{config.instrument}: liquid-cloud calibration is not well-suited to CL31/CL51 "
-            "(signal distortion / saturation); the coefficient is indicative only.", UserWarning)
-    elif _inst not in ("CL61",):
-        warnings.warn(
-            f"{config.instrument}: the liquid-cloud lidar ratio (18.8 sr, ~910 nm) does not apply "
-            f"at {config.wavelength:.0f} nm; the coefficient is on the input's scale and "
-            "indicative only.", UserWarning)
+    # The liquid-cloud (O'Connor/Hopkin) calibration is the PRIMARY method for the 910 nm
+    # ceilometers (CL31/CL51/CL61) — including the CL31/CL51, which cannot be Rayleigh-calibrated.
+    # It also runs for CHM15k / Mini-MPL. No suitability warning here: the only genuine warning is
+    # _beta_conversion_factor's unrecognized-units fallback.
 
     # --- Optional pre-averaging (time/range) to speed up high-res files ---
     # Applied BEFORE the WV correction and the per-profile filters (the costly steps),

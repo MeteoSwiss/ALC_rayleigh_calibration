@@ -1,11 +1,12 @@
 """
 Robustness tests: the Rayleigh and the liquid-cloud calibration must RUN for every instrument
-type at both L1 and L2, producing a reasonable result object (never an exception), and emitting a
-suitability *warning* for the combinations the method is not validated for:
+type at both L1 and L2, producing a reasonable result object (never an exception):
 
-  * Rayleigh  — CL31/CL51 (signal distortion) warn; CHM15k/CL61/Mini-MPL are suitable.
-  * Cloud     — only the 910 nm CL61 is suitable; CL31/CL51 (distortion) and the non-910 nm
-                CHM15k/Mini-MPL warn but still run.
+  * Rayleigh — CHM15k / CL61 / Mini-MPL are suitable; CL31/CL51 cannot be Rayleigh-calibrated
+               (signal distortion) so they emit a suitability warning but still run.
+  * Cloud    — the liquid-cloud (O'Connor/Hopkin) method is suitable for EVERY elastic
+               ceilometer/lidar and is the PRIMARY method for CL31/CL51, so no suitability
+               warning is expected for any instrument.
 
 Uses the CL31/CL51/CHM15k/Mini-MPL/CL61 sample files bundled under examples/data (L1 and L2). The
 Rayleigh tests run fully offline; the cloud tests need CAMS for the mandatory 910 nm water-vapour
@@ -104,6 +105,6 @@ def test_cloud_runs_for_every_instrument(case):
     assert int(res.n_profiles) >= 0
     if res.n_profiles > 0:
         assert np.isfinite(res.cal_median) and res.cal_median > 0
-    # only the 910 nm CL61 is "suitable"; everything else should warn
-    expect = it != "CL61"
-    assert _suitability_warned(rec) is expect, (it, level, [str(w.message) for w in rec])
+    # The liquid-cloud method is suitable for every elastic ceilometer/lidar (it is the PRIMARY
+    # method for CL31/CL51), so no suitability warning is expected for any of them.
+    assert not _suitability_warned(rec), (it, level, [str(w.message) for w in rec])
