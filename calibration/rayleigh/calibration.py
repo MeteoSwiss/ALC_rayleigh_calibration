@@ -30,7 +30,6 @@ from ..io.data_loader import (
 from .atmosphere import (
     DEFAULT_STANDARD_ATMOSPHERE,
     load_standard_atmosphere,
-    load_ecmwf_profile,
     load_cams_atmosphere,
     calculate_molecular_properties,
     klett_inversion,
@@ -393,18 +392,9 @@ def calibrate_rayleigh(
     elif options.use_std_atm:
         atm_profile = load_standard_atmosphere(std_atm_file, altitude_grid)
     else:
-        ecmwf_file = options.folder_ecmwf / f"MACC_{date_str}.nc"
-        atm_profile = load_ecmwf_profile(
-            ecmwf_file, info.latitude, info.longitude, altitude_grid
-        )
-        if atm_profile is None:
-            logger.warning(f"ECMWF file not found: {ecmwf_file}")
-            return CalibrationResult(
-                lidar_constant=-1,
-                flag=-4,
-                uncertainty=0,
-                message="Missing model data",
-            )
+        # ECMWF MACC reanalysis path retired (replaced by CAMS, molecular_source='cams',
+        # or the US Standard Atmosphere). Fall back to the standard atmosphere.
+        atm_profile = load_standard_atmosphere(std_atm_file, altitude_grid)
 
     # =========================================================================
     # Step 5: Calculate molecular properties

@@ -1,9 +1,11 @@
 {
     "_comment_data_level": "Input product: 'L1' (rcs_0 daily), 'L2_daily' or 'L2_monthly' (attenuated_backscatter_0 reconstructed). folder_root must match.",
     "data_level": "L1",
-    "folder_root": "/data/zue/E_PROFILE/ALC/L1_FILES/",
-    "folder_output": "/data/zue/E_PROFILE/ALC/Calibration/rayleigh-test-v13/",
-    "folder_ECMWF": "/data/ECMWF/",
+    "folder_root": "D:/E-PROFILE_L1_2026/",
+    "folder_output": "C:/DATA/Projects/202606_E-PROFILE_calibration/",
+    "cams_folder": "D:/CAMS/",
+    "_comment_abs_cs": "Empty = use the bundled 910 nm WV LUT (calibration/data/abs_cross_wv_910nm.nc). Set a path to override with a full-band external LUT.",
+    "abs_cs_lookup_table": "",
     "_comment_night": "Night selection for the (night-only) Rayleigh fit. use_sza_night=1 -> darkness-adaptive window: keep profiles with solar zenith angle > sza_night_threshold deg (100 = sun ~10 deg below horizon; 108 = astronomical, strictest). use_sza_night=0 -> fixed solar-clock window hour_min..hour_max. SZA falls back to the clock window if station coordinates are missing.",
     "use_sza_night": 1,
     "sza_night_threshold": 100,
@@ -33,7 +35,5 @@
     "plot_main": 1,
     "plot_all": 0,
     "_comment_wv": "Water-vapor correction for 910 nm instruments (CL31/CL51/CL61). A 910 nm night without matching CAMS is skipped. 1064 nm (CHM15k) is unaffected.",
-    "apply_wv_correction": 1,
-    "cams_folder": "D:/CAMS/",
-    "abs_cs_lookup_table": "C:/Users/hervo/OneDrive/Documents/MATLAB/MDA/monitoring_alc_monthly/abs_cross_647_full_levels_1000.nc"
+    "apply_wv_correction": 1
 }

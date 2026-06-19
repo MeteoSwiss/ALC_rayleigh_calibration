@@ -53,8 +53,11 @@ htmlcov/
 *.nc
 *.csv
 *.mat
-# ...except the US Standard Atmosphere table shipped as package data
-!rayleigh_calibration/data/standard_atmosphere_US_1976_50km.csv
+# ...except data shipped as package data / committed test fixtures:
+!calibration/data/standard_atmosphere_US_1976_50km.csv
+!calibration/data/abs_cross_wv_910nm.nc
+# bundled sample L1/L2 fixtures used by examples + tests
+!examples/data/**/*.nc
 
 # Figures and R&D output live outside the repo, under
 # C:\DATA\Projects\202606_E-PROFILE_calibration (see README). Ignore any local copy.

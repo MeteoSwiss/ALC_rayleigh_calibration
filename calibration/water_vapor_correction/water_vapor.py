@@ -49,10 +49,21 @@ def laser_spectrum_for(instrument_type: str, fallback_nm: float) -> Tuple[float,
     return (fallback_nm, 3.4)
 
 
-def load_abs_cross_section(lut_path: Path) -> Tuple[NDArray, NDArray, NDArray]:
+# 910 nm water-vapour absorption LUT shipped as package data: the 903-918 nm band of
+# abs_cross_647_full_levels_1000.nc (HITRAN/MT-CKD), abscs_ave only. Used when no explicit
+# LUT path is configured, so the WV correction works out of the box for 910 nm instruments.
+DEFAULT_ABS_CROSS_SECTION = (
+    Path(__file__).resolve().parent.parent / "data" / "abs_cross_wv_910nm.nc"
+)
+
+
+def load_abs_cross_section(lut_path: Optional[Path] = None) -> Tuple[NDArray, NDArray, NDArray]:
     """
-    Load the HITRAN/MT-CKD absorption cross-section LUT
-    (abs_cross_647_full_levels_1000.nc).
+    Load the HITRAN/MT-CKD absorption cross-section LUT.
+
+    With no path (or a missing / empty one) the bundled 910 nm band LUT
+    (:data:`DEFAULT_ABS_CROSS_SECTION`) is used, so the water-vapour correction
+    runs without any external file.
 
     Returns
     -------
@@ -60,6 +71,8 @@ def load_abs_cross_section(lut_path: Path) -> Tuple[NDArray, NDArray, NDArray]:
     height_m: (n_height,) height grid [m]
     abscs   : (n_wl, n_height) absorption cross-section [cm^2]
     """
+    if lut_path is None or str(lut_path).strip() in ("", ".") or not Path(lut_path).exists():
+        lut_path = DEFAULT_ABS_CROSS_SECTION
     from netCDF4 import Dataset
     with Dataset(lut_path) as nc:
         wl_nm = np.asarray(nc.variables["lambda"][:], dtype=float)

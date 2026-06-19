@@ -152,7 +152,6 @@ class InstrumentInfo:
 class CalibrationOptions:
     """Configuration options for Rayleigh calibration."""
     # Paths
-    folder_ecmwf: Path = field(default_factory=lambda: Path("E:/ECMWF/"))
     folder_root: Path = field(default_factory=lambda: Path("/data/zue/E_PROFILE/ALC/L1_FILES/"))
     folder_output: Path = field(default_factory=lambda: Path("/data/pay/REM/ACQ/E_PROFILE_ALC/Calibration/rayleigh/"))
 
@@ -254,7 +253,6 @@ class CalibrationOptions:
             data = json.load(f)
 
         return cls(
-            folder_ecmwf=Path(data.get("folder_ECMWF", "E:/ECMWF/")),
             folder_root=Path(data.get("folder_root", "/data/zue/E_PROFILE/ALC/L1_FILES/")),
             folder_output=Path(data.get("folder_output", "/data/pay/REM/ACQ/E_PROFILE_ALC/Calibration/rayleigh/")),
             data_level=DataLevel(data.get("data_level", "L1")),
