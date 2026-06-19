@@ -118,16 +118,17 @@ _B137 = np.array([
 _RD_CAMS = 287.06  # J/(kg K), as in get_Beta_CAMS_oper_monthly.m
 
 
-def cams_water_vapor_profile(
+def _cams_levels(
     cams_file: Path,
     latitude: float,
     longitude: float,
     t_start: np.datetime64,
     t_end: np.datetime64,
-) -> Optional[Tuple[NDArray, NDArray]]:
+) -> Optional[Tuple[NDArray, NDArray, NDArray, NDArray]]:
     """
-    Mean CAMS water-vapor number-density profile over a time window at the nearest
-    grid point.
+    Core CAMS model-level read + hydrostatic integration over a time window at the
+    nearest grid point. Shared by the water-vapor correction and the optional CAMS
+    molecular profile.
 
     Faithful port of get_Beta_CAMS_oper_monthly.m: model-level pressure from the
     ECMWF L137 a/b coefficients (CAMS z/lnsp are SURFACE fields, not profiles),
@@ -137,7 +138,11 @@ def cams_water_vapor_profile(
 
     Returns
     -------
-    (altitude_m_asl, n_wv) sorted ascending in altitude, or None if no data.
+    (H, T, P_level, n_wv) each sorted ascending in altitude, or None if no data:
+        H        : geopotential height [m ASL]
+        T        : temperature [K]
+        P_level  : full model-level pressure [Pa]
+        n_wv     : water-vapor number density [m^-3]
     """
     import xarray as xr
 
@@ -205,7 +210,53 @@ def cams_water_vapor_profile(
     n_wv = Pw / (KB * T)                          # [m^-3]
 
     order = np.argsort(H)
-    return H[order], n_wv[order]
+    return H[order], T[order], P_level[order], n_wv[order]
+
+
+def cams_water_vapor_profile(
+    cams_file: Path,
+    latitude: float,
+    longitude: float,
+    t_start: np.datetime64,
+    t_end: np.datetime64,
+) -> Optional[Tuple[NDArray, NDArray]]:
+    """
+    Mean CAMS water-vapor number-density profile over a time window at the nearest
+    grid point (thin wrapper over _cams_levels; kept for API stability).
+
+    Returns
+    -------
+    (altitude_m_asl, n_wv) sorted ascending in altitude, or None if no data.
+    """
+    levels = _cams_levels(cams_file, latitude, longitude, t_start, t_end)
+    if levels is None:
+        return None
+    h, _t, _p, n_wv = levels
+    return h, n_wv
+
+
+def cams_temperature_pressure_profile(
+    cams_file: Path,
+    latitude: float,
+    longitude: float,
+    t_start: np.datetime64,
+    t_end: np.datetime64,
+) -> Optional[Tuple[NDArray, NDArray, NDArray]]:
+    """
+    Mean CAMS temperature/pressure profile over a time window at the nearest grid
+    point, for building the molecular reference (beta_mol proportional to P/T) from
+    CAMS instead of the US Standard 1976 atmosphere (thin wrapper over _cams_levels).
+
+    Returns
+    -------
+    (altitude_m_asl, temperature_K, pressure_Pa) sorted ascending in altitude,
+    or None if no data.
+    """
+    levels = _cams_levels(cams_file, latitude, longitude, t_start, t_end)
+    if levels is None:
+        return None
+    h, t, p, _n_wv = levels
+    return h, t, p
 
 
 def two_way_wv_transmission(

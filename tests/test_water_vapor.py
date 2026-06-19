@@ -1,5 +1,5 @@
 """
-Validation tests for the water-vapor correction (rayleigh_calibration.water_vapor).
+Validation tests for the water-vapor correction (rayleigh_calibration.water_vapor_correction.water_vapor).
 
 Cross-validates the Python implementation against:
   1. the MATLAB reference code (wv_t2eff.m, compute_wv_transmission.m,
@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from rayleigh_calibration.water_vapor import (
+from rayleigh_calibration.water_vapor_correction.water_vapor import (
     wv_t2eff_core,
     two_way_wv_transmission,
     cams_water_vapor_profile,
@@ -41,7 +41,7 @@ try:
 except Exception:
     HAVE_XARRAY = False
 
-from rayleigh_calibration.water_vapor import G0
+from rayleigh_calibration.water_vapor_correction.water_vapor import G0
 
 N_A = 6.02214076e23      # Avogadro [1/mol]
 M_H2O = 0.01801528       # molar mass of water [kg/mol]

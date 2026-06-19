@@ -17,23 +17,26 @@ import time as timing
 import numpy as np
 from numpy.typing import NDArray
 
-from .config import InstrumentInfo, CalibrationOptions, CalibrationResult
-from .data_loader import (
+from ..config import InstrumentInfo, CalibrationOptions, CalibrationResult
+from ..io.data_loader import (
     build_file_paths,
     load_l1_data,
     load_data,
+    average_ceilometer_data,
     filter_time_range,
     filter_cloudy_profiles,
     CeilometerData,
 )
 from .atmosphere import (
+    DEFAULT_STANDARD_ATMOSPHERE,
     load_standard_atmosphere,
     load_ecmwf_profile,
+    load_cams_atmosphere,
     calculate_molecular_properties,
     klett_inversion,
     MOLECULAR_LIDAR_RATIO,
 )
-from .water_vapor import (
+from ..water_vapor_correction.water_vapor import (
     in_water_vapor_band,
     laser_spectrum_for,
     cams_water_vapor_profile,
@@ -45,13 +48,10 @@ from .rayleigh_fit import (
     validate_calibration,
     RayleighFitResult,
 )
-from .output import write_calibration_result
-from .plotting import (
+from ..io.output import write_calibration_result
+from ..plotting import (
     plot_rcs_timeseries,
-    plot_molecular_fit,
-    plot_lidar_constant,
-    plot_rayleigh_window_search,
-    plot_sensitivity_analysis,
+    plot_rayleigh_diagnostics_compact,
 )
 
 
@@ -104,6 +104,7 @@ def _compute_cl_for_perturbation(
     altitude_shift_m: float,
     subtract_background: bool,
     consider_points_lower_than_molecular: bool,
+    sign_error_v10: bool = False,
     return_diagnostics: bool = False,
 ) -> Optional[_PerturbationResult]:
     """
@@ -161,6 +162,7 @@ def _compute_cl_for_perturbation(
             reference_value=reference_value,
             i_start=i_start_ext,
             i_end=i_end_ext,
+            sign_error_v10=sign_error_v10,
         )
     except Exception:
         return None
@@ -208,6 +210,7 @@ def calibrate_rayleigh(
     info: InstrumentInfo,
     options: CalibrationOptions,
     std_atm_file: Optional[Path] = None,
+    fit_inputs_out: Optional[dict] = None,
 ) -> CalibrationResult:
     """
     Perform Rayleigh calibration for a single instrument on a single date.
@@ -242,7 +245,7 @@ def calibrate_rayleigh(
 
     # Default standard atmosphere file
     if std_atm_file is None:
-        std_atm_file = Path("standard_atmosphere_US_1976_50km.csv")
+        std_atm_file = DEFAULT_STANDARD_ATMOSPHERE
 
     logger.info(f"Starting Rayleigh calibration for {info.site_name} on {date_str}")
 
@@ -277,6 +280,19 @@ def calibrate_rayleigh(
 
     logger.info(f"Loaded {len(data.time)} profiles")
 
+    # Optional pre-averaging: reduces the Rayleigh input to coarser 1 min / 30 m
+    # blocks before any filtering or fitting, matching the cloud-calibration speedup.
+    data = average_ceilometer_data(
+        data,
+        average_time_s=getattr(options, "average_time_s", None),
+        average_range_m=getattr(options, "average_range_m", None),
+    )
+    if getattr(options, "average_time_s", None) or getattr(options, "average_range_m", None):
+        logger.info(
+            "Averaged Rayleigh input to %s profiles x %s range bins",
+            len(data.time), len(data.range_alc),
+        )
+
     # =========================================================================
     # Step 2: Filter to nighttime window (solar time)
     # =========================================================================
@@ -299,7 +315,7 @@ def calibrate_rayleigh(
         )
 
     # ── Plot: RCS time-series (before cloud filtering) ──
-    if options.plot_main or options.plot_all:
+    if options.plot_main:
         pdir = _plot_dir(options, info, date_str)
         tag = _plot_tag(info, date_str)
         try:
@@ -343,7 +359,38 @@ def calibrate_rayleigh(
     if np.ma.isMaskedArray(altitude_grid):
         altitude_grid = altitude_grid.data
 
-    if options.use_std_atm:
+    # Night window (UTC); used for time-windowed model data (the CAMS molecular
+    # profile and/or the WV correction below).
+    night = np.datetime64(f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}")
+    t_start = night - np.timedelta64(24 - int(options.hour_min), "h")
+    t_end = night + np.timedelta64(int(options.hour_max), "h")
+
+    molecular_source = getattr(options, "molecular_source", "standard")
+    if molecular_source == "cams":
+        # Build the molecular reference (beta_mol ~ P/T) from the actual CAMS T/p
+        # at the site instead of the US Standard 1976 atmosphere. Same CAMS archive
+        # as the WV correction; a night without a matching CAMS month cannot use
+        # this option and is skipped (consistent with the WV rule).
+        cams_mol_file = Path(options.cams_folder) / f"CAMS_Beta_{date_str[:6]}.nc"
+        if not cams_mol_file.exists():
+            logger.warning(
+                f"No CAMS for {date_str[:6]}; cannot build CAMS molecular profile"
+            )
+            return CalibrationResult(
+                lidar_constant=-1, flag=-4, uncertainty=0,
+                message="No CAMS for molecular profile",
+            )
+        atm_profile = load_cams_atmosphere(
+            cams_mol_file, info.latitude, info.longitude, t_start, t_end, altitude_grid
+        )
+        if atm_profile is None:
+            logger.warning(f"CAMS molecular profile unavailable: {cams_mol_file}")
+            return CalibrationResult(
+                lidar_constant=-1, flag=-4, uncertainty=0,
+                message="Missing CAMS molecular data",
+            )
+        logger.info("Molecular profile from CAMS T/p")
+    elif options.use_std_atm:
         atm_profile = load_standard_atmosphere(std_atm_file, altitude_grid)
     else:
         ecmwf_file = options.folder_ecmwf / f"MACC_{date_str}.nc"
@@ -386,9 +433,6 @@ def calibrate_rayleigh(
                 lidar_constant=-1, flag=-4, uncertainty=0,
                 message="No CAMS for water-vapor correction",
             )
-        night = np.datetime64(f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}")
-        t_start = night - np.timedelta64(24 - int(options.hour_min), "h")
-        t_end = night + np.timedelta64(int(options.hour_max), "h")
         lam0_nm, fwhm_nm = laser_spectrum_for(info.instrument_type.value, nominal_wl_nm)
         prof = cams_water_vapor_profile(cams_file, info.latitude, info.longitude, t_start, t_end)
         if prof is not None:
@@ -414,8 +458,30 @@ def calibrate_rayleigh(
     # =========================================================================
     logger.info("Finding optimal molecular window")
 
-    # Calculate mean RCS profile
-    rcs_mean = np.nanmean(data.rcs, axis=0)
+    # Screen outlier profiles (residual aerosol/cloud/noise) BEFORE averaging, so the
+    # time-mean is robust without the ~1.5x noise penalty of a median profile at the
+    # weak-signal molecular altitudes. Metric = median range-normalised signal in the
+    # molecular search band; reject profiles > N robust-sigma (MAD) from the median.
+    keep_idx = np.arange(data.rcs.shape[0])
+    if getattr(options, "screen_profile_outliers", True) and data.rcs.shape[0] >= 10:
+        band = (data.range_alc >= options.range_start_m) & (data.range_alc <= options.range_end_m)
+        if np.any(band):
+            metric = np.nanmedian(data.rcs[:, band] / (data.range_alc[band] ** 2), axis=1)
+            finite = np.isfinite(metric)
+            if finite.sum() >= 10:
+                center = np.median(metric[finite])
+                mad = np.median(np.abs(metric[finite] - center))
+                thr = getattr(options, "profile_outlier_nmad", 4.0) * 1.4826 * mad
+                keep = finite & (np.abs(metric - center) <= max(thr, 1e-30))
+                if keep.sum() >= max(3, int(0.5 * data.rcs.shape[0])):
+                    keep_idx = np.where(keep)[0]
+                    logger.info(f"Outlier screen: kept {keep_idx.size}/{data.rcs.shape[0]} profiles")
+    rcs_use = data.rcs[keep_idx]
+
+    # Collapse the kept profiles in time. Mean is efficient for the weak-signal photon
+    # noise at 3-6 km; "median" is robust but ~1.5x noisier there (set via options).
+    _agg = np.nanmedian if getattr(options, "time_aggregation", "mean") == "median" else np.nanmean
+    rcs_mean = _agg(rcs_use, axis=0)
 
     if np.all(np.isnan(rcs_mean)):
         logger.warning("RCS contains only NaN")
@@ -426,8 +492,20 @@ def calibrate_rayleigh(
             message="RCS contains only NaN",
         )
 
-    # Range-normalized signal
+    # Range-normalized signal (night mean) + per-profile stack. The stack feeds the
+    # "optimal" method's temporal-variability aerosol rejection (molecular is steady in
+    # time; aerosol fluctuates).
     signal = rcs_mean / (data.range_alc ** 2)
+    signal_stack = rcs_use / (data.range_alc[None, :] ** 2)
+
+    # Optional capture hook (used by the method-comparison harness): expose the prepared
+    # fit inputs so every method can be evaluated on the identical profile.
+    if fit_inputs_out is not None:
+        fit_inputs_out.update(
+            signal=signal, p_mol=mol_props.p_mol, range_alc=data.range_alc,
+            altitude=data.altitude, signal_stack=signal_stack,
+            hours=np.asarray(data.hours_since_start)[keep_idx],
+        )
 
     fit_result = find_optimal_molecular_window(
         signal=signal,
@@ -437,6 +515,11 @@ def calibrate_rayleigh(
         range_start_m=options.range_start_m,
         range_end_m=options.range_end_m,
         increment_bins=options.fit_range_increment_bins,
+        min_window_start_m=options.min_window_start_m,
+        min_r2=options.min_window_r2,
+        max_rel_error=options.max_window_rel_error,
+        method=getattr(options, "molecular_method", "improved"),
+        signal_stack=signal_stack,
     )
 
     # Update altitude values
@@ -451,22 +534,22 @@ def calibrate_rayleigh(
     # ── Pre-compute time subsets for sensitivity analysis ──
     # Build now so they're available for visualization
     rng = np.random.default_rng(42)
-    n_profiles = data.rcs.shape[0]
+    n_profiles = rcs_use.shape[0]   # screened profile count
     # Cap at n_profiles: on nights with very few profiles, max(3, ...) could exceed the
     # population and rng.choice(replace=False) would raise "larger sample than population".
     n_keep = min(n_profiles, max(3, int(n_profiles * TIME_SUBSET_FRACTION)))
 
-    rcs_mean_samples = [rcs_mean]  # index 0: all profiles
-    time_subset_indices = [np.arange(n_profiles)]  # All profile indices for sample 0
-    
+    rcs_mean_samples = [rcs_mean]  # index 0: all (screened) profiles
+    time_subset_indices = [keep_idx]  # original indices of the kept profiles (for viz)
+
     for _ in range(N_TIME_SAMPLES):
         idx = rng.choice(n_profiles, size=n_keep, replace=False)
         idx = np.sort(idx)  # Sort for visualization
-        rcs_mean_samples.append(np.nanmean(data.rcs[idx], axis=0))
-        time_subset_indices.append(idx)
+        rcs_mean_samples.append(_agg(rcs_use[idx], axis=0))
+        time_subset_indices.append(keep_idx[idx])   # map back to original indices
 
     # ── Plot: RCS with molecular window annotation ──
-    if options.plot_main or options.plot_all:
+    if options.plot_main:
         pdir = _plot_dir(options, info, date_str)
         tag = _plot_tag(info, date_str)
         # Calculate sensitivity range (window ± max altitude shift)
@@ -498,30 +581,22 @@ def calibrate_rayleigh(
         except Exception as exc:
             logger.warning(f"plot_rcs_timeseries (annotated) failed: {exc}")
 
-    # ── Plot: Rayleigh window search diagnostics ──
-    if options.plot_all and fit_result.search_diagnostics is not None:
-        pdir = _plot_dir(options, info, date_str)
-        tag = _plot_tag(info, date_str)
-        diag = fit_result.search_diagnostics
-        try:
-            plot_rayleigh_window_search(
-                range_bin_m=diag.range_bin_m,
-                half_length_m=diag.half_length_m,
-                slopes=diag.slopes,
-                intercepts=diag.intercepts,
-                r_squared=diag.r_squared,
-                sum_abs_intercept=diag.sum_abs_intercept,
-                best_range_m=fit_result.center_range_m,
-                best_half_m=fit_result.half_length_m,
-                title=f"{info.site_name} — {date_str} — Window Search",
-                save_path=pdir / f"{tag}_window_search.png",
-            )
-        except Exception as exc:
-            logger.warning(f"plot_rayleigh_window_search failed: {exc}")
-
     # =========================================================================
     # Step 7: Validate Rayleigh fit
     # =========================================================================
+    # No eligible molecular window passed the validity gates (start above aerosol,
+    # R² >= min_window_r2, slope > 0, |b| < a, slope ~ median ratio). The fit comes
+    # back with NaN slope / inf relative_error; flag it as non-proportional rather
+    # than emitting a spurious constant.
+    if not np.isfinite(fit_result.slope) or not np.isfinite(fit_result.relative_error):
+        logger.warning("No eligible molecular window (signal not proportional to molecular)")
+        return CalibrationResult(
+            lidar_constant=-1,
+            flag=-2,
+            uncertainty=0,
+            message="No molecular window passed the validity gates",
+        )
+
     if not fit_result.is_valid:
         if fit_result.slope <= 0:
             logger.warning("Negative Rayleigh fit slope")
@@ -587,6 +662,7 @@ def calibrate_rayleigh(
                     altitude_shift_m=alt_shift,
                     subtract_background=options.subtract_background,
                     consider_points_lower_than_molecular=options.consider_points_lower_than_molecular,
+                    sign_error_v10=options.sign_error_v10,
                 )
                 if pr is not None:
                     pr.time_sample_idx = t_idx
@@ -648,6 +724,7 @@ def calibrate_rayleigh(
         altitude_shift_m=0,
         subtract_background=options.subtract_background,
         consider_points_lower_than_molecular=options.consider_points_lower_than_molecular,
+        sign_error_v10=options.sign_error_v10,
         return_diagnostics=True,   # keep cl_profile etc. for plots
     )
 
@@ -680,17 +757,25 @@ def calibrate_rayleigh(
         reference_value=ref_val_check,
         i_start=0,
         i_end=np.where(mol_mask_nominal)[0][-1],
+        sign_error_v10=options.sign_error_v10,
     )
-    # The Rayleigh-fit slope corresponds to C_L * T_a^2 (aerosol two-way
-    # transmittance), because beta_a ~ 0 in the molecular window. To recover
-    # C_L we must divide out only the AEROSOL transmittance T_a^2, not the
-    # total transmittance T^2 = T_a^2 * T_m^2. Using the total optical depth
-    # (incl. molecular) overestimates C_L^slope and can cause false
-    # 'method disagreement' rejections (see report sec. 4).
-    optical_depth_aer_ref = np.trapz(
-        ext_aer_check[:i_start_mol_nominal], data.range_alc[:i_start_mol_nominal]
-    )
-    inv_trans_ref = np.exp(2 * optical_depth_aer_ref)
+    if options.sign_error_v10:
+        # E-PROF v1.0 (pre-a4e7140): reference inverse-transmittance from the TOTAL
+        # optical depth (aerosol + molecular), which overestimates C_L^slope.
+        ext_tot_check = ext_aer_check + mol_props.beta_mol * MOLECULAR_LIDAR_RATIO
+        optical_depth_ref = np.trapezoid(
+            ext_tot_check[:i_start_mol_nominal], data.range_alc[:i_start_mol_nominal]
+        )
+    else:
+        # The Rayleigh-fit slope corresponds to C_L * T_a^2 (aerosol two-way
+        # transmittance), because beta_a ~ 0 in the molecular window. To recover
+        # C_L we must divide out only the AEROSOL transmittance T_a^2, not the total
+        # transmittance T^2 = T_a^2 * T_m^2 (using the total OD overestimates
+        # C_L^slope and can cause false 'method disagreement' rejections).
+        optical_depth_ref = np.trapezoid(
+            ext_aer_check[:i_start_mol_nominal], data.range_alc[:i_start_mol_nominal]
+        )
+    inv_trans_ref = np.exp(2 * optical_depth_ref)
 
     cl_slope = fit_result.slope * inv_trans_ref
     error_pct = abs((cl_slope - cl_median) / cl_median * 100)
@@ -713,78 +798,60 @@ def calibrate_rayleigh(
             message=f"Uncertainty exceeds value: {uncertainty:.2e} > {cl_median:.2e}",
         )
 
-    # ── Plot: Molecular fit, CL profile, Sensitivity analysis ──
-    if options.plot_main or options.plot_all:
+    # ── Plot: compact 4x4 Rayleigh diagnostics dashboard ──
+    if options.plot_main:
         pdir = _plot_dir(options, info, date_str)
         tag = _plot_tag(info, date_str)
         plot_title_base = f"{info.site_name} ({info.wmo_id}) — {date_str}"
 
-        # (a) Molecular fit diagnostic
-        if pr_nominal is not None and pr_nominal.signal_normalized is not None:
+        # Build LR × altitude-shift × time-sample cube for the dashboard
+        lr_used = np.array(sorted({pr.lidar_ratio for pr in perturbation_results}))
+        shifts_used = np.array(sorted({pr.altitude_shift_m for pr in perturbation_results}))
+        ts_used = np.array(sorted({pr.time_sample_idx for pr in perturbation_results}))
+        cl_cube = np.full((len(lr_used), len(shifts_used), len(ts_used)), np.nan)
+        lr_idx = {v: i for i, v in enumerate(lr_used)}
+        sh_idx = {v: i for i, v in enumerate(shifts_used)}
+        ts_idx = {v: i for i, v in enumerate(ts_used)}
+        for pr in perturbation_results:
+            cl_cube[lr_idx[pr.lidar_ratio], sh_idx[pr.altitude_shift_m], ts_idx[pr.time_sample_idx]] = pr.lidar_constant
+        cl_matrix = np.nanmedian(cl_cube, axis=2)
+
+        if (
+            pr_nominal is not None
+            and pr_nominal.signal_normalized is not None
+            and fit_result.search_diagnostics is not None
+        ):
+            diag = fit_result.search_diagnostics
             try:
-                # Molecular attenuated backscatter = beta_mol × transmission
-                beta_att_mol = mol_props.beta_att_mol
-                plot_molecular_fit(
+                plot_rayleigh_diagnostics_compact(
                     range_alc=data.range_alc,
                     altitude=data.altitude,
                     rcs_mean=rcs_mean,
                     signal_normalized=pr_nominal.signal_normalized,
                     p_mol=mol_props.p_mol,
-                    beta_att_mol=beta_att_mol,
+                    beta_att_mol=mol_props.beta_att_mol,
                     fit_altitude_start=fit_result.altitude_start,
                     fit_altitude_end=fit_result.altitude_end,
-                    title=f"{plot_title_base} — Molecular Fit",
-                    save_path=pdir / f"{tag}_molecular_fit.png",
-                )
-            except Exception as exc:
-                logger.warning(f"plot_molecular_fit failed: {exc}")
-
-        # (b) Lidar-constant profile
-        if pr_nominal is not None and pr_nominal.cl_profile is not None:
-            try:
-                plot_lidar_constant(
-                    range_alc=data.range_alc,
-                    cl_profile=pr_nominal.cl_profile,
+                    range_bin_m=diag.range_bin_m,
+                    half_length_m=diag.half_length_m,
+                    slopes=diag.slopes,
+                    intercepts=diag.intercepts,
+                    r_squared=diag.r_squared,
+                    best_range_m=fit_result.center_range_m,
+                    best_half_m=fit_result.half_length_m,
+                    lr_values=lr_used,
+                    alt_shifts=shifts_used,
+                    cl_matrix=cl_matrix,
                     cl_median=cl_median,
-                    cl_slope=cl_slope,
                     cl_uncertainty=uncertainty,
-                    fit_range_start=fit_result.range_start_m,
-                    fit_range_end=fit_result.range_end_m,
-                    title=f"{plot_title_base} — Lidar Constant",
-                    save_path=pdir / f"{tag}_lidar_constant.png",
+                    hours_since_start=data.hours_since_start,
+                    rcs=data.rcs,
+                    used_profile_indices=np.asarray(keep_idx, dtype=int),
+                    title=f"{plot_title_base} — Rayleigh diagnostics (compact)",
+                    save_path=pdir / f"{tag}_rayleigh_diag_compact.png",
                 )
             except Exception as exc:
-                logger.warning(f"plot_lidar_constant failed: {exc}")
-
-        # (c) Sensitivity analysis heatmap
-        try:
-            # Build LR × altitude-shift × time-sample cube
-            lr_used = np.array(sorted({pr.lidar_ratio for pr in perturbation_results}))
-            shifts_used = np.array(sorted({pr.altitude_shift_m for pr in perturbation_results}))
-            ts_used = np.array(sorted({pr.time_sample_idx for pr in perturbation_results}))
-            cl_cube = np.full((len(lr_used), len(shifts_used), len(ts_used)), np.nan)
-            lr_idx = {v: i for i, v in enumerate(lr_used)}
-            sh_idx = {v: i for i, v in enumerate(shifts_used)}
-            ts_idx = {v: i for i, v in enumerate(ts_used)}
-            for pr in perturbation_results:
-                cl_cube[lr_idx[pr.lidar_ratio], sh_idx[pr.altitude_shift_m], ts_idx[pr.time_sample_idx]] = pr.lidar_constant
-
-            # Median over time samples for the heatmap display
-            cl_matrix = np.nanmedian(cl_cube, axis=2)
-
-            plot_sensitivity_analysis(
-                lr_values=lr_used,
-                alt_shifts=shifts_used,
-                cl_matrix=cl_matrix,
-                cl_median=cl_median,
-                cl_uncertainty=uncertainty,
-                cl_cube=cl_cube,
-                time_sample_labels=["all"] + [f"subset {i}" for i in range(1, N_TIME_SAMPLES + 1)],
-                title=f"{plot_title_base} — Sensitivity",
-                save_path=pdir / f"{tag}_sensitivity.png",
-            )
-        except Exception as exc:
-            logger.warning(f"plot_sensitivity_analysis failed: {exc}")
+                logger.warning(f"plot_rayleigh_diagnostics_compact failed: {exc}")
 
     # =========================================================================
     # Step 11: Build result and write to NetCDF

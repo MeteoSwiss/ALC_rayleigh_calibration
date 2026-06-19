@@ -1,0 +1,590 @@
+
+===== PAGE 1 =====
+ResearchArticle Vol.62,No.4/1February2023/AppliedOptics 861
+Correct(ed) Klett–Fernald algorithm for elastic
+aerosol backscatter retrievals: a sensitivity
+analysis
+Johannes Speidel* Hannes Vogelmann
+AND
+KarlsruheInstituteofTechnology(KIT),InstituteofMeteorologyandClimateResearchAtmosphericEnvironmentalResearch(IMK-IFU),
+CampusAlpin,Garmisch-Partenkirchen,82467,Germany
+*Correspondingauthor:johannes.speidel@kit.edu
+Received23June2022;revised22December2022;accepted26December2022;posted3January2023;published23January2023
+Retrievalalgorithmsforaerosolelasticbackscatterlidarsaremostcommonlybasedonasignalinversionknownas
+theKlettsolution.Whileoftenused,asignerrorintheoriginalpublicationhasbarelybeenmentionedorrecog-
+nizedinthescientificcommunity.Inthisstudy,wepresentacorrectedKlettinversionandasensitivityanalysisofits
+implementationunderdifferentatmosphericconditions.Weshowthattheerror’sdimensiondependsonmultiple
+factors,thuspreventingtrivialaposterioricorrectionsontheresultscalculatedwiththeoriginal,uncorrectedKlett
+solution.ComparingtheuncorrectedwiththecorrectedKlettsolution,longintegrationpathwaysincombination
+withlowaerosolconcentrationsleadtosubstantialrelativedeviationsofmorethan100%,whereasshortintegra-
+tionpathwayswithhighaerosolconcentrationsconsiderablyreducetherelativedeviationstomagnitudesaround
+15%.Thehigherthealtitudeoflayerswithincreasedaerosolconcentrations,thehigherthedeviationsduetothe
+incorrectusageofKlett’sinversion,howeveronaslightlevel(≈1%). ©2023OpticaPublishingGroupundertheterms
+oftheOpticaOpenAccessPublishingAgreement
+https://doi.org/10.1364/AO.465944
+1. INTRODUCTION thosetwo.Severalapproachestotacklethisproblemhavebeen
+published, as, e.g., discussed in [6]. With his publication in
+Aerosolsareinvolvedinmultipleimportantprocessesthatnot
+1972,Fernaldpresentedafundamentalanalyticalapproachto
+onlyhaveadirectimpactonairquality,butalsoinfluencecloud
+solvethelidarequationundertheconsiderationofbothmolecu-
+formationandtheEarth’sradiationbudget[1].Furthermore,
+larandparticlesignalcontributions[7].Amajorbreakthrough
+observed composition and distribution of aerosols can deliver
+in elastic backscatter signal processing was Klett’s publication
+valuable information about atmospheric transport dynamics
+in1981[8],where,undertheassumptionofapowerlawrela-
+[2].Inaddition,satellite-basedatmosphericobservationsoften
+tionship between volume backscatter and volume extinction
+needaprioriinformationonaerosolopticaldepth.Therefore,
+coefficient,ananalyticalinversionsolutiontothelidarequation
+itisimportanttoobtainaccuratemeasurementsofthecontent
+andcompositionofaerosolsintheatmosphere. wasdeveloped.Byreversingtheboundsofintegration,leading
+Tomeasuretheprevailingaerosolcontentintheatmosphere, toanintegrationfromhightolowaltitudes,thisinversionalgo-
+elastic backscatter lidars are systems that are the most easy to rithmprovedtobemathematicallystablewithouttheneedof
+implement and operate. Hence, even stratospheric measure- additional measurements for lidar calibration. This solution,
+ments of aerosols were conducted shortly after the first lasers however, did not account for a molecular contribution in the
+wereconstructedandemployedintolidarsystemsintheearly lidarsignal.Additionalandequallyimportantpublicationson
+1960s[3].Sincethen,lidaraerosolobservationshavebecome thelidarsignalinversionproblemhavebeenmadebyFernald
+anincreasingfocusofresearch,alsoforinstrumentcalibrations [9]andSasanoetal.[10].ThecriticismonKlett’sfirstsolution
+ofsatellitesystems(e.g.,[4,5]andreferencestherein).However, containedthereinwasaddressedinafollow-uppublicationby
+accurate measurements of aerosol’s optical backscatter and Klett in 1985. With this publication [11], Klett finalized the
+extinctioncharacteristicshavebeenandstillremainchallenging. lidarinversionalgorithmknownasthe“Klett–Fernald–Sasano
+This is due to the fact that the lidar equation [Eq. (1)] for algorithm.” Therein, a finalized equation for the retrieval of
+elastic backscatter lidars is an underdetermined equation. aerosol backscatter coefficients under the consideration of
+Therefore,informationoneitherthevolumebackscattercoef- molecularRayleighscatteringisprovided.Also,thisinversion
+ficientorthevolumeextinctioncoefficienthastobecollected algorithm includes additional improvements with respect to
+a priori, calling for additional observational data of one of variablebackscatter-to-extinctionratiosoverheight.However,
+1559-128X/23/040861-08Journal©2023OpticaPublishingGroup
+
+===== PAGE 2 =====
+862 Vol.62,No.4/1February2023/AppliedOptics ResearchArticle
+due to his original idea of a backward integration scheme, 2. THEORY
+this inversion is most commonly simply referred to as Klett’s
+ThissectionfocusesonadetailedderivationofKlett’ssolution
+solution.
+and the point where a wrong sign was introduced in Klett’s
+By now, technologically more sophisticated lidar concepts
+work [11]. As a result, we present a sign-corrected version of
+havebeendeveloped,allowingformoreaccurateandversatile
+Eqs. (20) and (22) from the original publication. The crucial
+determination of aerosol properties, offering the advantage of
+pointwewanttostressisthefactthatthewrongsignishiddenin
+moreaccurateresultswithoutaprioriassumptionsonthelidar
+Klett’sEq.(20),servingasasubstitutewithinhisfinalEq.(22).
+ratio. Examples include high spectral resolution lidar (HSRL,
+AdetaileddescriptionofthecorrectedKlettsolutionisgivenin
+[12]),orsystemsusingRamanbackscatterandcombinationsof
+thedevelopmentofourEq.(9).Finally,thecorrectedequation
+multiple wavelengths (e.g., [13,14]). Nevertheless, despite its
+isfurthertransformedintoaversionwithoutlogarithmicterms,
+age and accompanying uncertainties, elastic backscatter coef-
+preventing numerical instabilities for profiles with very low
+ficientsmeasuredwithlidars,insomecasesasabyproduct,still
+aerosolcontent[Eq.(10)].
+delivervaluableinformationontheatmosphericaerosolcontent
+As stated in the Introduction, Klett’s inversion from 1985
+andarethereforefrequentlyused(e.g.,[15–17]).Forthispur-
+[11]issuperiortotheonehepublishedin1981[8],asitspe-
+pose,Klett’sinversionschemestillisastate-of-the-artmethod.
+cifically takes molecular Rayleigh scattering into account.
+However, Klett’s renowned 1985 publication is afflicted by a
+Therefore,theimproved1985Klettinversionshouldbeused
+signerror.ThiswasfirstnoticedbyKaestnerin1986,shortly
+forcalculatingbothbackscatterandextinctioncoefficients,even
+afterKlett’spublication[18].Nonetheless,basedontheamount
+thoughitisnotalwaysdonethatway(e.g.,[31–33]).
+ofcitations,thisimportanterratumhasnotgaineditsappropri-
+ThestartingpointforallconsiderationsbehindKlett’s1985
+atedegreeofrecognition.Inaddition,thereareindicationsthat
+inversionisthewell-knowngenerallidarequation
+thesignerrorisstillrepeatedlyadopted,presumablyduetolack-
+ingknowledgeofitsexistence.Averyrareexampleinwhichthe 1 (cid:20) (cid:90) r (cid:21)
+P(r,λ)=C ·β(r,λ)· ·exp −2 α(r (cid:48),λ)dr (cid:48) , (1)
+signerrorisdirectlymentioned,thoughnotexplicitlyexplained, r2
+0
+can be found in a publication of Zavyalov [19]. Fortunately,
+largepartsbothwithinliteratureandthelidarcommunityhave withP beingthereceivedpower,Calidar-dependentconstant,
+tacitly corrected the sign error (e.g., [20–25]). Unfortunately, r therangefromthelidar,andβ andα thevolumebackscat-
+errordescriptionsandclearguidanceonhowtoproperlyusethe ter and extinction coefficients, respectively. In addition, the
+inversionalgorithmarelacking,whichstillleadstoconfusion.
+equationisdependentonthewavelengthλatwhichthelidaris
+Interestingly, many publications simply state to use the lidar operated.Forthesakeofbrevity,thisdependenceisomittedin
+signal inversion according to Klett 1985 [11], without shar- thenotationofthefollowingequationsbutalwayshastobekept
+ing the specific formula they were using, and without further in mind. By introducingr 0 as a constant reference range and
+commentsonwhetherornottheyhavenoticedtheneedfora
+simplifyingS(r)=ln(r2·P(r)),Klett[8]derives
+correctionoftheoriginalsigns(e.g.,[26–30]).Althoughacor- β(r) (cid:90) r
+rectimplementationcanprobablybeassumedinmostcases,the S(r)−S =ln −2 α(r (cid:48))dr (cid:48), (2)
+0 β
+traceabilityisclearlyaffected.Inconclusion,clearindications, 0 r0
+descriptions,orevenwarningsofthesignerrorarehardlyever where S =S(r ) and β =β(r ). This equationshows to be
+0 0 0 0
+given. Moreover, in addition to the sign error itself, there are
+independentoftheusedlidarsystem.DerivingEq.(2)byr then
+furthercomplicationsandpitfallsregardingthecorrectusageof
+leadsto
+Klett’sinversionalgorithm.Adetaileddescriptionofproblems
+occurringintheinversion’simplementationwillbegiveninthe dS(r) = 1 dβ(r) −2α(r). (3)
+followingsection.GiventheunabatedhighrelevanceofKlett’s dr β(r) dr
+1985algorithm[11]inthefieldofelasticbackscatterlidars,the
+From this point on, within his 1985 publication, Klett intro-
+uncertainty regarding its possible incorrect implementation
+duces the lidar ratio B as a relation between backscatter and
+issohighthatacertaindegreeofpropagationofthiserrorhas
+extinctioncoefficientsinawaythat
+to be assumed. Furthermore, the impact of using the wrong
+formulation of the Klett solution has never been discussed in β(r)=β (r)+β (r)=B (r)α (r)+B α (r). (4)
+P R P P R R
+quantitative terms. Therefore, this paper identifies at which
+pointasignerroroccursintheoriginalpublicationandpresents SubscriptP denotestheparticlecontribution,whereasRstands
+a sign-corrected, stable solution derived from Klett’s original for the molecular (Rayleigh) contribution on the backscatter
+inversion algorithm. To quantify the implication of the sign andextinctioncoefficients.Themolecularlidarratioisconstant
+errorontheinversionresults,severalcasestudiesarecarriedout overheightwith B = 3 sr−1≈0.119sr−1.Theparticlelidar
+R 8π
+formultipleatmosphericconditions.Thisallowsanestimation ratio,however,iscapableofhavingvariablevaluesoverheight.
+ofhowdifferentmeasuringconditionsareaffectedbyvarying If according a priori information is available, keeping B (r)
+P
+intensitiesofaerosolloadatmultiplealtitudes. heightdependentleadstoimprovedresults[11].However,the
+ThemathematicaldetailsaredescribedinSection2,andthe valuesofB (r)aremostoftenchosentohaveconstant,height-
+P
+resultsofthequantitativecasestudiesaswellastheirimplica- independent values that best fit the prevailing atmospheric
+tionsarediscussedinSection3.Finally,abriefsummaryisgiven conditions(e.g.,[34]).InsertingEq.(4)intoEq.(3)thenleads
+inSection4. tothefollowing:
+
+===== PAGE 3 =====
+ResearchArticle Vol.62,No.4/1February2023/AppliedOptics 863
+dS(r) = 1 dβ(r) −2 (cid:18)β P (r) + β R (r)(cid:19) Subsequently,volumebackscattercoefficientscanbecalculated
+dr β(r) dr B (r) B asfollows:
+P R
+1 dβ(r) 2β(r) (cid:18) 1 1 (cid:19) exp(S(cid:48)−S(cid:48) )
+= − +2β (r) − . β(r)= m . (9)
+β(r) dr B P (r) R B P (r) B R (5) β 1 m +2 (cid:82) r rm exp(S B (cid:48) P − ( S r m (cid:48) (cid:48) ) )dr(cid:48)
+For easier comparability with the original Eq. (22) in [11],
+Atthispoint,KlettintroducesanewsignalvariableS(cid:48)(r)within
+we kept the notation S(cid:48)−S(cid:48) , which we introduced as
+thesubstitute S(cid:48)−S m (cid:48) ,analogoustoEq.(2).However,ascan S∗(r)=(S(cid:48)−S(cid:48) )(r) earlier. A m s can be seen, Eq. (9) is actu-
+beseeninEq.(21)in[11]andinEq.(8)inthispublication,this m
+ally identical in its notation with Eq. (22) from Klett 1985
+definitioncanraiseconfusionasthereisnosinglevariableS(cid:48)but
+[11]. However, it is very important to recognize that our Eq.
+alwaystheentiresubstitute(S(cid:48)−S
+m
+(cid:48) )(r).Therefore,weslightly
+(9) refers to the substitute S∗(r), which is now defined with
+modifytheoriginalnotationandchangethenameofthesubsti-
+correctsigns[Eq.(7)].Weemphasizethattyposcanbefoundin
+tutefromS(cid:48)(r)toS∗(r).Besidesthat,stickingtoKlett’soriginal
+manymanuscriptsandthatsuchfaultsinthefinalprintsdonot
+notation,inthefollowing,theindexmalwaysreferstothefar-
+alwayshavetocoincidewiththeactual,implementedmethod.
+endreferenceranger sothat,e.g.,S =S(r ).Thechoiceof
+m m m However,wrongequationswiththeoriginalsignerrorfrom[11]
+theintegrationboundsresultsoutoftheimportantKlett1981
+areoccasionallypublished(e.g.,[35–37]).Inaddition,another
+publication[8],whichledtoimprovedmathematicalstabilityof
+signerrorinthedenominator,whichcannotunambiguouslybe
+theinversionalgorithmastheintegrationstartsfromthefarend.
+Attheintroductionofthenewsignalvariable S∗(r)(called S(cid:48) assignedtotheoriginalsignconfusionaroundKlett’s1985pub-
+lication,hasbeenusedaswell(e.g.,[38,39]).Therefore,weseea
+in[11]),awrongsignwasnotedintheoriginalpublication[Eq.
+(20)].Originally,thedefinitionofthesubstituteS∗(r)lookslike doublecheckoftheusedinversionalgorithmandallpublished
+equationsonthiserrorasessentialtopreventitsfurtherpropa-
+this:
+gation.Inspiteofthecorrectedsignerror,onemajordrawback
+S ∗(r):=(S (cid:48)−S (cid:48) )(r)=S(r)−S +
+2 (cid:90) rm
+β (r (cid:48))dr (cid:48) ofEq.(9)istheasymmetryofthelogarithminthedefinitionof
+m m B
+R r
+R thesignalvariable S(r)=ln(r2P(r)),leadingtostrongsignal
+(cid:90) rm β (r(cid:48)) variations or even undefined values if the noisy signal values
+−2 R dr (cid:48) drawnearzero.Thisimpliesfilteringorsubstitutionofallvalues
+r B P (r(cid:48)) P(r)≤0.Criticismontheuseofthelogarithmhasalreadybeen
+(cid:90) rm (cid:18) 1 1 (cid:19) voicedby,e.g.,[38]in1995.Nevertheless,therearestillexam-
+=S(r)−S +2 − β (r (cid:48))dr (cid:48),
+m B B (r(cid:48)) R plesinwhichthelogarithmisused(e.g.,[40,41]).Inadditionto
+r R P
+(6) thisissue,thelogarithmictermcanoftenbefoundinequations
+thatrefertoKlett1985[11],butcompletelymisinterpretthe
+whilethecorrectsubstituteS∗(r)shouldbe substituteS∗(r)fromEq.(7)inawaythatitisfalselyassumed
+S ∗(r):=(S (cid:48)−S (cid:48) )(r) tobesimplyS∗(r)=S(r)−S m (e.g.,[42–48]).Toavoidthese
+m problems, we recommend using a transformed formulation
+(cid:90) rm (cid:18) 1 1 (cid:19) withoutalogarithm:
+=S(r)−S −2 − β (r (cid:48))dr (cid:48).
+m r B R B P (r(cid:48)) R S ˆ(r)·exp[Y(r)]
+(7) β(r)= , (10)
+Sˆ m +2 (cid:82)rm Sˆ(r(cid:48)) ·exp[Y(r(cid:48))]dr(cid:48)
+Here, it is very important to note that the error made in the β m r BP (r(cid:48))
+introduction of S∗(r) [Eq. (6)] would propagate into Eq. (9)
+with
+andsubsequentlyintothefinalEq.(10),ifnotreplacedbyEq.
+(7).Onlyifthesign-correctedS∗(r)[Eq.(7)]isincludeddoes (cid:90) rm (cid:18) 1 1 (cid:19)
+Y(r)=−2 − β (r (cid:48))dr (cid:48),
+thefollowingdifferentialequationleadtotheresultofEq.(21) B B (r(cid:48)) R
+r R P
+intendedbyKlett[11].Duetothereverseintegrationwiththe
+referencevalueattheupperend,signshavetobechanged.This
+S
+ˆ(r)=r2P(r).
+canbeseeninthefollowingdifferential:
+dS∗(r) dS(r) 2 d (cid:90) rm d (cid:90) rm β (r(cid:48)) This notation can easily be derived from Eq. (9) by conse-
+= − β (r(cid:48))dr(cid:48)+2 R dr(cid:48) quentlyapplyingtheexponentialfunctiononthelogarithmic
+dr dr B R dr r R dr r B P (r(cid:48)) terms S(r) and S in the substitute S∗(r). If one considers
+m
+dS(r) β (r) β (r) B (r(cid:48))=B asbeingconstantoverheight,thisformulaequals
+= +2 R −2 R P P
+dr B B (r) the solution proposed by Fernald [9], which was published
+R P
+1 dβ(r) β (r) β (r) β (r) beforeKlett’spublicationin1985[11].Here,Eq.(10)isfree
+= −2 R −2 P +2 R ofthesignerrorhiddeninEqs.(20)and(22)ofKlett’s1985
+β(r) dr B P (r) B P (r) B P (r) workandtakesintoaccountthepossibilityforvariableB (r(cid:48)).
+P
+β (r) β (r) β (r) This, or similar notations are well established (e.g., [10,25]).
+−2 R +2 R −2 R
+B B B (r) We recommend using this formulation [Eq. (10)] for elas-
+R R P
+tic backscatter inversions if applying Klett’s original 1985
+1 dβ(r) β(r)
+= −2 . algorithm.
+β(r) dr B (r)
+P
+(8)
+
+===== PAGE 4 =====
+864 Vol.62,No.4/1February2023/AppliedOptics ResearchArticle
+3. SENSITIVITYSTUDY
+After analytically correcting the sign error in Klett’s original
+publication,itsimpactunderdifferingatmosphericconditions
+isnotself-evidentbylookingonlyattheequation.Therefore,
+inthefollowing,theerrorcausedbyawrongsignwithinKlett’s
+substitutionintheinversionalgorithmisexaminedwiththeuse
+of both artificial and real lidar signals in varying atmospheric
+conditions.Withthis,aclassificationonwhetherthiserrorhas
+tobeconsideredmarginalcanbeachieved.Tofurthersimplify
+the case study, all examples presented in this section are con-
+sidered to be free of any overlap function. Furthermore, the
+particlelidarratioiskeptconstantforallcasestudiessuchthat
+B (r)=B =1/50sr−1.Also,allcasestudiesassumethepres-
+P P
+enceofopticallyrelevantmolecules,meaningthatβ (r)(cid:54)=0.
+R
+Incasesinwhichβ (r)=0(dustloadinspaceinabsenceofa
+R
+gaseousatmosphere),thesignerrordoesnotaffecttheresultsas
+canbeseenfromEqs.(7)and(10).
+A. CaseStudywithNoAerosolLoad
+Inthefirstcase,asimplifiedatmospherewithnoaerosolcon-
+tentisassumed.Forthiscase,anartificiallidarreturnsignalis Fig. 2. (a) (Un)corrected Klett inversion of aerosol backscatter
+generated[basedonEq.(1)],solelyinfluencedbythemolecular coefficientsonthebasisofarepresentativeprofilemeasuredonMount
+RayleighbackscatterderivedfromaU.S.standardatmosphere Zugspitze, Germany. The calculated aerosol backscatter coefficients
+athighaltitudesareenlargedintheinsetforbettervisibility.(b)shows
+[49].Forthisfirst,aerosol-freecondition,thelidarisassumedto
+relative errors due to the incorrect usage with the wrong sign for a
+besituatedatsealevel.AstheKlettinversionalgorithmisbasi-
+selectedrangeofaltitude.
+callyanintegrationoverheight,alongintegrationpathischosen
+withanarbitraryreferenceheightat2000bin(1bin=ˆ 7.5m),
+B. CaseStudywithLowAerosolLoad
+i.e.,atanaltitudeof15kmabovesealevel(ASL).
+While the correct implementation of Klett’s inversion To assess the sign problem in realistic surroundings with
+resultsintheexpectedβ (r)=0overtheentirerange,itcan low aerosol load, the second case is based on actual aerosol
+P
+be demonstrated that the uncorrected usage with the wrong measurementsfromaground-basedlidar.Atanaltitudeof2675
+sign therein causes negative values of β (Fig. 1). Those val- mASL,theGarmisch–Partenkirchenaerosollidarprovidesone
+P
+ofthelongesttimeseriesofstratosphericaerosolmeasurements
+ues magnify continuously in the negative range the closer
+[15].WeselectedacharacteristicprofilefromJanuary2022as
+we get from high altitudes to the ground, reaching values
+β <−3·10−7(m·sr)−1.Underrealistictroposphericcondi- representativeforthecaseofanelevatedlidar,locatedabovethe
+P planetary boundary layer and with the capability of reaching
+tionsatsuchaltitudes,β regularlyexceedsmuchhighervalues
+P highintothestratosphere.Inthiscase,measurementsreacha
+oftheorderofmagnitude+10−5(m·sr)−1.Theerrorobtained
+heightofover46kmASL,whichcorrespondstoroughly5800
+fromthisspecificcasestudycanthusbeassumedmarginalfor
+binsor43.5kmabovethelidarsite.Aspreviously,themeasured
+typicaltroposphericconditions. values of β are again used to create an artificial lidar return
+P
+signal.AstheKlettalgorithminthepresentedformassumesthe
+referenceheighttobefreeofaerosols,wesetβ (r )=0.Thisis
+P m
+trueforallpresentedcasestudies.Analogoustotheaerosol-free
+condition, using the uncorrected inversion in this scenario
+resultsinsmallervaluesforβ ,asdisplayedinFig.2(a).Again,
+P
+thenegativebiasamplifiestowardsloweraltitudes(andwitha
+longer integration pathway, respectively), leading to negative
+values. Note that besides the fact that the integration length
+is almost three times as long as in the previous scenario, the
+valuesfromthelowestlayersarestillbiggerthanthosefromthe
+aerosol-free scenario. But still, the relative deviations between
+thecorrectedanduncorrectedresultsareveryhigh[Fig.2(b)].
+Thelowestvaluesarearound20%,whereasthehighestvalues
+byfarexceed100%,especiallybelowthealtitudesshowninthis
+Fig. 1. Aerosol backscatter coefficients, calculated with the cor-
+rected inversion equation (blue) and with the incorrect sign therein plot. Interestingly, Fig. 2(b) also shows that the discrepancies
+(red). are getting remarkably smaller by only increasing the aerosol
+
+===== PAGE 5 =====
+ResearchArticle Vol.62,No.4/1February2023/AppliedOptics 865
+content with constant factors. Nevertheless, considering the
+clear negative signal, the usage of the wrong algorithm under
+suchatmosphericconditionswouldimmediatelyleadtoaques-
+tioning of one’s own algorithm implementation. Therefore,
+in this case, the error can be seen as substantial. However, in
+casesofsolelyobservingthestratospherewithanenhanceddust
+load, this might be overseen and lead to misinterpretation of
+measurementresults.
+C. CaseStudywithHighAerosolLoad
+Toaccountforthepresentedeffectofadecreaseoftherelative
+errorswithhigheraerosolloads,thethirdandlastcasestudyis
+settoalidarsituatedwithintheplanetaryboundarylayer.Again,
+weusedmeasuredvaluesofβ ,inthiscasefrommeasurements
+P
+performed with a HSRL system. The measurement was per-
+formedwithintheCHEESEHEADcampaign[50]duringthe
+summer of 2019 in northern Wisconsin, USA. Contrasting
+thesiteatMountZugspitze,theinstrumentwasstandingatan
+altitudeof≈400mASL,withintheplanetaryboundarylayer.
+To demonstrate the effect for high aerosol concentrations, we
+selectedaprofilefromatimeperiodwithahighaerosolload.
+However, it has to be stressed that no major human aerosol
+sourcewasexistentinproximityofthisremotesite.Concerning
+measurementswithintheboundarylayer,highervaluesofβ
+P
+are commonly observed at other measurement sites. Yet, the
+maximum values of β are two orders of magnitude higher
+P
+than those at Mount Zugspitze [Fig. 3(a)]. In contrast to the
+formerlyshowncases,here,theaerosolbackscattercoefficients
+donotrevealtheusageofanincorrectalgorithmastheydonot
+turn into negative values. Additionally, the relative deviations
+betweentheimplementationofthecorrectedanduncorrected
+inversions become smaller, with a maximum of about 25%
+(integration pathway: ≈16km). Considering the occurrence
+of higher aerosol concentrations, those relative discrepancies
+canbecomeevenless[Fig.3(c)].Asalreadyindicated,theincor-
+rectusageoftheinversionshouldhaveamagnifyingeffecton
+the error, which correlates with the length of the integration
+path. This becomes evident in Fig. 3(d), where the reference
+altitude is defined to be half the distance (≈8km instead of
+≈16km).Giventhataerosolconcentrationsineachheightstay
+thesame,therelativedeviationsarenowsubstantiallysmaller,
+with maximum values of about 18%. The higher the aerosol
+concentrations, the further the drop in differences between
+implementations of the corrected and uncorrected inversion
+algorithms.Whenevensysteminter-comparisonstudiesresult
+in deviations of 10% or less, one might hardly question the Fig.3. (a)(Un)correctedKlettinversionofaerosolbackscattercoef-
+ficientsonthebasisofarepresentativeprofilemeasuredinnorthern
+inversionalgorithmbutassumeasystemoffsetinstead.Byana-
+Wisconsin, USA. The calculated aerosol backscatter coefficients at
+lyzingtherelativedeviations,weobservethathighaerosolloads
+highaltitudesareenlargedintheinsetforbettervisibility.(b)Absolute
+remarkablyreducethedifferences.Forexample,fortheintense
+errorsarecomparedwith(c)relativeerrors.(d)Relativeerrorsarealso
+aerosolpeakabove3km,asimultaneousdropwithintherelative
+shown for the case of the integration path length being halved. (a),
+deviationscanbeobserved.Regardingtheabsolutedeviations, (b)Enlargedinsetseasetheinterpretationofthecalculatedresultsfor
+however,resultsshowadifferentpictureintworegards.First, specificaltitudes.
+aerosolpeaksshowhigherabsolutediscrepancies.Second,and
+asaconsequenceofthis,overallelevatedaerosolconcentrations
+increasetheabsolutedeviations,too[Fig.3(b)]. differentaltitudes.Therefore,weassumedascenarioinwhich
+Asalaststep,wefocusonthequestionofhowtheincorrect theverticaldistributionofβ isagainbasedontheU.S.stand-
+R
+usage of the inversion with the wrong sign therein affects the ard atmosphere. To be independent of any natural structures
+resultingbackscattercoefficients,dependingonaerosollayersat withenhancedaerosolinrealdata,wethenaddedanartificial
+
+===== PAGE 6 =====
+866 Vol.62,No.4/1February2023/AppliedOptics ResearchArticle
+underestimation of the aerosol backscatter coefficients β ,
+P
+resultinginevennegativevaluesincasesofaverylowaerosol
+load (e.g., stratosphere). For an artificial atmosphere without
+any aerosols, values of β ∼−10−7(m·sr)−1 were calculated
+P
+insteadoftheexpectedvaluesβ =0.Whensimulatingtypical
+P
+conditions for stratospheric lidars with long integration path-
+waysandlittleaerosolcontent,theunderestimationofβ builds
+P
+upthelowerthealtitudegets.Withanintegrationpathwayof
+roughly43.5km,thedeviationsofresults,calculatedwiththe
+correctedanduncorrectedKlettinversions,exceededvaluesof
+100%byfar.
+Fig. 4. Relative errors induced by the incorrect usage of Klett’s Assumingrealisticboundarylayerconditionswithenhanced
+inversionforadditionalaerosollayerssharplydefinedwithinarangeof aerosol content revealed overall smaller relative deviations
+150bin,introducedindifferentaltitudes.
+compared to the aerosol-depleted stratospheric conditions.
+Maximumdiscrepanciesof≥25%occurredforanintegration
+verticalaerosoldistributionwithanexponentialdecreaseover pathway of 15 km. Halving the integration pathway reduced
+height.Thefunctionparametersarechosensuchthattheafter- maximum deviations to values of ≥17%, exhibiting an error
+wardsretrievedvaluesofβ werewithinthesamevaluerangeas dependency on the integration length. Further increases of
+P
+forthepreviouslyshownHSRLmeasurements.Finally,aerosol the aerosol load (by a multiplied, constant factor of four and
+stepswithaverticalextentof150binsareintroducedatdifferent an integration length of over 15 km) led, in maximum, to a
+altitudes.Theincreaseofaerosolissettoalwaystwiceasmuch reductionofdeviationsofmorethan6%forthelongintegra-
+astheaerosolbackscattercoefficientsateverysinglebinwithin tion pathway and a reduction of more than 4% for a halved
+theaerosollayer.Thisartificialsignalisretrievedwiththerefer- pathway. The absolute errors, however, increased with higher
+ence altituder ≈16km, analogous to the previously shown aerosol concentrations. Without any factorial multiplica-
+m
+CHEESEHEADexample.Wefindthattherelativeerrorsdue tion of aerosol load, the calculated absolute errors peaked at
+toincorrectusageoftheinversionturnouttobelower,thelower values of ≥0.5·10−5(m·sr)−1. With the same factorial
+weassumedthealtitudeoftheincreasedaerosollayer(Fig.4). multiplication of four, the absolute errors reached values of
+Thisalsoappliesiftheadditionalaerosolamountthatisadded ≥1.4·10−5(m·sr)−1. In a last step, we have shown that the
+totheaerosolbackscattercoefficientsissupposedtoalwaysbe error’smagnitudeisdependentontheheightinwhichaerosol
+thesame.Forabsoluteerrors,thetrendofdeviationsissimilar. layers are present. The errors made by the incorrect usage of
+Althoughshownforonlyaspecificheight,thoseresultsapplyfor Klett’s inversion in the retrieval were bigger, the higher the
+allaltitudesbelowtheadditionallyintroducedaerosollayeras aerosollayerwas.Thiswastrueforbothrelativeandabsolute
+well. discrepancies.However,differencesweremarginal.Intheexem-
+In conclusion, for boundary layer lidars, the deviations plary scenario, the relative deviations differed by over 1% at
+resulting from the wrong implementation with the sign overallvaluesof≈11%.
+erroraremuchsmallerthaninthepreviouslyshownscenario. Overall, we have demonstrated that the error caused by
+Nevertheless, they are still substantial and cannot be assumed the incorrect implementation of Klett’s inversion with the
+tobemarginal.Buttheycaneasilyendupinmisleadingresults wrong sign therein is dependent on multiple factors: aerosol
+becausetheretrievedβ profilesarestillwithinarealisticband- concentration, altitude of aerosol occurrence, and the length
+P
+width, and the deviations are not obvious (such as negative of the integration pathway. Simple a posteriori corrections on
+values). miscalculated data are therefore hardly possible. The error
+magnitudeissubstantialforstratosphericlidarsbasedabovethe
+planetaryboundarylayer.Forboundarylayerlidars,theerrors
+4. SUMMARYANDCONCLUSION
+aresignificantlysmaller,potentiallypreventingtheirdetection.
+Weidentifiedandreviewedscientificliteratureforasignerror Inconclusion,theerrorscausedbythewrongsignintheKlett
+withintheoriginalpublicationoftheKlettinversionfrom1985 inversionalgorithmmaybeunnoticedinboundarylayerelastic
+[11],whichiswidelyusedinthefieldofelasticbackscatterlidars. aerosolretrievals,butstillaretoobigtobenegligible.Ourstudy
+Thecorrect(ed)versionofKlett’ssolutionhasbeenpresentedas contributestoabetterunderstandingoftheimplementationof
+Eq.(10),whichweadvisetouse.Withthenotationshownhere, theKlettalgorithmforelasticbackscatteraerosolretrievalsand
+Eq.(10)containsaslightimprovementtowardsKlett’soriginal proposesanimproved,sign-correctedsolutionasbestpractice.
+solution, as it does not contain any asymmetric logarithmic
+Funding. DeutscheForschungsgemeinschaft(406980118,VO2423/1-1);
+terms that cause problems with noisy data close to zero. For
+KarlsruheInstituteofTechnology.
+a constant lidar ratio of aerosols (β /α ), this equation was
+P P
+shown to be identical to the proposed solution by Fernald in Acknowledgment. First and foremost, we cordially thank Dr. James
+1984[9],whichiscorrect,butnotalwaysreferenced. Klettforhisimpartialendorsementaswellashisadditionalremarksduringthe
+reviewprocessofthispaper.Thisledtosignificantimprovements.Inaddition,
+Inasensitivityanalysis,threedifferingatmosphericcasestud-
+wehighlyappreciatethesupportfrombothProf.Dr.HansPeterSchmidand
+ieswerecarriedout,whichnarroweddowntheerror’sbehavior
+PDDr.RalfSussmann.Also,wethankDr.ThomasTrickl,whoconfirmed
+fordifferentlidarsetups.Generally,theincorrectusageofKlett’s
+andsupportedourinitialconsiderations,aswellasMatthiasPerfahlforhis
+inversion with the sign error therein was shown to lead to an technicalsupport.Also,wethanktheUniversityofWisconsinLidarGroup
+
+===== PAGE 7 =====
+ResearchArticle Vol.62,No.4/1February2023/AppliedOptics 867
+forsharingtheirdatafromtheCHEESEHEADcampaign.Finally,wethank 17.S.M.Khaykin,S.Godin-Beekmann,P.Keckhut,A.Hauchecorne,J.
+KarinaWinklerforherconscientiousproofreading. Jumelet,J.-P.Vernier,A.Bourassa,D.A.Degenstein,L.A.Rieger,
+C.Bingen,F.Vanhellemont,C.Robert,M.DeLand,andP.K.Bhartia,
+Disclosures. Theauthorsdeclarenoconflictsofinterest. “Variability and evolution of the midlatitude stratospheric \ hack\
+Dataavailability. Dataunderlyingtheresultspresentedinthispaperare break aerosol budget from 22 years of ground-based lidar and
+satelliteobservations,”Atmos.Chem.Phys.17,1829–1845(2017).
+notpubliclyavailableatthistimebutmaybeobtainedfromtheauthorsupon
+18.M. Kaestner, “Lidar inversion with variable backscatter/extinction
+reasonablerequest.
+ratios:comment,”Appl.Opt.25,833–835(1986).
+19.V.V.Zavyalov,C.Marchant,G.E.Bingham,T.D.Wilkerson,J.L.
+Hatfield,R.S.Martin,P.J.Silva,K.D.Moore,J.A.Swasey,D.J.
+REFERENCES
+Ahlstrom, and T. Jones, “Aglite lidar: calibration and retrievals of
+1.P. Forster, T. Storelvmo, K. Armour, W. Collins, J.-L. Dufresne, D. well characterized aerosols from agricultural operations using a
+Frame, D. Lunt, T. Mauritsen, M. Palmer, M. Watanabe, M. Wild, three-wavelength elastic lidar,” J. Appl. Remote Sens. 3, 033522
+andH.Zhang,“Theearth’senergybudget,climatefeedbacks,and (2009).
+climatesensitivity,”inClimateChange2021:ThePhysicalScience 20.V.A.Kovalev,SolutionsinLIDARProfilingoftheAtmosphere(Wiley,
+Basis. Contribution of Working Group I to the Sixth Assessment 2015).
+Report of the Intergovernmental Panel on Climate Change, V. 21.A. Ansmann and D. Müller, “Lidar and atmospheric aerosol par-
+Masson-Delmotte,P.Zhai,A.Pirani,S.Connors,C.Péan,S.Berger, ticles,” in Lidar: Range-Resolved Optical Remote Sensing of the
+N.Caud,Y.Chen,L.Goldfarb,M.Gomis,M.Huang,K.Leitzell,E. Atmosphere, C. Weitkamp, ed. (Springer New York, 2005), pp.
+Lonnoy,J.Matthews,T.Maycock,T.Waterfield,O.Yelekçi,R.Yu, 105–141.
+andB.Zhou,eds.(CambridgeUniversity,2021),pp.923–1054. 22.V. Matthias, V. Freudenthaler, A. Amodeo, et al., “Aerosol lidar
+2.S. Kremser, L. W. Thomason, M. von Hobe, et al., “Stratospheric intercomparison in the framework of the EARLINET project.
+aerosol - observations, processes, and impact on climate,” Rev. 1.Instruments,”Appl.Opt.43,961–976(2004).
+Geophys.54,278–335(2016). 23.M. Sicard, F. Molero, J. L. Guerrero-Rascado, R. Pedros, F. J.
+3.G.FioccoandG.Grams,“Observationsoftheaerosollayerat20km Exposito, C. Cordoba-Jabonero, J. M. Bolarin, A. Comeron, F.
+byopticalradar,”J.Atmos.Sci.21,323–324(1964). Rocadenbosch, M. Pujadas, L. Alados-Arboledas, J. A. Martinez-
+4.G.L.Schuster,M.Vaughan,D.MacDonnell,W.Su,D.Winker,O. Lozano, J. P. Diaz, M. Gil, A. Requena, F. Navas-Guzman, and J.
+Dubovik, T. Lapyonok, and C. Trepte, “Comparison of CALIPSO M. Moreno, “Aerosol lidar intercomparison in the framework of
+aerosol optical depth retrievals to AERONET measurements, and SPALINET—the Spanish lidar network: methodology and results,”
+a climatology for the lidar ratio of dust,” Atmos. Chem. Phys. 12, IEEETrans.Geosci.RemoteSens.47,3547–3559(2009).
+7431–7452(2012). 24.P.Chazette,“ThemonsoonaerosolextinctionpropertiesatGoadur-
+5.A. Comerón, C. Muñoz-Porcar, F. Rocadenbosch, A. Rodríguez- ingINDOEXasmeasuredwithlidar,”J.Geophys.Res.Atmos.108,
+Gómez,andM.Sicard,“Currentresearchinlidartechnologyused 4187(2003).
+fortheremotesensingofatmosphericaerosols,”Sensors17,1450 25.H. Eisele and T. Trickl, “Improvements of the aerosol algorithm in
+(2017). ozonelidardataprocessingbyuseofevolutionarystrategies,”Appl.
+6.R.T.H.CollisandP.B.Russell,“Lidarmeasurementofparticlesand Opt.44,2638–2651(2005).
+gasesbyelasticbackscatteringanddifferentialabsorption,”inLaser 26.A.Dörnbrack,T.Birner,A.Fix,H.Flentje,A.Meister,H.Schmid,E.
+Monitoring of the Atmosphere, E. D. Hinkley, ed. (Springer Berlin V.Browell,andM.J.Mahoney,“Evidenceforinertiagravitywaves
+Heidelberg,1976),pp.71–151. formingpolarstratosphericcloudsoverScandinavia,”J.Geophys.
+7.F.G.Fernald,B.M.Herman,andJ.A.Reagan,“Determinationof Res.Atmos.107,SOL30-1–SOL30-18(2002).
+aerosolheightdistributionsbylidar,”J.Appl.Meteorol.Climatol.11, 27.Q.Hu,P.Goloub,I.Veselovskii,J.-A.Bravo-Aranda,I.E.Popovici,
+482–489(1972). T.Podvin,M.Haeffelin,A.Lopatin,O.Dubovik,C.Pietras,X.Huang,
+8.J.D.Klett,“Stableanalyticalinversionsolutionforprocessinglidar B.Torres,andC.Chen,“Long-range-transportedCanadiansmoke
+returns,”Appl.Opt.20,211–220(1981). plumes in the lower stratosphere over northern France,” Atmos.
+9.F. G. Fernald, “Analysis of atmospheric lidar observations: some Chem.Phys.19,1173–1193(2019).
+comments,”Appl.Opt.23,652–653(1984). 28.D.Müller,F.Wagner,U.Wandinger,A.Ansmann,M.Wendisch,D.
+10.Y.Sasano,E.V.Browell,andS.Ismail,“Errorcausedbyusingacon- Althausen, and W. von Hoyningen-Huene, “Microphysical particle
+stantextinction/backscatteringratiointhelidarsolution,”Appl.Opt. parametersfromextinctionandbackscatterlidardatabyinversion
+24,3929–3932(1985). withregularization:experiment,”Appl.Opt.39,1879–1892(2000).
+11.J. D. Klett, “Lidar inversion with variable backscatter/extinction 29.E.Barbaro,J.V.-G.deArellano,H.G.Ouwersloot,J.S.Schröter,
+ratios,”Appl.Opt.24,1638–1643(1985). D.P.Donovan,andM.C.Krol,“Aerosolsintheconvectiveboundary
+12.E. E. Eloranta, “High spectral resolution lidar,” in Lidar: Range- layer:shortwaveradiationeffectsonthecoupledland-atmosphere
+ResolvedOpticalRemoteSensingoftheAtmosphere,C.Weitkamp, system,”J.Geophys.Res.Atmos.119,5845–5863(2014).
+ed.(SpringerNewYork,2005),pp.143–163. 30.B.I.Vasil’evandO.Mannoun,“IRdifferential-absorptionlidarsfor
+13.J. Reichardt, U. Wandinger, V. Klein, I. Mattis, B. Hilber, and R. ecological monitoring of the environment,” Quantum Electron. 36,
+Begbie, “RAMSES: German Meteorological Service autonomous 801(2006).
+Raman lidar for water vapor, temperature, aerosol, and cloud 31.D.Yuan,Z.Mao,P.Chen,Y.He,andD.Pan,“Remotesensingofsea-
+measurements,”Appl.Opt.51,8111–8131(2012). wateropticalpropertiesandthesubsurfacephytoplanktonlayerin
+14.D. Althausen, R. Engelmann, H. Baars, B. Heese, A. Ansmann, coastalwatersusinganairbornemultiwavelengthpolarimetricocean
+D. Müller, and M. Komppula, “Portable Raman lidar PollyXT lidar,”Opt.Express30,29564–29583(2022).
+for automated profiling of aerosol backscatter, extinction, and 32.L.Mei,P.Guan,Y.Yang,andZ.Kong,“Atmosphericextinctioncoef-
+depolarization,”J.Atmos.Ocean.Technol.26,2366–2378(2009). ficient retrieval and validation for the single-band Mie-scattering
+15.T.Trickl,H.Giehl,H.Jäger,andH.Vogelmann,“35yrofstratospheric Scheimpfluglidartechnique,”Opt.Express25,A628–A638(2017).
+aerosol measurements at Garmisch-Partenkirchen: from Fuego to 33.P.A.Lewandowski,W.E.Eichinger,H.Holder,J.Prueger,J.Wang,
+Eyjafjallajökull, and beyond,” Atmos. Chem. Phys. 13, 5205–5225 andL.I.Kleinman,“Verticaldistributionofaerosolsinthevicinityof
+(2013). MexicoCityduringMILAGRO-2006Campaign,”Atmos.Chem.Phys.
+16.G. Pappalardo, A. Amodeo, A. Apituley, A. Comeron, V. 10,1017–1030(2010).
+Freudenthaler, H. Linné, A. Ansmann, J. Bösenberg, G. D’Amico, 34.J. Ackermann, “The extinction-to-backscatter ratio of tropo-
+I.Mattis,L.Mona,U.Wandinger,V.Amiridis,L.Alados-Arboledas, spheric aerosol: a numerical study,” J. Atmos. Ocean. Technol.
+D.Nicolae,andM.Wiegner,“EARLINET:towardsanadvancedsus- 15,1043–1050(1998).
+tainable European aerosol lidar network,” Atmos. Meas. Tech. 7, 35.J.Kasparian,E.Frejafon,P.Rambaldi,J.Yu,B.Vezin,J.P.Wolf,P.
+2389–2409(2014). Ritter, and P. Viscardi, “Characterization of urban aerosols using
+
+===== PAGE 8 =====
+868 Vol.62,No.4/1February2023/AppliedOptics ResearchArticle
+SEM-microscopy,x-rayanalysisandlidarmeasurements,”Atmos. 44.R. Rossi, M. Gelfusa, A. Malizia, and P. Gaudio, “Adaptive quasi-
+Environ.32,2957–2967(1998). unsupervised detection of smoke plume by LiDAR,” Sensors 20,
+36.M.Adam,M.Pahlow,V.A.Kovalev,J.M.Ondov,M.B.Parlange,and 6602(2020).
+N.Nair,“Aerosolopticalcharacterizationbynephelometerandlidar: 45.H. Liu and Z. Wang, “An iterative calibrating method for airborne
+theBaltimoreSupersiteexperimentduringtheCanadianforestfire atmospheric detection lidar based on the Klett forward integral
+smokeintrusion,”J.Geophys.Res.Atmos.109,D16S02(2004). equation,”Opt.Commun.452,476–480(2019).
+37.P.Hegde,P.Pant,andY.BhavaniKumar,“Anintegratedanalysisof 46.P.KulkarniandS.Ramachandran,“Comparisonofaerosolextinction
+lidarobservationsinassociationwithopticalpropertiesofaerosols betweenlidarandSAGEIIoverGadanki,atropicalstationinIndia,”
+fromahighaltitudelocationincentralHimalayas,”Atmos.Sci.Lett. Ann.Geophys.33,351–362(2015).
+10,48–57(2009). 47.P.Kulkarni,S.Ramachandran,Y.BhavaniKumar,D.NarayanaRao,
+38.S.A.Young,“Analysisoflidarbackscatterprofilesinopticallythin andM.Krishnaiah,“Featuresofuppertroposphereandlowerstrato-
+clouds,”Appl.Opt.34,7019–7031(1995). sphereaerosolsobservedbylidaroverGadanki,atropicalIndiansta-
+39.E. Montilla-Rosero, A. Silva, C. Jimenez, R. Hernandez, and C. tion,”J.Geophys.Res.Atmos.113,D17207(2008).
+Saavedra,“Opticalcharacterizationoflowertroposphericaerosols 48.A. Jayaraman, S. Ramachandran, Y. B. Acharya, and B. H.
+bytheSouthernEastPacificLidarStation(Concepcion,Chile),”J. Subbaraya, “Pinatubo volcanic aerosol layer decay observed at
+AerosolSci.92,16–26(2016). Ahmedabad (23N), India, using neodymium:yttrium/aluminium/
+40.A.PantazisandA.Papayannis,“Lidaralgorithmsandtechniquein garnet backscatter lidar,” J. Geophys. Res. Atmos. 100,
+3Dscanningforplanetaryboundarylayerheightandsingle-beam- 23209–23214(1995).
+single-pointing wind speed retrieval,” Appl. Opt. 58, 2284–2293 49.ICAO(InternationalCivilAviationOrganization),ManualoftheICAO
+(2019). StandardAtmosphere:Extendedto80Kilometres(262500Feet),3rd
+41.A.Pantazis,A.Papayannis,andG.Georgousis,“Lidaralgorithmsin ed.(1993).
+3Dscanningforatmosphericlayeringandplanetaryboundarylayer 50.B.J.Butterworth,A.R.Desai,P.A.Townsend,etal.,“Connecting
+heightretrieval:comparisonwithothertechniques,”Appl.Opt.57, Land–Atmosphere Interactions to Surface Heterogeneity in
+8199–8211(2018). CHEESEHEAD19,” Bull. Am. Meteorol. Soc. 102(2), E421–E445
+42.A.Ananthavel,S.K.Mehta,S.Ali,T.V.R.Reddy,V.Annamalai,and (2021).
+D. N. Rao, “Micro pulse lidar measurements in coincidence with
+CALIPSO overpasses: Comparison of tropospheric aerosols over
+Kattankulathur(12.82oN,80.04oE),”Atmos.Pollut.Res.12,101082
+(2021).
+43.A.Ananthavel,S.K.Mehta,T.V.R.Reddy,S.Ali,andD.N.Rao,
+“Verticaldistributionsandcolumnarpropertiesoftheaerosolsdur-
+ing different seasons over Kattankulathur (12.82oN, 80.04oE): a
+semi-urban tropical coastal station,” Atmos. Environ. 256, 118457
+(2021).

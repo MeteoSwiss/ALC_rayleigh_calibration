@@ -1,0 +1,100 @@
+
+===== PAGE 1 =====
+Is your aerosol backscatter retrieval afflicted by a sign error?
+Johannes Speidel (johannes.speidel@kit.edu), Hannes Vogelmann
+www.kit.edu
+KIT – The Research University in the Helmholtz Association
+
+===== PAGE 2 =====
+What is it all about?
+Elastic aerosol backscatter signals:
+ Klett inversion (Klett 1985)
+Same inversion algorithm is
+occasionally called
+Klett-Fernald-Sasano algorithm
+(Fernald 1984, Sasano et al. 1985).
+Klett 1985 sometimes leads to
+negative values of aerosol
+backscatter coefficients.
+imk-ifu.kit.edu
+2 09.06.2023 Johannes Speidel (johannes.speidel@kit.edu), Hannes Vogelmann
+
+===== PAGE 3 =====
+The corrected Klett 1985 inversion algorithm
+From the original Klett paper (1985) this
+error can be easily adopted. The sign
+error is hidden in the substitute of Klett’s
+final equation (22) which by itself is
+correct.
+First shown by M. Kaestner (1986),
+but is rarely known
+Literature review shows
+ongoing error propagation
+Klett endorsed publication
+of this study
+imk-ifu.kit.edu
+3 09.06.2023 Johannes Speidel (johannes.speidel@kit.edu), Hannes Vogelmann
+
+===== PAGE 4 =====
+The corrected Klett 1985 inversion algorithm
+and
+with
+Here, the original formula
++ -
+leads to instead of
+imk-ifu.kit.edu
+4 09.06.2023 Johannes Speidel (johannes.speidel@kit.edu), Hannes Vogelmann
+
+===== PAGE 5 =====
+The corrected Klett 1985 inversion algorithm
+and
+with
+This formulation of the Klett inversion shows a better numerical stability for a
+weak signal at large distances because its free of the logarithm in the signal
+variable from the original formula.
+Extended sensitivity analysis by Speidel and Vogelmann (2023)
+imk-ifu.kit.edu
+5 09.06.2023 Johannes Speidel (johannes.speidel@kit.edu), Hannes Vogelmann
+
+===== PAGE 6 =====
+Sensitivity study – what are the impacts?
+Stratospheric data from Mt. Zugspitze Tropospheric data from PF, Wisconsin
+https://www.motor-talk.de/news/so-werden-alte-lampen-wieder-heller-t6472031.html
+Corrected values > Uncorrected values
+imk-ifu.kit.edu
+6 09.06.2023 Johannes Speidel (johannes.speidel@kit.edu), Hannes Vogelmann
+
+===== PAGE 7 =====
+Sensitivity study – what are the impacts?
+Tropospheric data from PF, Wisconsin
+hhttttppss::////wwwwww..mmoottoorr--ttaallkk..ddee//nneewwss//ssoo--wweerrddeenn--aallttee--llaammppeenn--wwiieeddeerr--hheelllleerr--tt66447722003311..hhttmmll
+Lower aerosol concentrations
+Higher relative errors
+Longer integration pathways
+imk-ifu.kit.edu
+7 09.06.2023 Johannes Speidel (johannes.speidel@kit.edu), Hannes Vogelmann
+
+===== PAGE 8 =====
+Updated inversion results
+imk-ifu.kit.edu
+8 09.06.2023 Johannes Speidel (johannes.speidel@kit.edu), Hannes Vogelmann
+
+===== PAGE 9 =====
+Information in a nutshell
+The original sign error from 1985 leads to:
+Large errors for low aerosol loads and/or long integration pathways.
+Smaller but substantial errors, especially in boundary layer conditions
+(plenty of aerosol, short integration pathways).
+Complex error behavior, preventing a-posteriori corrections.
+Fernald 1984 uses a slightly different notation, but with correct signs.
+imk-ifu.kit.edu
+9 09.06.2023 Johannes Speidel (johannes.speidel@kit.edu), Hannes Vogelmann
+
+===== PAGE 10 =====
+Conclusion
+Data analysis/intercomparisons on a transregional scale
+require identical inversion algorithms!
+Proper documentation of the used formula avoids further error propagation.
+For more details:
+imk-ifu.kit.edu
+10 09.06.2023 Johannes Speidel (johannes.speidel@kit.edu), Hannes Vogelmann

@@ -385,8 +385,15 @@ def plot_rayleigh_window_search(
     best_half_m: float,
     title: str = "",
     save_path: Optional[Path] = None,
+    valid_window: Optional[NDArray[np.bool_]] = None,
 ) -> "Figure":
-    """Four-panel diagnostic of the Rayleigh window grid search."""
+    """Four-panel diagnostic of the Rayleigh window grid search.
+
+    The optimum is the highest-R² window among those that pass the molecular
+    validity gates (``valid_window``); panel 3 shows that per-centre best R² and
+    panel 4 outlines the eligible region. (The old criterion, min Σ|intercept|,
+    was degenerate at high altitude — see find_optimal_molecular_window.)
+    """
     plt = _get_plt()
 
     fig, axes = plt.subplots(4, 1, figsize=(13, 15), sharex=True)
@@ -410,29 +417,53 @@ def plot_rayleigh_window_search(
     ax2.set_title("Fit Intercept (absolute)")
     ax2.grid(True, alpha=0.15)
 
-    # Panel 3 -- sum |b| vs centre
+    # Panel 3 -- best R² per centre among ELIGIBLE windows (the new selection score).
+    # The old criterion (Σ|b|) is shown faintly for reference: it is degenerate at
+    # high altitude — minimised where the signal -> 0 (noise), not where the fit is good.
     ax3 = axes[2]
-    ax3.plot(r_km, sum_abs_intercept, "k-", lw=0.8)
+    if valid_window is not None:
+        r2_valid = np.where(valid_window, r_squared, np.nan)
+        has_valid = np.any(valid_window, axis=1)
+        best_r2_centre = np.full(r2_valid.shape[0], np.nan)
+        if np.any(has_valid):
+            best_r2_centre[has_valid] = np.nanmax(r2_valid[has_valid], axis=1)
+        ax3.plot(r_km, best_r2_centre, "k-", lw=1.0, label="max R² (eligible)")
+        ax3.set_ylabel(r"max R$^2$ (eligible)")
+        ax3.set_ylim(0, 1)
+        ax3.set_title("Best R² per centre among eligible windows (higher is better)")
+        ax3b = ax3.twinx()
+        ax3b.plot(r_km, sum_abs_intercept, color="0.6", lw=0.8, ls=":")
+        ax3b.set_ylabel(r"$\Sigma$|b| (old, degenerate)", color="0.6")
+        ax3b.tick_params(axis="y", labelcolor="0.6")
+    else:
+        ax3.plot(r_km, sum_abs_intercept, "k-", lw=0.8)
+        ax3.set_ylabel(r"$\Sigma$|b|")
+        ax3.set_title("Sum of |Intercepts| (lower is better)")
     ax3.axvline(best_range_m * 1e-3, color="#d62728", ls="--", lw=1.0,
                 label=f"Best centre: {best_range_m / 1e3:.2f} km")
-    ax3.set_ylabel(r"$\Sigma$|b|")
-    ax3.set_title("Sum of |Intercepts| (lower is better)")
     ax3.legend(fontsize=9)
     ax3.grid(True, alpha=0.25)
 
-    # Panel 4 -- R²
+    # Panel 4 -- R² with the eligible (valid-window) region outlined
     ax4 = axes[3]
     im4 = ax4.pcolormesh(r_km, h_km, r_squared.T, shading="auto",
                          vmin=0, vmax=1, cmap="YlGnBu")
+    if valid_window is not None and np.any(valid_window):
+        # Dim the ineligible windows and outline the eligible region; the optimum must
+        # fall inside it (high-R², above aerosol) — the fix made visible.
+        ax4.contourf(r_km, h_km, (~valid_window).T.astype(float), levels=[0.5, 1.5],
+                     colors="white", alpha=0.55, zorder=2)
+        ax4.contour(r_km, h_km, valid_window.T.astype(float), levels=[0.5],
+                    colors="#2ca02c", linewidths=1.8, zorder=3)
     ax4.scatter(
         [best_range_m * 1e-3], [best_half_m * 1e-3],
-        color="#d62728", s=120, marker="x", linewidths=2.5, zorder=5,
-        label=f"Optimum",
+        color="#d62728", s=140, marker="x", linewidths=2.5, zorder=5,
+        label="Optimum (max R², eligible)",
     )
     plt.colorbar(im4, ax=ax4, label=r"R$^2$", pad=0.02)
     ax4.set_xlabel("Centre range (km)")
     ax4.set_ylabel("Half-length (km)")
-    ax4.set_title("Coefficient of Determination")
+    ax4.set_title("Coefficient of Determination (green = eligible region)")
     ax4.legend(fontsize=9, loc="upper left")
     ax4.grid(True, alpha=0.15)
 
@@ -588,5 +619,188 @@ def plot_sensitivity_analysis(
     fig.suptitle(title or "Sensitivity Analysis", fontsize=13)
     fig.tight_layout()
 
+    _save_and_close(fig, save_path)
+    return fig
+
+
+def plot_rayleigh_diagnostics_compact(
+    range_alc: NDArray[np.float64],
+    altitude: float,
+    rcs_mean: NDArray[np.float64],
+    signal_normalized: NDArray[np.float64],
+    p_mol: NDArray[np.float64],
+    beta_att_mol: NDArray[np.float64],
+    fit_altitude_start: float,
+    fit_altitude_end: float,
+    range_bin_m: NDArray[np.float64],
+    half_length_m: NDArray[np.float64],
+    slopes: NDArray[np.float64],
+    intercepts: NDArray[np.float64],
+    r_squared: NDArray[np.float64],
+    best_range_m: float,
+    best_half_m: float,
+    lr_values: NDArray[np.float64],
+    alt_shifts: NDArray[np.float64],
+    cl_matrix: NDArray[np.float64],
+    cl_median: float,
+    cl_uncertainty: float,
+    hours_since_start: NDArray[np.float64],
+    rcs: NDArray[np.float64],
+    used_profile_indices: Optional[NDArray[np.int64]] = None,
+    title: str = "",
+    save_path: Optional[Path] = None,
+) -> "Figure":
+    """Single 4x4 Rayleigh dashboard with molecular, window, sensitivity and RCS panels."""
+    plt = _get_plt()
+
+    fig = plt.figure(figsize=(20, 16))
+    gs = fig.add_gridspec(4, 5, hspace=0.4, wspace=0.35)
+
+    # Rows 1-3 left: molecular fit three panels (stacked)
+    ax_m1 = fig.add_subplot(gs[0:2, 0])
+    ax_m2 = fig.add_subplot(gs[0:2, 1])
+    ax_m3 = fig.add_subplot(gs[0:2, 2])
+
+    # Rows 1-3 right: window-search three panels (stacked)
+    ax_w1 = fig.add_subplot(gs[0, 3:5])
+    ax_w2 = fig.add_subplot(gs[1, 3:5])
+    ax_w3 = fig.add_subplot(gs[2, 3:5])
+    
+      # Last row left 2 cols: RCS pcolor with non-used profiles faded
+    ax_r = fig.add_subplot(gs[3, 0:2])
+
+    # Last row right 2 cols: sensitivity three subpanels
+    ax_s1 = fig.add_subplot(3,3)
+    ax_s2 = fig.add_subplot(3,4)
+    ax_s3 = fig.add_subplot(3,5)
+
+  
+
+    # --- Molecular panels ---
+    z_km = (range_alc + altitude) * 1e-3
+    z_start = fit_altitude_start * 1e-3
+    z_end = fit_altitude_end * 1e-3
+    z_max = min(z_end + 3.0, float(z_km.max()))
+    scale = 1e6
+
+    ax_m1.plot(rcs_mean, z_km, color="#1f77b4", lw=0.7)
+    ax_m1.axhspan(z_start, z_end, color="gold", alpha=0.15)
+    ax_m1.set_ylabel("Altitude (km ASL)")
+    ax_m1.set_xlabel("Raw RCS")
+    ax_m1.set_ylim(0, z_max)
+    ax_m1.set_title("Molecular: RCS")
+    ax_m1.grid(True, alpha=0.25)
+
+    ax_m2.plot(signal_normalized * scale, z_km, color="#1f77b4", lw=0.7, label="normalised")
+    ax_m2.plot(p_mol * scale, z_km, color="#d62728", lw=0.8, ls="--", label="molecular")
+    ax_m2.axhspan(z_start, z_end, color="gold", alpha=0.15)
+    ax_m2.set_xscale("log")
+    ax_m2.set_ylabel("Altitude (km ASL)")
+    ax_m2.set_xlabel(r"Signal (Mm$^{-1}$)")
+    ax_m2.set_ylim(0, z_max)
+    ax_m2.set_title("Molecular: Signal vs Theory")
+    ax_m2.grid(True, which="both", alpha=0.25)
+    ax_m2.legend(fontsize=8)
+
+    beta_att = signal_normalized * (range_alc ** 2)
+    ax_m3.plot(beta_att * scale, z_km, color="#1f77b4", lw=0.7, label=r"retrieved $\beta_{att}$")
+    ax_m3.plot(beta_att_mol * scale, z_km, color="#d62728", lw=0.8, ls="--", label=r"molecular $\beta_{att}$")
+    ax_m3.axhspan(z_start, z_end, color="gold", alpha=0.15)
+    ax_m3.set_ylabel("Altitude (km ASL)")
+    ax_m3.set_xlabel(r"$\beta_{att}$ (Mm$^{-1}$ sr$^{-1}$)")
+    ax_m3.set_ylim(0, z_max)
+    ax_m3.set_title("Molecular: Attenuated Backscatter")
+    ax_m3.grid(True, alpha=0.25)
+    ax_m3.legend(fontsize=8)
+
+    # --- Window-search panels ---
+    r_km = range_bin_m * 1e-3
+    h_km = half_length_m * 1e-3
+    im_w1 = ax_w1.pcolormesh(r_km, h_km, slopes.T, shading="auto", cmap="RdBu_r")
+    plt.colorbar(im_w1, ax=ax_w1, pad=0.01).set_label("Slope")
+    ax_w1.scatter([best_range_m * 1e-3], [best_half_m * 1e-3], color="#d62728", marker="x", s=80)
+    ax_w1.set_ylabel("Half-length (km)")
+    ax_w1.set_title("Window: Slope")
+
+    im_w2 = ax_w2.pcolormesh(r_km, h_km, np.abs(intercepts.T), shading="auto", cmap="magma")
+    plt.colorbar(im_w2, ax=ax_w2, pad=0.01).set_label("|Intercept|")
+    ax_w2.scatter([best_range_m * 1e-3], [best_half_m * 1e-3], color="#d62728", marker="x", s=80)
+    ax_w2.set_ylabel("Half-length (km)")
+    ax_w2.set_title("Window: Intercept")
+
+    im_w3 = ax_w3.pcolormesh(r_km, h_km, r_squared.T, shading="auto", vmin=0, vmax=1, cmap="YlGnBu")
+    plt.colorbar(im_w3, ax=ax_w3, pad=0.01).set_label(r"R$^2$")
+    ax_w3.scatter([best_range_m * 1e-3], [best_half_m * 1e-3], color="#d62728", marker="x", s=80)
+    ax_w3.set_ylabel("Half-length (km)")
+    ax_w3.set_xlabel("Centre range (km)")
+    ax_w3.set_title("Window: R²")
+
+    # --- Sensitivity panels ---
+    rel_dev = (cl_matrix - cl_median) / cl_median * 100
+    vabs = max(float(np.nanmax(np.abs(rel_dev))), 1.0)
+    im_s1 = ax_s1.imshow(rel_dev, aspect="auto", origin="lower", cmap="RdBu_r", vmin=-vabs, vmax=vabs)
+    plt.colorbar(im_s1, ax=ax_s1, pad=0.01).set_label("Deviation (%)")
+    ax_s1.set_xticks(range(len(alt_shifts)))
+    ax_s1.set_xticklabels([f"{s:+.0f}" for s in alt_shifts], fontsize=8)
+    ax_s1.set_yticks(range(len(lr_values)))
+    ax_s1.set_yticklabels([f"{lr:.0f}" for lr in lr_values], fontsize=8)
+    ax_s1.set_xlabel("Alt shift (m)")
+    ax_s1.set_ylabel("LR (sr)")
+    ax_s1.set_title("Sensitivity Grid")
+
+    vals = cl_matrix[np.isfinite(cl_matrix)].ravel()
+    if vals.size:
+        ax_s2.boxplot(vals, widths=0.5)
+        ax_s2.axhline(cl_median, color="#d62728", lw=1.0)
+        ax_s2.axhspan(cl_median - cl_uncertainty, cl_median + cl_uncertainty, color="#d62728", alpha=0.12)
+    ax_s2.set_xticks([])
+    ax_s2.set_title("All combos")
+    ax_s2.set_ylabel("Lidar constant")
+    ax_s2.grid(True, axis="y", alpha=0.25)
+
+    if vals.size:
+        jitter = np.linspace(-0.08, 0.08, vals.size)
+        ax_s3.scatter(1 + jitter, vals, s=18, alpha=0.5)
+        ax_s3.axhline(cl_median, color="#d62728", lw=1.0)
+        ax_s3.axhspan(cl_median - cl_uncertainty, cl_median + cl_uncertainty, color="#d62728", alpha=0.12)
+    ax_s3.set_xlim(0.7, 1.3)
+    ax_s3.set_xticks([])
+    ax_s3.set_title("Spread")
+    ax_s3.set_ylabel("Lidar constant")
+    ax_s3.grid(True, axis="y", alpha=0.25)
+
+    # --- RCS panel with non-used profiles faded (instead of removed) ---
+    rcs_plot = np.asarray(rcs, dtype=float).copy().T
+    rcs_plot[rcs_plot <= 0] = np.nan
+    log_rcs = np.log10(rcs_plot)
+    valid = log_rcs[np.isfinite(log_rcs)]
+    if valid.size:
+        vmin, vmax = float(np.percentile(valid, 5)), float(np.percentile(valid, 95))
+    else:
+        vmin, vmax = 0.0, 6.0
+
+    hm = ax_r.pcolormesh(hours_since_start, range_alc * 1e-3, log_rcs, shading="auto", cmap="viridis", vmin=vmin, vmax=vmax)
+    plt.colorbar(hm, ax=ax_r, pad=0.01).set_label(r"log$_{10}$(RCS)")
+
+    if used_profile_indices is not None and used_profile_indices.size > 0:
+        used = np.zeros(hours_since_start.size, dtype=bool)
+        used[np.asarray(used_profile_indices, dtype=int)] = True
+        not_used = ~used
+        for i in np.where(not_used)[0]:
+            if i < hours_since_start.size - 1:
+                x0 = hours_since_start[i]
+                x1 = hours_since_start[i + 1]
+            else:
+                x0 = hours_since_start[i]
+                x1 = x0 + np.median(np.diff(hours_since_start)) if hours_since_start.size > 1 else x0 + 1
+            ax_r.axvspan(x0, x1, color="white", alpha=0.45, linewidth=0)
+
+    ax_r.set_xlabel("Hours since start")
+    ax_r.set_ylabel("Range (km)")
+    ax_r.set_title("RCS (non-used profiles faded)")
+    ax_r.grid(True, alpha=0.2)
+
+    fig.suptitle(title or "Rayleigh Diagnostics", fontsize=14)
+    fig.tight_layout()
     _save_and_close(fig, save_path)
     return fig

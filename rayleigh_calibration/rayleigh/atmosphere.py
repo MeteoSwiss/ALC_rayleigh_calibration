@@ -17,6 +17,14 @@ from numpy.typing import NDArray
 from scipy.interpolate import interp1d
 
 
+# US Standard Atmosphere 1976 table shipped as package data (rayleigh_calibration/data/).
+# Resolved relative to the installed package so it works regardless of the current
+# working directory (atmosphere.py lives in rayleigh_calibration/rayleigh/).
+DEFAULT_STANDARD_ATMOSPHERE = (
+    Path(__file__).resolve().parent.parent / "data" / "standard_atmosphere_US_1976_50km.csv"
+)
+
+
 # Physical constants
 STANDARD_TEMPERATURE = 288.15  # K (15°C)
 STANDARD_PRESSURE = 101325.0   # Pa
@@ -167,7 +175,7 @@ def calculate_molecular_properties(
 
 
 def load_standard_atmosphere(
-    filepath: Path,
+    filepath: Optional[Path],
     altitude_grid: NDArray[np.float64],
 ) -> AtmosphericProfile:
     """
@@ -185,6 +193,9 @@ def load_standard_atmosphere(
     AtmosphericProfile
         Temperature and pressure interpolated to altitude grid.
     """
+    if filepath is None:
+        filepath = DEFAULT_STANDARD_ATMOSPHERE
+
     data = np.genfromtxt(filepath, delimiter=',', names=True)
 
     # Ensure altitude_grid is a regular numpy array (not masked)
@@ -278,6 +289,80 @@ def load_ecmwf_profile(
     )
 
 
+def load_cams_atmosphere(
+    cams_file: Path,
+    latitude: float,
+    longitude: float,
+    t_start: np.datetime64,
+    t_end: np.datetime64,
+    altitude_grid: NDArray[np.float64],
+) -> Optional[AtmosphericProfile]:
+    """
+    Build a temperature/pressure profile from CAMS model-level data for the
+    molecular reference (beta_mol proportional to P/T), interpolated to the
+    instrument altitude grid.
+
+    Uses the same CAMS read + ECMWF-L137 hydrostatic integration as the
+    water-vapor correction (water_vapor.cams_temperature_pressure_profile), so the
+    molecular profile is consistent with the WV correction's air density. The
+    alternative is load_standard_atmosphere (US Standard 1976); at a mid-latitude
+    site the two differ by <1 % in molecular density.
+
+    Parameters
+    ----------
+    cams_file : Path
+        Monthly CAMS file (CAMS_Beta_YYYYMM.nc), same archive as the WV correction.
+    latitude, longitude : float
+        Station coordinates (nearest CAMS grid point is used).
+    t_start, t_end : np.datetime64
+        Night window; CAMS T/p is averaged over it.
+    altitude_grid : ndarray
+        Target altitude grid in meters ASL.
+
+    Returns
+    -------
+    AtmosphericProfile or None
+        Temperature/pressure on altitude_grid, or None if CAMS is unavailable.
+    """
+    from .water_vapor import cams_temperature_pressure_profile
+
+    if np.ma.isMaskedArray(altitude_grid):
+        if np.any(np.ma.getmaskarray(altitude_grid)):
+            raise ValueError("Cannot interpolate with masked altitude values")
+        altitude_grid = altitude_grid.data
+
+    prof = cams_temperature_pressure_profile(
+        cams_file, latitude, longitude, t_start, t_end
+    )
+    if prof is None:
+        return None
+    h_cams, t_cams, p_cams = prof
+
+    # Interpolate the CAMS levels to the instrument grid. Linear interpolation
+    # matches load_standard_atmosphere / load_ecmwf_profile; CAMS levels are dense
+    # enough in the troposphere (the 2-6 km fit window) that the choice is
+    # negligible. Below the lowest CAMS level the nearest valid value is held; the
+    # molecular fit window never reaches the top, so NaN above is harmless.
+    temperature = interp1d(
+        h_cams, t_cams, bounds_error=False, fill_value=np.nan
+    )(altitude_grid)
+    pressure = interp1d(
+        h_cams, p_cams, bounds_error=False, fill_value=np.nan
+    )(altitude_grid)
+
+    valid_idx = np.where(~np.isnan(temperature))[0]
+    if len(valid_idx) > 0:
+        first_valid = valid_idx[0]
+        temperature[:first_valid] = temperature[first_valid]
+        pressure[:first_valid] = pressure[first_valid]
+
+    return AtmosphericProfile(
+        temperature=temperature,
+        pressure=pressure,
+        altitude=altitude_grid,
+    )
+
+
 def klett_inversion(
     beta_att: NDArray[np.float64],
     beta_mol: NDArray[np.float64],
@@ -287,6 +372,7 @@ def klett_inversion(
     reference_value: float,
     i_start: int,
     i_end: int,
+    sign_error_v10: bool = False,
 ) -> Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
     """
     Perform Klett inversion to retrieve aerosol backscatter and extinction.
@@ -338,29 +424,46 @@ def klett_inversion(
     # qt[R] = sum(beta_mol[R:ref] * lr_diff * dz) = cum[ref] - cum[R]
     R_idx = np.arange(i_start, i_end)
     qt = cum[reference_index] - cum[R_idx]     # (n_R,)
-    # Corrected Klett-Fernald sign: the exponent is +2 * integral(beta_mol * dS),
-    # not -2. The original Klett (1985) publication carries a sign error in the
-    # signal-variable substitute; the negative sign drives aerosol backscatter
-    # negative. See Speidel & Vogelmann, Appl. Opt. 62, 861 (2023), Eq. (10).
-    numerator = beta_att[R_idx] * np.exp(2 * qt)  # (n_R,)
+    if sign_error_v10:
+        # --- E-PROF v1.0 (pre-a4e7140) sign-error path -----------------------
+        # Reproduces the ORIGINAL bug exactly: the wrong -2 exponent (which drives
+        # aerosol backscatter negative) and a reverse-cumsum denominator truncated
+        # above the reference index. Kept ONLY to regenerate the historical v1.0
+        # baseline; never used in production (default sign_error_v10=False).
+        numerator = beta_att[R_idx] * np.exp(-2 * qt)
+        T_factor_all = -2.0 * (cum[reference_index] - cum[i_start:reference_index])
+        weighted_all = beta_att[i_start:reference_index] * np.exp(T_factor_all) * lidar_ratio_aerosol * dz
+        rev_cumsum = np.cumsum(weighted_all[::-1])[::-1]
+        denom_sum = np.empty(len(R_idx))
+        offset = R_idx - i_start
+        valid_off = offset < len(rev_cumsum)
+        denom_sum[valid_off] = rev_cumsum[offset[valid_off]]
+        denom_sum[~valid_off] = 0.0
+        denominator = reference_value + 2 * denom_sum
+    else:
+        # Corrected Klett-Fernald sign: the exponent is +2 * integral(beta_mol * dS),
+        # not -2. The original Klett (1985) publication carries a sign error in the
+        # signal-variable substitute; the negative sign drives aerosol backscatter
+        # negative. See Speidel & Vogelmann, Appl. Opt. 62, 861 (2023), Eq. (10).
+        numerator = beta_att[R_idx] * np.exp(2 * qt)  # (n_R,)
 
-    # T_factor[r] = +2 * (cum[ref] - cum[r]) over the full inversion range
-    # (same sign correction as above).
-    T_factor_all = 2.0 * (cum[reference_index] - cum[R_idx])
-    weighted_all = beta_att[R_idx] * np.exp(T_factor_all) * lidar_ratio_aerosol * dz
+        # T_factor[r] = +2 * (cum[ref] - cum[r]) over the full inversion range
+        # (same sign correction as above).
+        T_factor_all = 2.0 * (cum[reference_index] - cum[R_idx])
+        weighted_all = beta_att[R_idx] * np.exp(T_factor_all) * lidar_ratio_aerosol * dz
 
-    # Denominator integral 2 * \int_R^Rc weighted dr, evaluated for every R in
-    # [i_start, i_end). With a forward cumulative sum, the signed integral from
-    # R to the reference index is cum_den[ref] - cum_den[R]: positive below the
-    # reference and negative above it. This evaluates the full Klett denominator
-    # over the whole window instead of truncating it to the constant of
-    # integration above reference_idx (the truncation artificially inflated C_L
-    # in the upper part of the window; see report sec. 2.2).
-    cum_den = np.zeros(n_bins + 1)            # cum_den[k] = sum(weighted bins [i_start, k))
-    np.cumsum(weighted_all, out=cum_den[i_start + 1:i_end + 1])
-    denom_int = cum_den[reference_index] - cum_den[R_idx]
+        # Denominator integral 2 * \int_R^Rc weighted dr, evaluated for every R in
+        # [i_start, i_end). With a forward cumulative sum, the signed integral from
+        # R to the reference index is cum_den[ref] - cum_den[R]: positive below the
+        # reference and negative above it. This evaluates the full Klett denominator
+        # over the whole window instead of truncating it to the constant of
+        # integration above reference_idx (the truncation artificially inflated C_L
+        # in the upper part of the window; see report sec. 2.2).
+        cum_den = np.zeros(n_bins + 1)            # cum_den[k] = sum(weighted bins [i_start, k))
+        np.cumsum(weighted_all, out=cum_den[i_start + 1:i_end + 1])
+        denom_int = cum_den[reference_index] - cum_den[R_idx]
 
-    denominator = reference_value + 2 * denom_int
+        denominator = reference_value + 2 * denom_int
 
     beta_aer[R_idx] = numerator / denominator - beta_mol[R_idx]
     beta_tot[R_idx] = beta_aer[R_idx] + beta_mol[R_idx]

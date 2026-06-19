@@ -9,7 +9,7 @@ Usage:
     python run_targeted_rayleigh.py [--workers N] KEY [KEY ...]
         KEY = "<WMO>_<identifier>"   e.g.  0-20000-0-06610_A
 
-Writes D:/E-PROFILE_calibration_rayleigh/fullcal_all/<KEY>/<KEY>_cl.csv in the
+Writes C:/DATA/Projects/202606_E-PROFILE_calibration/E-PROFILE_calibration_rayleigh/fullcal_all/<KEY>/<KEY>_cl.csv in the
 same format as run_all_l2monthly.py. Resumable: a KEY whose _cl.csv already
 exists is skipped.
 """
@@ -31,7 +31,7 @@ def main():
     ap.add_argument("keys", nargs="+", help="instrument keys '<WMO>_<identifier>'")
     args = ap.parse_args()
 
-    manifest = json.load(open("stations_l2_manifest.json"))
+    manifest = json.load(open("C:/DATA/Projects/202606_E-PROFILE_calibration/stations_l2_manifest.json"))
     by_key = {f"{s['wmo']}_{s['identifier']}": s for s in manifest}
 
     R.OUT.mkdir(parents=True, exist_ok=True)

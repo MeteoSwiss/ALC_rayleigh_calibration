@@ -12,7 +12,7 @@ from rayleigh_calibration.config import (
     CalibrationOptions,
     CalibrationResult,
 )
-from rayleigh_calibration.atmosphere import (
+from rayleigh_calibration.rayleigh.atmosphere import (
     calculate_refractive_index,
     calculate_rayleigh_phase_function,
     calculate_molecular_properties,

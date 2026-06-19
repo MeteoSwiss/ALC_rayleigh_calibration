@@ -15,7 +15,7 @@ import time
 import numpy as np
 from netCDF4 import Dataset
 
-from .config import InstrumentInfo, CalibrationResult
+from ..config import InstrumentInfo, CalibrationResult
 
 
 def create_output_directory(output_path: Path) -> None:

@@ -36,6 +36,10 @@ class DataLevel(str, Enum):
     L1 = "L1"
     L2_DAILY = "L2_daily"
     L2_MONTHLY = "L2_monthly"
+    # Native manufacturer/Cloudnet RAW NetCDF (CHM15k 'beta_raw' daily files; CL61 'beta_att'
+    # Cloudnet 5-min files). Layout: <root>/<WMO>/YYYYMMDD/*.nc (one daily file or many 5-min
+    # files per day-folder; the reader concatenates them). See load_raw_data.
+    RAW = "RAW"
 
 
 class InstrumentType(str, Enum):
@@ -156,14 +160,32 @@ class CalibrationOptions:
     # matching archive. L2 levels reconstruct rcs from attenuated backscatter.
     data_level: DataLevel = DataLevel.L1
 
-    # Time selection (hours UTC)
-    hour_min: int = 20  # Start hour on previous day
-    hour_max: int = 4   # End hour on current day
+    # Time selection (solar time)
+    hour_min: int = 20  # Start hour on previous day (clock fallback)
+    hour_max: int = 4   # End hour on current day (clock fallback)
     min_time_range: int = 3  # Minimum hours of clear data required
+    # Darkness-adaptive night selection (solar zenith angle). When enabled, the
+    # nighttime averaging window is the real dark period (SZA > threshold) rather
+    # than the fixed solar-clock window -> more dark hours in winter, no twilight
+    # in summer, latitude-adaptive. Falls back to hour_min/hour_max if disabled
+    # or station coordinates are missing.
+    use_sza_night: bool = True
+    sza_night_threshold: float = 100.0  # deg; 100 = sun ~10 deg below horizon (nautical)
+    # Time collapse before the molecular fit: "mean" (efficient for the weak-signal
+    # photon noise at 3-6 km) or "median" (robust but ~1.5x noisier there).
+    time_aggregation: str = "mean"
+    # Optional pre-averaging before the Rayleigh fit. When set, the calibration reads
+    # the full nightly data, then block-averages it in time and range before any
+    # filtering/fitting. Disabled by default; the Lindenberg runner enables 60 s / 30 m.
+    average_time_s: Optional[float] = None
+    average_range_m: Optional[float] = None
+    # Drop residual-aerosol/cloud/noise outlier PROFILES before the mean (MAD-based on
+    # the molecular-band signal) -> robust without the median's noise penalty.
+    screen_profile_outliers: bool = True
+    profile_outlier_nmad: float = 4.0
 
     # Plotting flags
     plot_main: bool = False
-    plot_all: bool = False
 
     # Cloud detection
     z_low_cloud: float = 4000.0  # Maximum altitude for low cloud detection (m)
@@ -182,6 +204,15 @@ class CalibrationOptions:
     # Atmosphere model
     use_std_atm: bool = True
 
+    # Source of the molecular reference profile (beta_mol proportional to P/T):
+    #   'standard' (default) — US Standard 1976 atmosphere (matches the MATLAB
+    #                          reference, which always uses the standard atmosphere);
+    #   'cams'              — actual CAMS T/p at the site (needs the monthly CAMS
+    #                          file, same archive as the WV correction).
+    # At mid-latitudes the two differ by <1 % in molecular density. When set to
+    # 'cams' this takes precedence over use_std_atm.
+    molecular_source: str = "standard"
+
     # Water-vapor correction (910 nm instruments only). Requires monthly CAMS +
     # the HITRAN cross-section LUT. A 910 nm night without a matching CAMS month is
     # skipped (never calibrated without a valid WV correction).
@@ -194,6 +225,27 @@ class CalibrationOptions:
     range_start_m: float = 2000.0
     range_end_m: float = 6000.0
     fit_range_increment_bins: int = 8
+    # Molecular-window validity gates (fix the high-altitude low-R² selection; see
+    # rayleigh_fit.find_optimal_molecular_window). A window is eligible only if it
+    # starts above the boundary-layer aerosol (min_window_start_m), has a genuine
+    # linear signal~molecular relation (R² >= min_window_r2, cf. MATLAB min_r2_rfit),
+    # and its slope is consistent with the pointwise median ratio
+    # (<= max_window_rel_error %, rejecting aerosol curvature). The best window is the
+    # highest-R² eligible one; if none qualifies the night is flagged non-calibration.
+    min_window_start_m: float = 2000.0
+    min_window_r2: float = 0.5
+    max_window_rel_error: float = 50.0
+    # Molecular-window detection strategy (see molecular_methods.py): 'improved'
+    # (default, production), 'main' (legacy, degenerate — for comparison), 'matlab'
+    # (Auto_Calib_25), 'calipso', 'earlinet', 'optimal'. The min_window_*/max_window_*
+    # gates above apply to 'improved'; other methods use their own documented defaults.
+    molecular_method: str = "improved"
+
+    # E-PROF v1.0 baseline ONLY: reproduce the pre-a4e7140 calibration (the Klett
+    # sign error + total-OD reference). Default False = the production, corrected
+    # calibration. Used solely to regenerate the historical v1.0 series for the
+    # method comparison (see atmosphere.klett_inversion / calibrate_rayleigh).
+    sign_error_v10: bool = False
 
     @classmethod
     def from_json(cls, filepath: Path) -> CalibrationOptions:
@@ -209,8 +261,14 @@ class CalibrationOptions:
             hour_min=data.get("hour_min", 20),
             hour_max=data.get("hour_max", 4),
             min_time_range=data.get("min_time_range", 3),
+            use_sza_night=bool(data.get("use_sza_night", 1)),
+            sza_night_threshold=float(data.get("sza_night_threshold", 100.0)),
+            time_aggregation=str(data.get("time_aggregation", "mean")),
+            average_time_s=(None if data.get("average_time_s", None) is None else float(data.get("average_time_s"))),
+            average_range_m=(None if data.get("average_range_m", None) is None else float(data.get("average_range_m"))),
+            screen_profile_outliers=bool(data.get("screen_profile_outliers", 1)),
+            profile_outlier_nmad=float(data.get("profile_outlier_nmad", 4.0)),
             plot_main=bool(data.get("plot_main", 0)),
-            plot_all=bool(data.get("plot_all", 0)),
             z_low_cloud=float(data.get("z_low_cloud", 4000)),
             max_ratio_cloudy=float(data.get("max_ratio_cloudy", 0.5)),
             lidar_ratio_aerosol=float(data.get("LRaer", 52)),
@@ -220,8 +278,14 @@ class CalibrationOptions:
             consider_points_lower_than_molecular=bool(data.get("consider_points_lower_than_molecular", 1)),
             threshold_quality=float(data.get("threshold_quality", 15)),
             use_std_atm=bool(data.get("use_std_atm", 1)),
+            molecular_source=str(data.get("molecular_source", "standard")),
             range_start_m=float(data.get("range_start_m", 2000)),
             range_end_m=float(data.get("range_end_m", 6000)),
+            min_window_start_m=float(data.get("min_window_start_m", 2000)),
+            min_window_r2=float(data.get("min_window_r2", 0.5)),
+            max_window_rel_error=float(data.get("max_window_rel_error", 50.0)),
+            molecular_method=str(data.get("molecular_method", "improved")),
+            sign_error_v10=bool(data.get("sign_error_v10", 0)),
             apply_wv_correction=bool(data.get("apply_wv_correction", 0)),
             cams_folder=Path(data.get("cams_folder", "D:/CAMS/")),
             abs_cs_lookup_table=Path(data.get("abs_cs_lookup_table", "")),

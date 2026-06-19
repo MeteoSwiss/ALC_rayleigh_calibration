@@ -52,7 +52,18 @@ htmlcov/
 # Data files (don't commit large data)
 *.nc
 *.csv
-!standard_atmosphere_US_1976_50km.csv
+*.mat
+# ...except the US Standard Atmosphere table shipped as package data
+!rayleigh_calibration/data/standard_atmosphere_US_1976_50km.csv
+
+# Figures and R&D output live outside the repo, under
+# C:\DATA\Projects\202606_E-PROFILE_calibration (see README). Ignore any local copy.
+figs_paper_validation/
+
+# Reference papers are kept on disk but not committed (~90 MB + third-party copyright).
+# Their text extracts (doc/*.txt) and the index (doc/README.md) ARE tracked.
+# Delete this line to version the PDFs in git.
+doc/*.pdf
 
 # Logs
 *.log

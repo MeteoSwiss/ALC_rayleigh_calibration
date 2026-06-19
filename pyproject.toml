@@ -6,6 +6,9 @@ authors = ["E-PROFILE <contact@e-profile.eu>"]
 license = "MIT"
 readme = "README.md"
 packages = [{include = "rayleigh_calibration"}]
+include = [
+    { path = "rayleigh_calibration/data/*.csv", format = ["sdist", "wheel"] },
+]
 keywords = ["lidar", "ceilometer", "calibration", "rayleigh", "atmospheric", "remote sensing"]
 classifiers = [
     "Development Status :: 4 - Beta",

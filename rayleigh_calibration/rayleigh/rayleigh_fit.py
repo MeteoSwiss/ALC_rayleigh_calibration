@@ -24,6 +24,7 @@ class WindowSearchDiagnostics:
     intercepts: NDArray[np.float64]         # (n_centers, n_lengths)
     r_squared: NDArray[np.float64]          # (n_centers, n_lengths)
     sum_abs_intercept: NDArray[np.float64]  # (n_centers,)
+    valid_window: Optional[NDArray[np.bool_]] = None  # (n_centers, n_lengths) eligible-window mask
 
 
 @dataclass
@@ -68,6 +69,34 @@ class CalibrationConstantResult:
     molecular_end_idx: int
 
 
+def _result_from_method_window(mw) -> RayleighFitResult:
+    """Map a molecular_methods.MethodWindow onto a RayleighFitResult (+ diagnostics)."""
+    g = mw.grid
+    diagnostics = None
+    if g is not None:
+        sum_abs_intercept = np.nansum(np.abs(g.intercept), axis=1)
+        diagnostics = WindowSearchDiagnostics(
+            range_bin_m=np.asarray(g.center_m, float),
+            half_length_m=np.asarray(g.half_m, float),
+            slopes=g.slope, intercepts=g.intercept, r_squared=g.r2,
+            sum_abs_intercept=sum_abs_intercept, valid_window=mw.eligible,
+        )
+    if not mw.ok:
+        return RayleighFitResult(
+            slope=np.nan, intercept=np.nan, r_squared=np.nan, std_error=np.nan,
+            p_value=np.nan, center_range_m=np.nan, half_length_m=np.nan,
+            range_start_m=np.nan, range_end_m=np.nan, altitude_start=0, altitude_end=0,
+            relative_error=np.inf, search_diagnostics=diagnostics,
+        )
+    rel = mw.rel_error if np.isfinite(mw.rel_error) else 0.0
+    return RayleighFitResult(
+        slope=mw.slope, intercept=mw.intercept, r_squared=mw.r2, std_error=mw.std_err,
+        p_value=mw.p_value, center_range_m=mw.center_m, half_length_m=mw.half_m,
+        range_start_m=mw.start_m, range_end_m=mw.end_m, altitude_start=0, altitude_end=0,
+        relative_error=rel, search_diagnostics=diagnostics,
+    )
+
+
 def find_optimal_molecular_window(
     signal: NDArray[np.float64],
     p_mol: NDArray[np.float64],
@@ -76,13 +105,41 @@ def find_optimal_molecular_window(
     range_start_m: float = 2000.0,
     range_end_m: float = 6000.0,
     increment_bins: int = 8,
+    min_window_start_m: float = 2000.0,
+    min_r2: float = 0.5,
+    max_rel_error: float = 50.0,
+    method: str = "improved",
+    signal_stack: Optional[NDArray[np.float64]] = None,
 ) -> RayleighFitResult:
     """
     Find the optimal molecular scattering window using grid search.
 
-    The algorithm searches over different center positions and window sizes
-    to find the region where the signal best matches theoretical molecular
-    scattering (linear relationship with minimal offset).
+    The algorithm searches over different center positions and window sizes,
+    then selects, among windows that are *physically* molecular, the one with
+    the best linear signal-vs-molecular fit (largest R^2).
+
+    Selection criterion (and why it changed)
+    ----------------------------------------
+    For each (center, half-length) window we regress the range-normalized signal
+    ``y`` on the theoretical molecular power ``x`` (``y = a*x + b``). A genuine
+    molecular window has a *high R^2* (signal proportional to molecular), a
+    positive slope ``a``, a small background offset ``b``, and lies above the
+    boundary-layer aerosol.
+
+    Earlier versions chose the center with the smallest Σ|b| (intercept), then the
+    half-length with the largest R^2. With a *free* intercept this is degenerate:
+    in the high-altitude noise region the signal → 0, so any line fits it with
+    ``b ≈ 0`` (trivially small) *and* ``R^2 ≈ 0`` (no real correlation) — so
+    min-Σ|b| systematically selected a low-R^2, noise-dominated window. This is the
+    documented EARLINET-SCC minimum-signal failure mode (Mattis, D'Amico, Baars
+    et al., AMT 9, 3009, 2016); the original MATLAB ``Auto_Calib_25/rayleigh_fit.m``
+    avoided it by forcing ``b = 0``, choosing by RMSE, and rejecting fits with
+    ``R^2 < min_r2_rfit (=0.5)``.
+
+    We restore that robustness: keep only windows that pass molecular-validity
+    gates, then pick the **largest R^2** among them. R^2 is the right metric here
+    precisely because it *collapses* in the noise region (so noise windows are
+    rejected, not selected).
 
     Parameters
     ----------
@@ -100,12 +157,41 @@ def find_optimal_molecular_window(
         Maximum center range to consider (m).
     increment_bins : int
         Step size in bins for center position search.
+    min_window_start_m : float
+        Minimum altitude (m AGL) at which a window may START — keeps the window
+        above the boundary-layer aerosol (rec #1). Note this constrains the window
+        start, unlike ``range_start_m`` which constrains the window center.
+    min_r2 : float
+        Minimum R^2 for a window to be eligible (cf. MATLAB ``min_r2_rfit``).
+        Rejects noise-dominated and strongly aerosol-curved windows.
+    max_rel_error : float
+        Maximum |slope − pointwise-median-ratio| / median-ratio (%). Rejects
+        windows where the signal is not truly proportional to molecular, i.e.
+        aerosol curvature (rec #2).
 
     Returns
     -------
     RayleighFitResult
-        Optimal fit parameters and window location.
+        Optimal fit parameters and window location. If no window passes the
+        validity gates, returns a failed fit (relative_error = inf) so the caller
+        flags a non-calibration night instead of emitting a spurious constant.
+
+    method : str
+        Detection strategy: "improved" (default; the in-line implementation below),
+        or one of "main"/"matlab"/"calipso"/"earlinet"/"optimal", dispatched to
+        :mod:`rayleigh_calibration.rayleigh.molecular_methods`.
     """
+    # Non-"improved" methods are dispatched to the pluggable selectors. "improved"
+    # keeps the in-line implementation below (the production path, unchanged).
+    if method != "improved":
+        from .molecular_methods import select_molecular_window
+        mw = select_molecular_window(
+            method, signal, p_mol, range_alc, half_length_options_m,
+            range_start_m=range_start_m, range_end_m=range_end_m,
+            increment_bins=increment_bins, signal_stack=signal_stack,
+        )
+        return _result_from_method_window(mw)
+
     dz = np.abs(range_alc[1] - range_alc[0]) if len(range_alc) > 1 else 1.0
 
     # Convert parameters to bin indices
@@ -123,6 +209,7 @@ def find_optimal_molecular_window(
     r_squared = np.full((n_centers, n_lengths), np.nan)
     std_errors = np.full((n_centers, n_lengths), np.nan)
     p_values = np.full((n_centers, n_lengths), np.nan)
+    rel_errors = np.full((n_centers, n_lengths), np.nan)  # |slope - median ratio| / median (%)
 
     # Grid search over center positions and window sizes
     for i, center_bin in enumerate(center_bins):
@@ -148,16 +235,66 @@ def find_optimal_molecular_window(
                 r_squared[i, j] = r ** 2
                 std_errors[i, j] = se
                 p_values[i, j] = p
+                # Slope vs. pointwise-median ratio: large where the signal is not
+                # truly proportional to molecular (aerosol curvature) -> rec #2 gate.
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    ratios = y / x
+                ratios = ratios[np.isfinite(ratios)]
+                if ratios.size:
+                    med_ratio = np.median(ratios)
+                    if med_ratio != 0:
+                        rel_errors[i, j] = abs((a - med_ratio) / med_ratio * 100.0)
             except (ValueError, RuntimeWarning):
                 continue
 
-    # Find optimal window:
-    # 1. First, find center with minimum sum of |intercept| across all window sizes
-    sum_abs_intercept = np.nansum(np.abs(intercepts), axis=1)
-    best_center_idx = np.nanargmin(sum_abs_intercept)
+    # ── Select the optimal molecular window ──────────────────────────────────
+    # Keep only physically valid molecular windows, then choose the best linear
+    # fit (largest R²) among them. See the function docstring for why min-Σ|b|
+    # (the previous criterion) is degenerate at high altitude.
+    #   (rec #1) starts above the boundary-layer aerosol : start >= min_window_start_m
+    #   (R² fix) genuine signal~molecular correlation    : R² >= min_r2  (cf. MATLAB min_r2_rfit)
+    #            signal increasing with molecular         : slope > 0
+    #            small background offset vs. slope        : |intercept| < slope
+    #   (rec #2) proportional to molecular (no curvature) : relative_error <= max_rel_error
+    start_range_grid = (center_bins[:, None] - half_length_bins[None, :]).astype(float) * dz
+    valid_window = (
+        np.isfinite(r_squared)
+        & (start_range_grid >= min_window_start_m)
+        & (r_squared >= min_r2)
+        & (slopes > 0)
+        & (np.abs(intercepts) < slopes)
+        & (~np.isfinite(rel_errors) | (rel_errors <= max_rel_error))
+    )
 
-    # 2. Then, find window size with maximum R² at that center
-    best_length_idx = np.nanargmax(r_squared[best_center_idx, :])
+    # Per-center sum of |intercept| kept only for the window-search diagnostic plot.
+    valid_center = np.any(np.isfinite(r_squared), axis=1)
+    sum_abs_intercept = np.where(valid_center, np.nansum(np.abs(intercepts), axis=1), np.inf)
+
+    if not np.any(valid_window):
+        # No molecular window passes the validity gates (clouds/aerosol fill the band,
+        # or the molecular SNR is too low everywhere). Return a failed fit
+        # (relative_error=inf) so the caller flags a non-calibration night, matching the
+        # MATLAB R²/RMSE rejection rather than emitting a spurious low-R² constant.
+        diagnostics = WindowSearchDiagnostics(
+            range_bin_m=center_bins.astype(float) * dz,
+            half_length_m=np.array(half_length_options_m, dtype=float),
+            slopes=slopes, intercepts=intercepts, r_squared=r_squared,
+            sum_abs_intercept=sum_abs_intercept, valid_window=valid_window,
+        )
+        return RayleighFitResult(
+            slope=np.nan, intercept=np.nan, r_squared=np.nan, std_error=np.nan,
+            p_value=np.nan, center_range_m=np.nan, half_length_m=np.nan,
+            range_start_m=np.nan, range_end_m=np.nan, altitude_start=0, altitude_end=0,
+            relative_error=np.inf, search_diagnostics=diagnostics,
+        )
+
+    # Best window = largest R² among the valid ones. R² collapses in the noise
+    # region, so this can never select the high-altitude degenerate window.
+    masked_r2 = np.where(valid_window, r_squared, -np.inf)
+    flat_idx = int(np.argmax(masked_r2))
+    best_center_idx, best_length_idx = np.unravel_index(flat_idx, masked_r2.shape)
+    best_center_idx = int(best_center_idx)
+    best_length_idx = int(best_length_idx)
 
     # Extract best fit parameters
     best_slope = slopes[best_center_idx, best_length_idx]
@@ -193,6 +330,7 @@ def find_optimal_molecular_window(
         intercepts=intercepts,
         r_squared=r_squared,
         sum_abs_intercept=sum_abs_intercept,
+        valid_window=valid_window,
     )
 
     return RayleighFitResult(

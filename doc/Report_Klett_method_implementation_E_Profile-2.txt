@@ -1,0 +1,260 @@
+
+===== PAGE 1 =====
+Klett method implementation report
+May 12, 2026
+Table of Contents
+1 Observations ....................................................................... 1
+1.1 Negative extinction values ....................................................... 1
+1.2 AOD discrepancy............................................................... 2
+2 Possible problem sources and fixing suggestions ......................................... 3
+2.1 Sign error in the Klett equation implementation.................................... 3
+2.2 Integration limits for the denominator ............................................ 5
+3 Consequences on the lidar-constant values.............................................. 7
+4 Additional point: computation of Cslope in the validation method ......................... 8
+L
+Appendix: Results validation with data from Lille miniMPL................................. 9
+In the E-Profile calibration method, the lidar constant C is computed using the results of the Klett
+L
+inversion under the assumption of a constant lidar ratio. The Klett inversion provides the aerosol and
+total (aerosol + molecular) backscatter profiles β (r) and β(r), as well as the aerosol extinction profile
+a
+σ (r).
+a
+After inspecting intermediate parameters involved in the computation of C , a potential problem
+L
+appears to arise in the Klett inversion. This report describes the observed problem, discusses possible
+causes, and suggests corrective actions.
+The baseline code used is the version already corrected for cloud detection (see the document ”Bugs
+descriptionE-PROFILEMini-MPLcloudfiltering”).Thefollowingresultsandanalysisfocusonnominal
+conditions (not on the full sensitivity matrix) and use data from the miniMPL mobile in Toulouse
+(2022–2025 period), except where specified otherwise.
+1 Observations
+1.1 Negative extinction values
+Thefirstobservationconcernstheaerosolextinctionprofileσ (r)returnedbythefunctionklett inversion().
+a
+Intheoriginalcode,allnegativevaluesofσ (r)areforcedtozerobecauseextinctionmustbenon-negative
+a
+and noise in the range-corrected signal (RCS) can produce values below zero. To inspect the raw in-
+version output this correction is temporarily removed by changing line 361 in atmosphere.py from
+ext aer[R idx] = np.maximum(0, beta aer[R idx]) * lidar ratio aerosol to ext aer[R idx] =
+beta aer[R idx] * lidar ratio aerosol.
+Figure 1 shows the extinction profiles (with zeroing) for a set of lidar-ratio values, while Figure 1b
+displaysthesameprofilesbeforethezero-forcingstep.Theretrievedprofilecontainslargenegativevalues,
+which are masked by the zeroing but still lead to an unphysical aerosol extinction profile. Moreover, in
+thelowerpartoftheprofiletheextinctionσ (r)increaseswhenthelidarratioS decreases,contradicting
+a a
+the physical relation S =σ (r)/β (r).
+a a a
+
+===== PAGE 2 =====
+2
+(a) Baseline extinction (zeroed) (b) Baseline extinction (no zeroing)
+Fig.1: Aerosol extinction profiles for different lidar-ratio values (2025-01-14).
+1.2 AOD discrepancy
+The AOD values derived from the Klett inversion are also far from the photometer measurements,
+confirming the above observation. Since the E-Profile method does not compute AOD directly, it is
+calculated by integrating the aerosol extinction coefficient over the full range:
+(cid:90) rmax
+AOD = σ (r)dr. (1)
+Klett a
+0
+In the code this is implemented as aod = np.trapz(ext aer, range alc) (line 162 of calibra-
+tion.py). Note that for the AOD computation the zeroing is effective (negative values of extinction
+are ignored).
+Figure2comparesthetimeseriesofAODobtainedfromtheKlettinversion(blue)withthephotome-
+termeasurements(red)overthe full studyperiod(2022-01-10to 2026-01-01).TheKlett-derived AODis
+systematically lower. A summary for selected nights is given in Table 1 and highlights this observation.
+Fig.2: Time series of AOD (log-scale): Klett inversion (blue) vs. photometer (red).
+
+===== PAGE 3 =====
+Klett method implementation report 3
+Date AOD (Klett) AOD (Photometer)
+2022-10-10 0.006 0.153
+2023-03-05 0.133 0.423
+2023-09-29 0.005 0.091
+2025-01-14 0.010 0.091
+Table 1: Comparison of AOD values from Klett inversion and photometer measurements.
+– 2022-10-10: Night with moderate aerosol loading (AOD = 0.153) and low Angstr¨om Exponent (AE
+= 0.53), indicating relatively coarse particles. Aerosols are present up to about 3.5 km height.
+– 2023-03-05: Night with significant aerosol loading (AOD = 0.423). Aerosols are concentrated in the
+boundarylayer,withadditionalplumesextendingupto4km.TheAEis1.5,indicatingfineparticles.
+– 2023-09-29: Night with low aerosol loading (AOD = 0.091). Aerosols are spread from the surface up
+to around 3 km. AE is 1.5, again indicating relatively fine particles.
+– 2025-01-14: Clear night with a stable atmosphere and low aerosol loading (AOD = 0.09). Aerosols
+are mainly concentrated in the boundary layer. AE is 1.66, indicating fine particles.
+2 Possible problem sources and fixing suggestions
+2.1 Sign error in the Klett equation implementation
+The original Klett formulation for the aerosol backscatter coefficient is:
+(cid:104) (cid:105)
+βatt(R)exp +2 (cid:82)Rcβ (r)∆Sdr
+R m
+β (R)= −β (R)
+a
+c+2
+(cid:82)Rcβatt(r)exp (cid:104)
++2
+(cid:82)Rcβ
+(r′)∆Sdr′
+(cid:105)
+S dr
+m
+R r m a
+with βatt the total attenuated backscatter, β the molecular backscatter, ∆S = S −S , where S is
+m a m a
+the lidar ratio and S the molecular lidar ratio, and c the constant of integration.
+m
+Byinspectingthefunctionklett inversion()fromatmosphere.py,itappearsthattheimplemented
+equation differs from Klett’s original formulation. The baseline code is displayed in Figure 3.
+Translating the Python implementation into equations gives the following expressions for the numer-
+ator and denominator in the Klett expression:
+(cid:110) (cid:90) Rc (cid:111)
+NUM(R)=βatt(R) exp -2 β (r)∆Sdr ,
+m
+R
+with the range R spanning from i start to i end.
+DEN(R)= (cid:40) c+2 (cid:82) R Rcβatt(r)exp (cid:110) -2 (cid:82) r Rcβ m (r′) ∆S dr′ (cid:111) S a dr if R between i start and reference idx,
+c otherwise (i.e., [reference idx ; i end])
+A difference in the sign of the exponential term can be seen compared to Klett’s formulation (high-
+lightedinyellow).ThisisaswellconfirmedbyinspectingtheexponentialtermsT factor alland-2*qt
+inthedebuggingconsole:botharenegative,whereas,basedontheirexpressioninKlett’sequation,they
+should be physically positive.
+A correction can therefore be made by changing the signs of T factor all and -2*qt. Specifically,
+line 341 can be modified to
+numerator = beta att[R idx] * np.exp(2 * qt)
+and line 344 to
+T factor all = 2.0 * (cum[reference index] - cum[i start:reference index]).
+Applying this sign correction yields extinction profiles that are much closer to a physical reality
+(Figure 4) and therefore improves the AOD estimates (Figure 5, Table 2).
+
+===== PAGE 4 =====
+4
+Fig.3: Baseline code from the function klett inversion() in atmosphere.py, lines 330–362.
+Fig.4: Extinction profiles (2025-01-14)
+
+===== PAGE 5 =====
+Klett method implementation report 5
+Fig.5:AODtimeseries(log-scale)aftersigncorrection(green)comparedwithphotometermeasurements
+(red) and values before correction (blue).
+Date AOD (baseline)AOD (sign-corrected)AOD (photometer)
+2022-10-10 0.006 0.135 0.153
+2023-03-05 0.133 0.305 0.423
+2023-09-29 0.005 0.086 0.091
+2025-01-14 0.010 0.048 0.091
+Table 2: AOD comparison after correcting the sign in the Klett equation.
+2.2 Integration limits for the denominator
+IntheoriginalcodethefulldenominatorexpressionDEN(R)isevaluatedonlyuptothereferenceindex.
+For the upper part of the calibration window, it is set as equal to the calibration constant, which is
+inconsistent with the theoretical Klett’s formulation. This truncation produces an artificial increase of
+the lidar constant C in the upper part of the window (Figure 6). This behavior can be explained by
+L
+the fact that, even though the extinction profile is set to zero, the aerosol backscatter values are not. As
+a result, the total backscatter values used to compute the constant (see line 360 in the Klett algorithm,
+Fig. 3) are much lower than their true values in the range from reference idx to i end. As the lidar
+constant is: C (r)= RCS(r), the smaller values of β(r) creates the increase in C observed.
+L β(r)×T2 L
+Fig.6
+
+===== PAGE 6 =====
+6
+Fig.7: Corrected implementation of the denominator integration (modifications operated on lines
+341–351).
+This issue can be fixed by changing the integration points so that ‘DEN(R)‘ computes the full
+denominator expression up to i end rather than stopping at reference idx. The modified version is
+shown in Figure 7; the changes affect lines 341 onward.
+Figure 8 displays the summary of the extinction profiles for the three cases: the baseline, the Klett
+(sign) correction, and the integration correction. For each case, the profiles are taken before zeroing.
+Theextinctionprofileobtainedwiththeintegrationcorrectionmatchesthephysicalrealitymoreclosely.
+Moreover, with the sign correction, the extinction now increases with the lidar ratio, and therefore the
+computed AOD also rises, which is consistent with physical expectations.
+The output lidar-constant profile also improves: the deviation in the upper part of the calibration
+window disappears (Figure 9).
+(a) Baseline (b) Sign-corrected (c) Sign + integration-corrected
+Fig.8: Summary of extinction profiles for the three code versions (2025-01-14).
+
+===== PAGE 7 =====
+Klett method implementation report 7
+Fig.9: Lidar-constant profile after correcting the integration limits (2025-01-14).
+3 Consequences on the lidar-constant values
+Fig.10: Time series of C for baseline, sign-corrected, and sign + integration-corrected versions.
+L
+Fig.11: Histogram of C values for the three code versions.
+L
+
+===== PAGE 8 =====
+8
+The sign correction raises the lidar constant from 1.31×105 to 1.53×105 (˜17 % increase). Indeed, a
+higher aerosol optical depth (AOD) reduces transmittance, which increases the lidar constant C (from
+L
+the lidar-constant equation). However, the integration-point correction has little/no effect on C . The
+L
+algorithm computes C as the median over the calibration window, therefore the value stays almost
+L
+unchanged as the lower part of the window has overall constant C values.
+L
+Figures 10 and 11 show the time series and distribution of C for the three code versions.
+L
+In addition, the corrected C values are far more sensitive to variations in the lidar ratio, as shown
+L
+in Figure 12. This increased sensitivity arises because the computed optical depth is higher, giving it
+greater influence in the C calculations, and the optical depth itself depends on the lidar ratio.
+L
+(a) Baseline version
+(b) Corrected version
+Fig.12: Sensitivity of the lidar constant to lidar-ratio variations (2025-01-14).
+4 Additional point: computation of Cslope in the validation method
+L
+The current implementation computes
+1
+Cslope =slope×
+L T2(r )
+ref
+where slope is obtained from the Rayleigh fit (find optimal window()). The Rayleigh regression
+relates RC r S 2 (r) to β m at r o t 2 l (r), therefore the slope should correspond to C L T a 2 (from the lidar equation).
+Consequently, the correct expression should use the aerosol transmittance T rather than the total
+a
+transmittance T:
+1
+Cslope =slope× .
+L T2(r )
+a ref
+Therefore, Cslope is overestimated because, physically, T2 < T2. This does not affect the computed
+L a
+values of C , but it does impact the validation of the results and their interpretation. It may also cause
+L
+false rejections of the computed C if the relative error between Cmedian and Cslope exceeds the set
+L L L
+threshold. The suggested correction in the code is shown in Figure 13.
+
+===== PAGE 9 =====
+Klett method implementation report 9
+(a) Baseline implementation
+(b) Corrected implementation
+Fig.13: Computation of Cslope in calibrate rayleigh() (file calibration.py).
+L
+Figure 14 shows the evolution of Cslope before and after the correction (in green) on the plots. As
+L
+expected, the corrected version produces a lower value, closer to Cmedian.
+L
+(a) Before correction (b) After correction
+Fig.14: Comparison of Cslope before and after the correction.
+L
+Appendix: Results validation with data from Lille miniMPL
+In order to confirm the previous conclusions drawn from the Toulouse miniMPL dataset, the same tests
+werecarriedoutonthedatafromtheLilleminiMPL.TheLilledatasetcontainsfarfewernightsavailable
+for calibration than the Toulouse dataset (80 vs 211). This can be explained by the cloudier weather in
+Lille and the sensitivity to false cloud detection.
+The results show that, as with the Toulouse data, the correction adjusts the AOD to values closer to
+the photometer measurements (Figure 15), and is therefore more accurate. It can also be noted that the
+corrected AOD values are closer to the measured values than in the Toulouse case.
+As expected, this also results in higher C values, with the median increasing from 222k to 266k
+L
+(Figures 16 and 17).
+
+===== PAGE 10 =====
+10
+Fig.15: AOD time series (log-scale) after sign correction (green) compared with photometer measure-
+ments (red) and values before correction (blue) for Lille miniMPL.
+Fig.16: Time series of C for baseline and corrected versions for Lille miniMPL.
+L
+Fig.17: Histogram of C values for the two code versions for Lille miniMPL.
+L

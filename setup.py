@@ -22,6 +22,8 @@ setup(
     long_description_content_type="text/markdown",
     url="https://e-profile.eu",
     packages=find_packages(exclude=["tests", "tests.*"]),
+    package_data={"rayleigh_calibration": ["data/*.csv"]},
+    include_package_data=True,
     python_requires=">=3.9",
     install_requires=[
         "numpy>=1.20",
