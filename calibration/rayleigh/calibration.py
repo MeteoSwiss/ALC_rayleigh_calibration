@@ -483,8 +483,8 @@ def calibrate_rayleigh(
         )
 
     # Range-normalized signal (night mean) + per-profile stack. The stack feeds the
-    # "optimal" method's temporal-variability aerosol rejection (molecular is steady in
-    # time; aerosol fluctuates).
+    # E-PROF v2 ("optimal") method's temporal-variability aerosol rejection (molecular is
+    # steady in time; aerosol fluctuates).
     signal = rcs_mean / (data.range_alc ** 2)
     signal_stack = rcs_use / (data.range_alc[None, :] ** 2)
 
@@ -508,7 +508,7 @@ def calibrate_rayleigh(
         min_window_start_m=options.min_window_start_m,
         min_r2=options.min_window_r2,
         max_rel_error=options.max_window_rel_error,
-        method=getattr(options, "molecular_method", "improved"),
+        method=getattr(options, "molecular_method", "eprof_v1.2"),
         signal_stack=signal_stack,
     )
 

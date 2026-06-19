@@ -108,7 +108,7 @@ def find_optimal_molecular_window(
     min_window_start_m: float = 2000.0,
     min_r2: float = 0.5,
     max_rel_error: float = 50.0,
-    method: str = "improved",
+    method: str = "eprof_v1.2",
     signal_stack: Optional[NDArray[np.float64]] = None,
 ) -> RayleighFitResult:
     """
@@ -177,14 +177,16 @@ def find_optimal_molecular_window(
         flags a non-calibration night instead of emitting a spurious constant.
 
     method : str
-        Detection strategy: "improved" (default; the in-line implementation below),
-        or one of "main"/"matlab"/"calipso"/"earlinet"/"optimal", dispatched to
+        Detection strategy (E-PROF version key or legacy alias): "eprof_v1.2" (default,
+        "improved"; the in-line implementation below), or one of "eprof_v1.1"/"eprof_v0.25"/
+        "earlinet"/"eprof_v2"/"bellini", dispatched to
         :mod:`calibration.rayleigh.molecular_methods`.
     """
-    # Non-"improved" methods are dispatched to the pluggable selectors. "improved"
-    # keeps the in-line implementation below (the production path, unchanged).
-    if method != "improved":
-        from .molecular_methods import select_molecular_window
+    from .molecular_methods import resolve_method, select_molecular_window
+    method = resolve_method(method)
+    # E-PROF v1.2 ("improved") keeps the in-line implementation below (the production path,
+    # unchanged); every other version is dispatched to the pluggable selectors.
+    if method != "eprof_v1.2":
         mw = select_molecular_window(
             method, signal, p_mol, range_alc, half_length_options_m,
             range_start_m=range_start_m, range_end_m=range_end_m,

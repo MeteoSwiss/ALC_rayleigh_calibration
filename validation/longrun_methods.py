@@ -141,7 +141,7 @@ def plot_timeseries_grid(all_results, insts):
                     cls.append(w.cl)
             if dates:
                 ax.plot(dates, cls, "-o", ms=2.5, lw=0.7, color=METHOD_COLORS[m])
-        # robust y-range from the stable methods so calipso/main spikes clip
+        # robust y-range from the stable methods so main spikes clip
         stable = [pn[ds][sm].cl for sm in ("improved", "optimal", "earlinet", "matlab", "bellini")
                   for ds in pn if calibrates(pn[ds][sm]) and np.isfinite(pn[ds][sm].cl) and pn[ds][sm].cl > 0]
         if len(stable) >= 3:

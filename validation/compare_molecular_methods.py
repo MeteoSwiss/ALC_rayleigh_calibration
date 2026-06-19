@@ -1,8 +1,8 @@
 """
 compare_molecular_methods.py
 
-Compare the six molecular-window detection methods (main / improved / matlab / calipso /
-earlinet / optimal) across several E-PROFILE sites and instruments, select the best, and
+Compare the molecular-window detection methods (main / improved / matlab / earlinet /
+optimal / bellini) across several E-PROFILE sites and instruments, select the best, and
 produce diagnostics:
 
   * DETAIL figures (a few representative instruments): vertical profiles with each method's
@@ -39,21 +39,22 @@ HALF = tuple(range(250, 2000, 240))
 QC_THR = 15.0  # pipeline threshold_quality: rel_error > this -> flag -2
 
 METHOD_COLORS = {"eprof_v10": "#000000", "main": "#7f7f7f", "improved": "#1f77b4",
-                 "matlab": "#2ca02c", "calipso": "#ff7f0e", "earlinet": "#9467bd",
+                 "matlab": "#2ca02c", "earlinet": "#9467bd",
                  "optimal": "#d62728", "bellini": "#8c564b"}
 # The three E-PROFILE production versions are renamed to their release numbers:
 #   main -> v1.1 (sign-fixed legacy), improved -> v1.2 (production), optimal -> v2.
 # v1.0 (eprof_v10) is the historical pre-a4e7140 sign-error calibration (run with the
-# same 'main' window but options.sign_error_v10=True). matlab/calipso/earlinet/bellini
+# same 'main' window but options.sign_error_v10=True). matlab/earlinet/bellini
 # are the external reference methods and keep their own names.
 METHOD_LABEL = {"eprof_v10": "E-PROF v1.0", "main": "E-PROF v1.1",
                 "improved": "E-PROF v1.2", "optimal": "E-PROF v2",
-                "matlab": "MATLAB Auto_Calib_25", "calipso": "CALIPSO-type",
+                "matlab": "MATLAB Auto_Calib_25",
                 "earlinet": "EARLINET/SCC-type", "bellini": "Bellini/ALICENET"}
 # Ordered tuple for display/precision/longrun aggregation — includes eprof_v10 for historical
 # comparison. METHODS (in molecular_methods.py) only lists live selectable methods.
+# (calipso was dropped — CALIOP "highest clean layer" needs a stratosphere a ground-up ALC lacks.)
 METHODS_DISPLAY = ("eprof_v10", "main", "improved", "optimal",
-                   "matlab", "calipso", "earlinet", "bellini")
+                   "matlab", "earlinet", "bellini")
 
 T = InstrumentType
 INSTRUMENTS = [
@@ -136,7 +137,7 @@ def run_instrument(inst):
 # DETAIL figures
 # ----------------------------------------------------------------------------
 SHORT = {"eprof_v10": "v1.0", "main": "main", "improved": "impr", "matlab": "matl",
-         "calipso": "cali", "earlinet": "earl", "optimal": "opt", "bellini": "bell"}
+         "earlinet": "earl", "optimal": "opt", "bellini": "bell"}
 
 
 def _cl_panel(ax, res):
@@ -380,7 +381,7 @@ def plot_timeseries(all_results):
                 any_pt = True
                 ax.plot(dates, cls, "-o", ms=4, lw=1.0, color=METHOD_COLORS[m], label=METHOD_LABEL[m])
         # Robust y-range from the stable (gated) methods so they stay readable; the wild
-        # main/calipso excursions then clip at the top rather than compressing everything.
+        # main excursions then clip at the top rather than compressing everything.
         stable = []
         for sm in ("improved", "optimal", "earlinet", "matlab", "bellini"):
             for ds in pn:
