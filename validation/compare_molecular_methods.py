@@ -29,9 +29,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
-from rayleigh_calibration import calibrate_rayleigh, CalibrationOptions, InstrumentInfo, DataLevel
-from rayleigh_calibration.config import InstrumentType
-from rayleigh_calibration.rayleigh.molecular_methods import METHODS, compute_window_grid, select_molecular_window
+from calibration import calibrate_rayleigh, CalibrationOptions, InstrumentInfo, DataLevel
+from calibration.config import InstrumentType
+from calibration.rayleigh.molecular_methods import METHODS, compute_window_grid, select_molecular_window
 
 OUT = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/figs_paper_validation/molecular_methods")
 OUT.mkdir(parents=True, exist_ok=True)

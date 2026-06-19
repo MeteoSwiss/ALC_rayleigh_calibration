@@ -21,8 +21,8 @@ import datetime as dt
 import logging, warnings
 from pathlib import Path
 import numpy as np
-from rayleigh_calibration import calibrate_rayleigh, CalibrationOptions, InstrumentInfo, DataLevel
-from rayleigh_calibration.config import InstrumentType
+from calibration import calibrate_rayleigh, CalibrationOptions, InstrumentInfo, DataLevel
+from calibration.config import InstrumentType
 
 warnings.filterwarnings("ignore")
 logging.getLogger().setLevel(logging.CRITICAL)

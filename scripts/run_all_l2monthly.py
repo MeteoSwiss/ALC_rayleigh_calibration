@@ -30,8 +30,8 @@ from pathlib import Path
 
 import numpy as np
 
-from rayleigh_calibration import calibrate_rayleigh, CalibrationOptions, InstrumentInfo, DataLevel
-from rayleigh_calibration.config import InstrumentType
+from calibration import calibrate_rayleigh, CalibrationOptions, InstrumentInfo, DataLevel
+from calibration.config import InstrumentType
 
 BASE = Path("A:/E-PROFILE_L2_monthly")
 OUT = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/E-PROFILE_calibration_rayleigh/fullcal_all")

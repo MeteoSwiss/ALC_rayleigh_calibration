@@ -2,7 +2,7 @@
 Liquid-water-cloud calibration of ceilometers (O'Connor 2004 / Hopkin 2019).
 
 This is a faithful Python port of the MATLAB reference
-``liquid_cloud_calibration/liquid_cloud_calibration.m`` (and the helpers it calls).
+``liquid_cloud/liquid_cloud_calibration.m`` (and the helpers it calls).
 The goal is a *bit-for-bit* match (within float tolerance) with the MATLAB output, so
 the structure mirrors the MATLAB one-function-per-helper layout and every formula,
 threshold, indexing convention and NaN-handling choice is reproduced exactly.
@@ -26,7 +26,7 @@ C is a MULTIPLIER:  beta_true = C * beta_L2.
 Water vapor
 -----------
 The WV chain is reproduced *exactly* as the MATLAB does it (NOT the cleaner
-``rayleigh_calibration/water_vapor.py`` route, which differs from the MATLAB by a
+``calibration/water_vapor.py`` route, which differs from the MATLAB by a
 small but non-negligible systematic factor). Specifically:
 
   CAMS T, q on model levels  (get_Beta_CAMS_oper_monthly.m)

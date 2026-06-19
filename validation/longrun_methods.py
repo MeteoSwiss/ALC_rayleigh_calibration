@@ -21,8 +21,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
-from rayleigh_calibration import calibrate_rayleigh, CalibrationOptions, InstrumentInfo, DataLevel
-from rayleigh_calibration.config import InstrumentType
+from calibration import calibrate_rayleigh, CalibrationOptions, InstrumentInfo, DataLevel
+from calibration.config import InstrumentType
 import compare_molecular_methods as cm
 from compare_molecular_methods import METHODS, METHOD_COLORS, METHOD_LABEL, run_methods, calibrates
 

@@ -29,13 +29,13 @@ import matplotlib.pyplot as plt
 WORKTREE = Path("D:/rc_worktrees/withfix")
 sys.path.insert(0, str(WORKTREE))
 
-from rayleigh_calibration import CalibrationOptions, InstrumentInfo
-from rayleigh_calibration.config import InstrumentType
-from rayleigh_calibration.io.data_loader import (
+from calibration import CalibrationOptions, InstrumentInfo
+from calibration.config import InstrumentType
+from calibration.io.data_loader import (
     build_file_paths, load_l1_data, filter_time_range, filter_cloudy_profiles)
-from rayleigh_calibration.rayleigh.atmosphere import (
+from calibration.rayleigh.atmosphere import (
     load_standard_atmosphere, calculate_molecular_properties, MOLECULAR_LIDAR_RATIO)
-from rayleigh_calibration.rayleigh.rayleigh_fit import find_optimal_molecular_window
+from calibration.rayleigh.rayleigh_fit import find_optimal_molecular_window
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from get_aeronet import nightly_aod_532

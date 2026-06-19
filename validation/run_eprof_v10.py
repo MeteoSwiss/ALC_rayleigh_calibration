@@ -18,7 +18,7 @@ try:
 except Exception:
     pass
 from pathlib import Path
-from rayleigh_calibration import calibrate_rayleigh, CalibrationOptions, InstrumentInfo, DataLevel
+from calibration import calibrate_rayleigh, CalibrationOptions, InstrumentInfo, DataLevel
 from longrun_methods import build_instruments, OUT, ROOT
 
 warnings.filterwarnings("ignore")

@@ -1,6 +1,6 @@
-# Rayleigh Calibration for Automated Lidars and Ceilometers
+# Calibration for Automated Lidars and Ceilometers (Rayleigh & cloud)
 
-A Python package for Rayleigh (molecular) calibration of ceilometers and lidars used in the MeteoSwiss / E-PROFILE network. Includes water-vapour correction for 910 nm instruments, six selectable molecular-window detection methods, liquid-cloud calibration, and a suite of analysis / validation scripts for the E-PROFILE ALC paper.
+The Python package `calibration` provides Rayleigh (molecular) **and** liquid-cloud calibration of ceilometers and lidars used in the MeteoSwiss / E-PROFILE network. Includes water-vapour correction for 910 nm instruments, six selectable molecular-window detection methods, and a suite of analysis / validation scripts for the E-PROFILE ALC paper.
 
 ## Features
 
@@ -11,7 +11,7 @@ A Python package for Rayleigh (molecular) calibration of ceilometers and lidars 
   - `improved` = E-PROF v1.2 — aerosol-robust grid search (production default)
   - `optimal` = E-PROF v2 — temporal aerosol rejection + layer flagging
   - `calipso`, `earlinet`, `bellini` — alternative reference methods
-- **Liquid-cloud calibration** (`cloud_calibration/`): Python port of MATLAB O'Connor method, bit-for-bit validated; reads E-PROFILE L2 or Cloudnet CL61 raw; mandatory WV correction
+- **Liquid-cloud calibration** (`cloud/`): Python port of MATLAB O'Connor method, bit-for-bit validated; reads E-PROFILE L2 or Cloudnet CL61 raw; mandatory WV correction
 - **Kalman smoothing bridge**: shells out to `run_kalman_from_matlab.py` to produce a smoothed daily lidar constant
 - **Three input data levels**: L1 (`rcs_0`), L2 daily, L2 monthly (see *Input data level*)
 - **CF-compliant output**: CSV (`<WMO>_<id>_cl.csv`) + optional NetCDF4
@@ -24,11 +24,14 @@ A Python package for Rayleigh (molecular) calibration of ceilometers and lidars 
 
 ## Installation
 
+This project is managed with [uv](https://docs.astral.sh/uv/) (PEP 621 / hatchling). From the repo root:
+
 ```bash
-pip install -e .
+uv pip install -e ".[plotting]"     # editable install incl. optional plot deps
+# or set up a fully managed environment:  uv sync
 ```
 
-Diagnostic plots need matplotlib (optional): `pip install matplotlib`.
+Plain pip works too if you prefer: `pip install -e ".[plotting]"`.
 
 **Required:** Python ≥ 3.9, NumPy, SciPy, netCDF4, pandas  
 **Optional:** matplotlib (plots), scipy.ndimage (smoothing)
@@ -36,8 +39,8 @@ Diagnostic plots need matplotlib (optional): `pip install matplotlib`.
 ## Quick Start
 
 ```python
-from rayleigh_calibration import calibrate_rayleigh, CalibrationOptions, InstrumentInfo
-from rayleigh_calibration.config import InstrumentType
+from calibration import calibrate_rayleigh, CalibrationOptions, InstrumentInfo
+from calibration.config import InstrumentType
 
 options = CalibrationOptions.from_json("options.json")
 info = InstrumentInfo(site_name="Payerne", wmo_id="0-20000-0-06610",
@@ -89,7 +92,7 @@ For L2 levels: `rcs = attenuated_backscatter_0 × calibration_constant_0 × 1e-6
 | `bellini` | Bellini/ALICENET | ALICENET gradient-based window |
 | `eprof_v10` | E-PROF v1.0 | Pre-a4e7140 baseline (sign-error in Rayleigh slope); for historical comparison only — **not selectable in production** |
 
-`METHODS_DISPLAY` in `validation/compare_molecular_methods.py` is the ordered tuple used for display/aggregation (includes `eprof_v10`). `METHODS` in `rayleigh_calibration/rayleigh/molecular_methods.py` lists only the live-selectable methods.
+`METHODS_DISPLAY` in `validation/compare_molecular_methods.py` is the ordered tuple used for display/aggregation (includes `eprof_v10`). `METHODS` in `calibration/rayleigh/molecular_methods.py` lists only the live-selectable methods.
 
 **Long-run results (14 sites, full archive):** `optimal` is most precise (robust CV 10–14 %); `improved` best balances precision and yield; `main` has the highest yield (57 %) but noisiest nights; `calipso` highest yield (79 %) but weakest signal-selectivity. See the reports in `doc/reports/` (figures under `C:\DATA\Projects\202606_E-PROFILE_calibration\figs_paper_validation\molecular_methods_longrun\`).
 
@@ -126,13 +129,13 @@ For L2 levels: `rcs = attenuated_backscatter_0 × calibration_constant_0 × 1e-6
 ## Repository layout
 
 ```
-rayleigh_calibration/         installable package (public API unchanged)
+calibration/         installable package (public API unchanged)
 ├── config.py  plotting.py  main.py    shared config, plotting, CLI entry point
 ├── rayleigh/                molecular calibration: calibration.py, rayleigh_fit.py,
 │                            atmosphere.py, molecular_methods.py
 ├── io/                      data_loader.py (L1/L2/RAW readers) + output.py (CSV/NetCDF)
 ├── water_vapor_correction/  water_vapor.py (spectral two-way WV transmission)
-├── cloud_calibration/       cloud_calibration.py (liquid-cloud O'Connor method)
+├── cloud/       cloud/calibration.py (liquid-cloud O'Connor method)
 └── data/                    standard_atmosphere_US_1976_50km.csv (package data)
 scripts/        runnable calibration runners + data/ (acquisition) + doc_tools/
 validation/     comparison / sensitivity / reproduction studies  (validation/README.md)
@@ -148,7 +151,7 @@ directory — run scripts from the repo root). Figures and result archives are w
 
 ## Key source files
 
-### Core package (`rayleigh_calibration/`)
+### Core package (`calibration/`)
 
 | Module | Purpose |
 |---|---|
@@ -157,11 +160,11 @@ directory — run scripts from the repo root). Figures and result archives are w
 | `rayleigh/atmosphere.py` | Standard-atmosphere loader + Bucholtz molecular properties |
 | `rayleigh/rayleigh_fit.py` | Molecular-window grid search + lidar-constant fit |
 | `water_vapor_correction/water_vapor.py` | WV two-way transmission from CAMS; port of MATLAB `wv_t2eff` + `compute_wv_transmission` |
-| `cloud_calibration/cloud_calibration.py` | Liquid-cloud calibration (O'Connor method); bit-for-bit vs MATLAB |
+| `cloud/calibration.py` | Liquid-cloud calibration (O'Connor method); bit-for-bit vs MATLAB |
 | `io/data_loader.py` | Multi-level reader (L1/L2/RAW/Cloudnet CL61); fog-flag threading |
 | `io/output.py` | CF-compliant CSV + NetCDF writers |
 
-The public API is re-exported from the top level — `from rayleigh_calibration import
+The public API is re-exported from the top level — `from calibration import
 calibrate_rayleigh, CalibrationOptions, InstrumentInfo, ...` is unchanged.
 
 ### Scripts & studies
@@ -205,10 +208,15 @@ Primary output: CSV at `C:\DATA\Projects\202606_E-PROFILE_calibration\E-PROFILE_
 
 ## Changelog
 
+### 2026 — uv packaging + package rename
+
+- Switched packaging from Poetry to **uv** / PEP 621 (`pyproject.toml` `[project]` + hatchling build backend); removed `setup.py`. Install with `uv pip install -e ".[plotting]"`.
+- Renamed the import package `rayleigh_calibration` → **`calibration`** (it does both Rayleigh and cloud calibration). Method subpackages are now `rayleigh/` and `cloud/` (the latter was `cloud_calibration/`; its module is `cloud/calibration.py`). The distribution and CLI command are now `eprofile-calibration`. Public imports become `from calibration import …`.
+
 ### 2026 — repository reorganization
 
-- Package split into themed subpackages: `rayleigh/` (calibration, fit, atmosphere, molecular methods), `io/` (readers + writers), `water_vapor_correction/`, `cloud_calibration/`; shared `config.py` / `plotting.py` / `main.py` stay at the package top level. The public API (`from rayleigh_calibration import …`) is unchanged.
-- US Standard Atmosphere 1976 table shipped as package data (`rayleigh_calibration/data/`); `load_standard_atmosphere(None, grid)` resolves it regardless of the working directory.
+- Package split into themed subpackages: `rayleigh/` (calibration, fit, atmosphere, molecular methods), `io/` (readers + writers), `water_vapor_correction/`, `cloud/`; shared `config.py` / `plotting.py` / `main.py` stay at the package top level. The public API (`from calibration import …`) is unchanged.
+- US Standard Atmosphere 1976 table shipped as package data (`calibration/data/`); `load_standard_atmosphere(None, grid)` resolves it regardless of the working directory.
 - Loose scripts sorted into `scripts/` (runners + `data/`), `validation/` (studies), `examples/` (notebooks) and `lost_and_found/` (R&D scratch + logs); root `test_*.py` consolidated into `tests/`.
 - Figures and result archives moved out of the repo to `C:\DATA\Projects\202606_E-PROFILE_calibration`; hardcoded output paths in the scripts updated accordingly.
 
@@ -217,7 +225,7 @@ Primary output: CSV at `C:\DATA\Projects\202606_E-PROFILE_calibration\E-PROFILE_
 - **WV correction** added (`water_vapor.py`): spectral two-way T²_wv from CAMS + HITRAN LUT; mandatory for 910 nm (flag −4 on missing CAMS, no fallback). Effect: Payerne CL61 Feb-28 C_L +20 %.
 - **Six molecular methods** (`molecular_methods.py`): `main`/`improved`/`optimal`/`calipso`/`earlinet`/`bellini`; selectable via `molecular_method` in options.json.
 - **E-PROF versioning**: `main`→v1.1, `improved`→v1.2, `optimal`→v2; historical baseline `eprof_v10` (pre-sign-error) tracked in `METHODS_DISPLAY` for paper comparison.
-- **Cloud calibration port** (`cloud_calibration.py`): bit-for-bit vs MATLAB O'Connor; reads E-PROFILE L2 and Cloudnet CL61 RAW; full WV correction included.
+- **Cloud calibration port** (`cloud/calibration.py`): bit-for-bit vs MATLAB O'Connor; reads E-PROFILE L2 and Cloudnet CL61 RAW; full WV correction included.
 - **Fog exclusion**: `vertical_visibility` threaded through all readers; flagged profiles excluded from Rayleigh + cloud calibration.
 - **RAW data level**: native instrument reader for CHM15k β_raw and Cloudnet CL61 β_att day-folders/daily files.
 - **Cloudnet CL61 pipeline**: download → homogenize → calibrate scripts for Lindenberg and Hyytiala (ACTRIS-Cloudnet API).

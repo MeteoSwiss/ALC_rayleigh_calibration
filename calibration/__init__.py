@@ -15,7 +15,7 @@ Main Features
 
 Example Usage
 -------------
->>> from rayleigh_calibration import calibrate_rayleigh, load_instruments, CalibrationOptions
+>>> from calibration import calibrate_rayleigh, load_instruments, CalibrationOptions
 >>> 
 >>> # Load instrument configuration
 >>> instruments = load_instruments("instruments.json")

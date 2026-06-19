@@ -280,7 +280,7 @@ def apply_wv_correction_monthly(beta_cl61, time_cl61, height_cl61,
     Returns beta_corrected and trans2 (for diagnostics).
     """
     import json as _json
-    from rayleigh_calibration.cloud_calibration.cloud_calibration import (
+    from calibration.cloud.calibration import (
         CloudCalConfig, set_defaults, compute_wv_transmission, CeiloData, _matlab_datenum)
 
     _opt = _json.loads(Path("options.json").read_text())
@@ -583,7 +583,7 @@ def main():
 
     print("Computing molecular β at 910 nm for wavelength correction...", flush=True)
     try:
-        from rayleigh_calibration.rayleigh.atmosphere import load_standard_atmosphere, calculate_molecular_properties
+        from calibration.rayleigh.atmosphere import load_standard_atmosphere, calculate_molecular_properties
         from pathlib import Path as _Path
         std_atm_file = None  # use the US Standard Atmosphere shipped as package data
         atm = load_standard_atmosphere(std_atm_file, z_cl61)

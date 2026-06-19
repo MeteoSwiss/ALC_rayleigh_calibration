@@ -29,8 +29,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib import dates as mdates
 
-from rayleigh_calibration import calibrate_rayleigh, CalibrationOptions, InstrumentInfo, DataLevel
-from rayleigh_calibration.config import InstrumentType
+from calibration import calibrate_rayleigh, CalibrationOptions, InstrumentInfo, DataLevel
+from calibration.config import InstrumentType
 
 OUT = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/E-PROFILE_calibration_rayleigh/fullcal")
 A_MONTHLY = Path("A:/E-PROFILE_L2_monthly")

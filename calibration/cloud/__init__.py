@@ -5,7 +5,7 @@ validated against the reference. Reads E-PROFILE L2 or Cloudnet CL61 raw and app
 the mandatory water-vapour correction.
 """
 
-from .cloud_calibration import (
+from .calibration import (
     liquid_cloud_calibration,
     liquid_cloud_calibration_from_data,
     CloudCalConfig,

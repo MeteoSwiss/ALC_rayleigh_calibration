@@ -12,7 +12,7 @@ agree within a tight tolerance:
       coefficients, ``lidar_ratios`` = S_consistent at the valid profiles, ``cal_median``,
       ``cal_mean``, ``cal_mode``, ``cal_std``, ``n_profiles``, and ``data.trans2_wv``) to a
       v7 .mat file;
-  (b) it runs the Python port ``rayleigh_calibration.cloud_calibration`` on the same file
+  (b) it runs the Python port ``calibration.cloud`` on the same file
       with the SAME config;
   (c) it asserts a match within rtol on ``cal_median`` and on the valid
       ``calibration_coefficients`` (aligned by profile index), plus ``cal_mean``,
@@ -111,7 +111,7 @@ def run_python() -> dict:
     """Run the Python port and return the comparable quantities."""
     # ensure the package is importable when run as a plain script
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from rayleigh_calibration.cloud_calibration import (
+    from calibration.cloud import (
         liquid_cloud_calibration, CloudCalConfig)
 
     cfg = CloudCalConfig(

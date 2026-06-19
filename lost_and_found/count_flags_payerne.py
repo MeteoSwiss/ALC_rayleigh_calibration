@@ -8,8 +8,8 @@ for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
     os.environ[_v] = "1"
 from pathlib import Path
 from collections import Counter
-from rayleigh_calibration import calibrate_rayleigh, CalibrationOptions, InstrumentInfo, DataLevel
-from rayleigh_calibration.config import InstrumentType
+from calibration import calibrate_rayleigh, CalibrationOptions, InstrumentInfo, DataLevel
+from calibration.config import InstrumentType
 
 WMO, IDENT = "0-20000-0-06610", "C"
 LAT, LON, ALT = 46.8137, 6.9425, 491.0

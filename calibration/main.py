@@ -7,7 +7,7 @@ It's designed to be run as a cron job or scheduled task.
 
 Usage
 -----
-    python -m rayleigh_calibration.main [OPTIONS]
+    python -m calibration.main [OPTIONS]
 
 Options
 -------
@@ -20,8 +20,8 @@ Options
 
 Example
 -------
-    python -m rayleigh_calibration.main --date 20240115 --verbose
-    python -m rayleigh_calibration.main --date 20240101 20240131 --verbose
+    python -m calibration.main --date 20240115 --verbose
+    python -m calibration.main --date 20240101 20240131 --verbose
 """
 
 from __future__ import annotations

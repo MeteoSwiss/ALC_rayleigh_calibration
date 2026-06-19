@@ -29,7 +29,7 @@ import matplotlib.pyplot as plt
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-from rayleigh_calibration.water_vapor_correction.water_vapor import (  # noqa: E402
+from calibration.water_vapor_correction.water_vapor import (  # noqa: E402
     cams_water_vapor_profile, two_way_wv_transmission, load_abs_cross_section,
 )
 

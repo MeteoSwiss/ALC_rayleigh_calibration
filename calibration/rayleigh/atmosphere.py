@@ -17,9 +17,9 @@ from numpy.typing import NDArray
 from scipy.interpolate import interp1d
 
 
-# US Standard Atmosphere 1976 table shipped as package data (rayleigh_calibration/data/).
+# US Standard Atmosphere 1976 table shipped as package data (calibration/data/).
 # Resolved relative to the installed package so it works regardless of the current
-# working directory (atmosphere.py lives in rayleigh_calibration/rayleigh/).
+# working directory (atmosphere.py lives in calibration/rayleigh/).
 DEFAULT_STANDARD_ATMOSPHERE = (
     Path(__file__).resolve().parent.parent / "data" / "standard_atmosphere_US_1976_50km.csv"
 )

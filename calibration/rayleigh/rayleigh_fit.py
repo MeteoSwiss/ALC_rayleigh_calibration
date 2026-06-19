@@ -179,7 +179,7 @@ def find_optimal_molecular_window(
     method : str
         Detection strategy: "improved" (default; the in-line implementation below),
         or one of "main"/"matlab"/"calipso"/"earlinet"/"optimal", dispatched to
-        :mod:`rayleigh_calibration.rayleigh.molecular_methods`.
+        :mod:`calibration.rayleigh.molecular_methods`.
     """
     # Non-"improved" methods are dispatched to the pluggable selectors. "improved"
     # keeps the in-line implementation below (the production path, unchanged).

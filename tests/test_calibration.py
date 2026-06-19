@@ -1,18 +1,18 @@
 """
-Basic tests for the rayleigh_calibration package.
+Basic tests for the calibration package.
 """
 
 import pytest
 import numpy as np
 from pathlib import Path
 
-from rayleigh_calibration.config import (
+from calibration.config import (
     InstrumentType,
     InstrumentInfo,
     CalibrationOptions,
     CalibrationResult,
 )
-from rayleigh_calibration.rayleigh.atmosphere import (
+from calibration.rayleigh.atmosphere import (
     calculate_refractive_index,
     calculate_rayleigh_phase_function,
     calculate_molecular_properties,

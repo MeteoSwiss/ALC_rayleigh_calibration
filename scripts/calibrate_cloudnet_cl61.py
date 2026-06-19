@@ -16,8 +16,8 @@ except Exception:
     pass
 from pathlib import Path
 import numpy as np
-from rayleigh_calibration import calibrate_rayleigh, CalibrationOptions, InstrumentInfo, DataLevel
-from rayleigh_calibration.config import InstrumentType
+from calibration import calibrate_rayleigh, CalibrationOptions, InstrumentInfo, DataLevel
+from calibration.config import InstrumentType
 from compare_molecular_methods import METHODS, run_methods, calibrates
 
 ROOT = Path("R:/CL61/RAW_cloudnet_dl")
@@ -102,7 +102,7 @@ def main():
 
     # cloud calibration — run on ALL available days (cloud cal wants maximum data coverage)
     try:
-        from rayleigh_calibration.cloud_calibration import liquid_cloud_calibration, CloudCalConfig
+        from calibration.cloud import liquid_cloud_calibration, CloudCalConfig
         import json as _json
         opt = _json.loads(Path("options.json").read_text())
         for s in SITES:

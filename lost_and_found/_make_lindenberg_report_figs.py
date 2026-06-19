@@ -20,13 +20,13 @@ import types
 from pathlib import Path
 import numpy as np
 
-# The heavy rayleigh_calibration package is only needed by run_lindenberg_cl61_cal for
+# The heavy calibration package is only needed by run_lindenberg_cl61_cal for
 # calibrate_rayleigh (which we never call here — we only reuse its plotting/Kalman helpers).
 # OneDrive is mid-sync on that package, so stub it out to keep the import clean.
 for _name, _attrs in {
-    "rayleigh_calibration": ["calibrate_rayleigh", "CalibrationOptions",
+    "calibration": ["calibrate_rayleigh", "CalibrationOptions",
                              "InstrumentInfo", "DataLevel"],
-    "rayleigh_calibration.config": ["InstrumentType"],
+    "calibration.config": ["InstrumentType"],
 }.items():
     _m = types.ModuleType(_name)
     for _a in _attrs:

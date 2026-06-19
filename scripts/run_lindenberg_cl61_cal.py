@@ -68,13 +68,13 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
-from rayleigh_calibration import (
+from calibration import (
     calibrate_rayleigh,
     CalibrationOptions,
     InstrumentInfo,
     DataLevel,
 )
-from rayleigh_calibration.config import InstrumentType
+from calibration.config import InstrumentType
 
 # --- E-PROFILE operational Kalman filter -----------------------------------
 # Imported from the separate improve_alc_calib project (NOT vendored: we use the
@@ -315,7 +315,7 @@ def _cloud_one(ds: str) -> dict:
     """Worker: cloud-calibrate one day (WV on + off). Runs in a separate process."""
     warnings.filterwarnings("ignore")
     logging.getLogger().setLevel(logging.ERROR)
-    from rayleigh_calibration.cloud_calibration import (
+    from calibration.cloud import (
         liquid_cloud_calibration,
         CloudCalConfig,
     )

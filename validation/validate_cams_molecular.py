@@ -19,7 +19,7 @@ from scipy.io import savemat
 
 # The package is pip-installed and ships the US Standard Atmosphere as package data,
 # so no sys.path / cwd juggling is needed here.
-from rayleigh_calibration.rayleigh.atmosphere import (
+from calibration.rayleigh.atmosphere import (
     load_standard_atmosphere,
     load_cams_atmosphere,
     calculate_molecular_properties,

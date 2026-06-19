@@ -5,7 +5,7 @@ logging.getLogger().setLevel(logging.ERROR)
 from netCDF4 import Dataset
 import numpy as np
 import run_lindenberg_cl61_cal as m
-from rayleigh_calibration.cloud_calibration import liquid_cloud_calibration, CloudCalConfig
+from calibration.cloud import liquid_cloud_calibration, CloudCalConfig
 
 nc = str(m.DATA_ROOT / m.WMO / "20241001.nc")
 with Dataset(nc) as ds:

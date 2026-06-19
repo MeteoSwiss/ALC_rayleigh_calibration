@@ -1,6 +1,6 @@
 """Synthetic smoke test for molecular_methods: all 6 methods + temporal aerosol rejection."""
 import numpy as np
-from rayleigh_calibration.rayleigh.molecular_methods import (
+from calibration.rayleigh.molecular_methods import (
     METHODS, compute_window_grid, select_molecular_window,
 )
 
