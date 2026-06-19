@@ -1146,22 +1146,34 @@ def apply_transmission_correction(
             C_high[i] = S[i] / S_THEORETICAL
             continue
 
-        # B_aerosol = nansum(beta(5:max_idx-5))*range_resol
-        # MATLAB 1-based 5:(max_idx-5) inclusive -> 0-based [4 : max_idx-5] inclusive
+        # Integrated below-cloud backscatter, in the INSTRUMENT (uncalibrated) beta units:
+        #   nansum(beta(5:max_idx-5))*range_resol     (MATLAB 1-based 5:(max_idx-5) inclusive
+        #   -> 0-based [4 : max_idx-5] inclusive).
         seg = beta_profile[4:(max_idx - 5) + 1]
-        B_aerosol = np.nansum(seg) * range_resol
+        B_aerosol_raw = np.nansum(seg) * range_resol
+        # Convert to a PHYSICAL aerosol optical depth before the Beer-Lambert transmission.
+        # ``beta`` here is the uncalibrated attenuated backscatter (e.g. L2 stored in
+        # 1E-6*1/(m*sr) units, ~O(1)); the per-profile calibration coefficient
+        # C = S/S_THEORETICAL is exactly what scales it to physical 1/(m*sr), so
+        #   AOD = LR * integral(C * beta) dr = LR * C * B_aerosol_raw.
+        # Without the C factor the "AOD" is ~1e6x too large for L2 input and T2 underflows
+        # to 0 (the MATLAB reference shares this latent bug — its parity test is skipped).
+        C_base = S[i] / S_THEORETICAL
+        B_aerosol = C_base * B_aerosol_raw
         if B_aerosol <= 0:
-            C_corrected[i] = S[i] / S_THEORETICAL
-            C_low[i] = S[i] / S_THEORETICAL
-            C_high[i] = S[i] / S_THEORETICAL
+            C_corrected[i] = C_base
+            C_low[i] = C_base
+            C_high[i] = C_base
             continue
 
         T2 = np.exp(-2.0 * config.aerosol_lidar_ratio * B_aerosol)
         T2_low = np.exp(-2.0 * config.aerosol_lidar_ratio_low * B_aerosol)
         T2_high = np.exp(-2.0 * config.aerosol_lidar_ratio_high * B_aerosol)
-        C_corrected[i] = S[i] * T2 / S_THEORETICAL
-        C_low[i] = S[i] * T2_low / S_THEORETICAL
-        C_high[i] = S[i] * T2_high / S_THEORETICAL
+        # Same form as the MATLAB reference (C_corrected = C_base * T2); only B_aerosol's
+        # units were corrected above (the scale bug). T2 <= 1.
+        C_corrected[i] = C_base * T2
+        C_low[i] = C_base * T2_low
+        C_high[i] = C_base * T2_high
 
     return C_corrected, C_low, C_high
 

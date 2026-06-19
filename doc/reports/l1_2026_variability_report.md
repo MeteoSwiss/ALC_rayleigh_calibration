@@ -191,34 +191,41 @@ attenuated backscatter — so only their **precision and consistency** are compa
 
 | instrument | cloud months | cloud σ_within-month % | cloud σ_month-to-month % | Rayleigh n | Rayleigh σ_night % | Rayleigh σ_SD % |
 |---|--:|--:|--:|--:|--:|--:|
-| Birkenes | 2 | 10.5 | 2.4 | 14 | 9.3 | 7.9 |
-| Camborne | 2 | 45.2 | 25.4 | 8 | 10.6 | 10.4 |
-| Lanzhot | 2 | 7.4 | 5.0 | 35 | 8.8 | 4.7 |
-| Lauder | 2 | 11.0 | 12.5 | 42 | 6.9 | 6.0 |
-| Aosta | 2 | 17.0 | 0.9 | 41 | 7.8 | 7.5 |
-| Sion / EPFL | 2 | 8.6 | 5.8 | 22 | 10.1 | 6.3 |
-| Temelín | 1 | 16.3 | – | 15 | 10.8 | 7.7 |
-| Uccle | 4 | 27.2 | 22.6 | 0 | – | – |
-| Zeebrugge | 4 | 36.1 | **105.9** | 6 | 7.5 | **14.5** |
-| Edmonton | 1 | 2.9 | – | 0 | – | – |
+| Birkenes | 2 | 11.4 | 0.9 | 14 | 9.3 | 7.9 |
+| Camborne | 2 | 45.7 | 26.5 | 8 | 10.6 | 10.4 |
+| Lanzhot | 2 | 7.2 | 4.0 | 35 | 8.8 | 4.7 |
+| Lauder | 2 | 10.7 | 11.8 | 42 | 6.9 | 6.0 |
+| Aosta | 2 | 16.8 | 0.7 | 41 | 7.8 | 7.5 |
+| Sion / EPFL | 2 | 8.4 | 5.6 | 22 | 10.1 | 6.3 |
+| Temelín | 1 | 16.5 | – | 15 | 10.8 | 7.7 |
+| Uccle | 4 | 27.3 | 21.4 | 0 | – | – |
+| Zeebrugge | 4 | 36.0 | **105.3** | 6 | 7.5 | **14.5** |
+| Edmonton | 1 | 3.0 | – | 0 | – | – |
+
+The cloud calibration runs with the **above-cloud aerosol two-way transmission correction applied**
+(see the fix note below); its effect is a physically sensible −4 to −6 % on the coefficient.
 
 - **On the well-exposed CL61 the two independent methods agree at the ~10 % level**: Lanzhot (cloud
-  σ_within-month 7.4 %, Rayleigh σ_night 8.8 %), Sion (8.6 / 10.1), Birkenes (10.5 / 9.3), Lauder
-  (11.0 / 6.9). This is strong corroboration — a method that does *not* use a molecular window
+  σ_within-month 7.2 %, Rayleigh σ_night 8.8 %), Sion (8.4 / 10.1), Birkenes (11.4 / 9.3), Lauder
+  (10.7 / 6.9). This is strong corroboration — a method that does *not* use a molecular window
   reproduces the Rayleigh-derived calibratability.
-- **Both methods independently flag Zeebrugge as anomalous** (cloud month-to-month 106 %, cloud
+- **Both methods independently flag Zeebrugge as anomalous** (cloud month-to-month 105 %, cloud
   coefficient ~10× the others; Rayleigh σ_SD 14.5 %, the worst CL61) — an instrument/site issue, not
   a method artefact.
-- **Camborne and Uccle are noisier in the cloud method** (45 %, 27 %) on only 2–4 months with few
+- **Camborne and Uccle are noisier in the cloud method** (46 %, 27 %) on only 2–4 months with few
   clean liquid clouds; their Rayleigh values (σ_SD 10.4 %; n=0 for Uccle) are the more reliable there.
 - The mean cloud within-month scatter (18 %, inflated by Camborne/Uccle/Zeebrugge) is larger than the
   Rayleigh σ_SD (8 %), as expected for a sparse monthly cloud sample — but where both have data they
   **agree on which CL61 are stable and which are not**, which is the point of a cross-check.
 
-*(Note: the cloud port's optional above-cloud aerosol-transmission refinement currently collapses the
-median coefficient to zero on the 2026 monthly L2 — a regression in that step — so the cross-check
-uses the base O'Connor coefficient, which is valid. Driver: `validation/run_cl61_cloud_l1_2026.py`,
-`cl61_cloud_vs_rayleigh.py`.)*
+*(Fix: the cloud `apply_transmission_correction` step previously produced a zero-median coefficient
+on L2 input — it integrated the **uncalibrated** stored backscatter (`B_aerosol = ∫β dr`, ~1e6×
+too large for L2's 1E-6*1/(m·sr) units), so `T² = exp(−2·LR·B_aerosol)` underflowed to 0. Now the
+integral is converted to a physical optical depth with the per-profile coefficient
+`AOD = LR·(S/S_THEORETICAL)·∫β dr` before the Beer–Lambert factor, giving the −4 to −6 % correction
+above. The MATLAB reference `liquid_cloud_calibration.m` carries the same latent bug — its parity
+test is skipped, so it was never caught; it needs the same one-line fix. Driver:
+`validation/run_cl61_cloud_l1_2026.py`, `cl61_cloud_vs_rayleigh.py`.)*
 
 ---
 
@@ -265,8 +272,9 @@ takes `YYYYMM` + `--archive` to regenerate for any snapshot.)
 2. **Keep `calipso` out** — physically inappropriate for ground-up ALCs.
 3. **Apply the WV correction on the CL61** — it brings the 910 nm units to CHM15k-class stability.
 4. **The liquid-cloud calibration is a valid independent cross-check** for CL61 — it agrees with the
-   Rayleigh at ~10 % on well-exposed units and flags the same problem instruments. (Fix the
-   transmission-correction regression to use it quantitatively at the monthly level.)
+   Rayleigh at ~10 % on well-exposed units and flags the same problem instruments. The above-cloud
+   aerosol-transmission step now works (a scale bug that zeroed it on L2 input was fixed); port the
+   same one-line fix to the MATLAB `liquid_cloud_calibration.m`.
 5. **Flag the outlier units**: Brest Mini-MPL, Zeebrugge & Camborne CL61, Payerne CHM15k (aerosol).
 6. **Feed per-night constants to the Kalman**, which absorbs the sparsity and residual outliers.
 

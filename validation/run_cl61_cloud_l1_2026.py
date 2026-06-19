@@ -79,10 +79,7 @@ def run_instrument(inst):
             nc_file=str(f),
             instrument="CL61",
             apply_wv_correction=True,
-            # The optional above-cloud aerosol-transmission refinement currently collapses the
-            # median coefficient to 0 on the 2026 monthly L2 (a regression in that step); the base
-            # O'Connor coefficient (without it) is valid and is what we cross-check against.
-            apply_transmission_correction=False,
+            apply_transmission_correction=True,   # below-cloud aerosol two-way transmission
             cams_folder=OPTS.get("cams_folder", "D:/CAMS/"),
             abs_cs_lookup_table=WV_LUT,
             station_latitude=inst["lat"],
