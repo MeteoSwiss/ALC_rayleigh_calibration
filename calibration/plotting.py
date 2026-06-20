@@ -656,28 +656,26 @@ def plot_rayleigh_diagnostics_compact(
     """Wide Rayleigh dashboard: molecular, window, sensitivity and an annotated RCS panel."""
     plt = _get_plt()
 
-    fig = plt.figure(figsize=(26, 13), layout="constrained")
-    gs = fig.add_gridspec(4, 5, hspace=0.45, wspace=0.4)
+    fig = plt.figure(figsize=(24, 14), layout="constrained")
+    gs = fig.add_gridspec(4, 6)            # every cell is filled -> no empty whitespace
 
-    # Rows 1-3 left: molecular fit three panels (stacked)
-    ax_m1 = fig.add_subplot(gs[0:2, 0])
-    ax_m2 = fig.add_subplot(gs[0:2, 1])
-    ax_m3 = fig.add_subplot(gs[0:2, 2])
+    # Row 0: molecular fit (3 panels)
+    ax_m1 = fig.add_subplot(gs[0, 0:2])
+    ax_m2 = fig.add_subplot(gs[0, 2:4])
+    ax_m3 = fig.add_subplot(gs[0, 4:6])
 
-    # Rows 1-3 right: window-search three panels (stacked)
-    ax_w1 = fig.add_subplot(gs[0, 3:5])
-    ax_w2 = fig.add_subplot(gs[1, 3:5])
-    ax_w3 = fig.add_subplot(gs[2, 3:5])
-    
-    # Row 2, left three cols: annotated RCS pcolor (one row above the sensitivity panels)
-    ax_r = fig.add_subplot(gs[2, 0:3])
+    # Row 1: window-search (3 panels)
+    ax_w1 = fig.add_subplot(gs[1, 0:2])
+    ax_w2 = fig.add_subplot(gs[1, 2:4])
+    ax_w3 = fig.add_subplot(gs[1, 4:6])
 
-    # Bottom row, left three cols: sensitivity subpanels
-    ax_s1 = fig.add_subplot(gs[3, 0])
-    ax_s2 = fig.add_subplot(gs[3, 1])
-    ax_s3 = fig.add_subplot(gs[3, 2])
+    # Rows 2-3, left two-thirds: the full RCS time-height matrix (the dominant panel)
+    ax_r = fig.add_subplot(gs[2:4, 0:4])
 
-  
+    # Rows 2-3, right third: sensitivity grid (top) and lidar-constant spread (bottom)
+    ax_s1 = fig.add_subplot(gs[2, 4:6])
+    ax_s3 = fig.add_subplot(gs[3, 4:6])
+
 
     # --- Molecular panels ---
     z_km = (range_alc + altitude) * 1e-3
@@ -753,22 +751,15 @@ def plot_rayleigh_diagnostics_compact(
 
     vals = cl_matrix[np.isfinite(cl_matrix)].ravel()
     if vals.size:
-        ax_s2.boxplot(vals, widths=0.5)
-        ax_s2.axhline(cl_median, color="#d62728", lw=1.0)
-        ax_s2.axhspan(cl_median - cl_uncertainty, cl_median + cl_uncertainty, color="#d62728", alpha=0.12)
-    ax_s2.set_xticks([])
-    ax_s2.set_title("All combos")
-    ax_s2.set_ylabel("Lidar constant")
-    ax_s2.grid(True, axis="y", alpha=0.25)
-
-    if vals.size:
         jitter = np.linspace(-0.08, 0.08, vals.size)
-        ax_s3.scatter(1 + jitter, vals, s=18, alpha=0.5)
-        ax_s3.axhline(cl_median, color="#d62728", lw=1.0)
-        ax_s3.axhspan(cl_median - cl_uncertainty, cl_median + cl_uncertainty, color="#d62728", alpha=0.12)
+        ax_s3.scatter(1 + jitter, vals, s=18, alpha=0.5, label="LR×shift combos")
+        ax_s3.axhline(cl_median, color="#d62728", lw=1.0, label="median")
+        ax_s3.axhspan(cl_median - cl_uncertainty, cl_median + cl_uncertainty,
+                      color="#d62728", alpha=0.12, label="±1σ")
+        ax_s3.legend(fontsize=7, loc="best")
     ax_s3.set_xlim(0.7, 1.3)
     ax_s3.set_xticks([])
-    ax_s3.set_title("Spread")
+    ax_s3.set_title("Lidar-constant spread")
     ax_s3.set_ylabel("Lidar constant")
     ax_s3.grid(True, axis="y", alpha=0.25)
 
@@ -804,19 +795,27 @@ def plot_rayleigh_diagnostics_compact(
         used[np.asarray(used_profile_indices, dtype=int)] = True
     not_used = ~used
 
-    # shade the NOT-used profiles: cloud-flagged (red) vs not-flagged-but-unused (grey)
-    seen_flag = seen_unused = False
-    for i in np.where(not_used)[0]:
-        x0 = hours_since_start[i]
-        x1 = hours_since_start[i + 1] if i < n_t - 1 else x0 + dt
-        if flagged[i]:
-            ax_r.axvspan(x0, x1, color="red", alpha=0.18, lw=0,
-                         label=None if seen_flag else "flagged (cloud)")
-            seen_flag = True
-        else:
-            ax_r.axvspan(x0, x1, color="0.55", alpha=0.35, lw=0,
-                         label=None if seen_unused else "not flagged, not used")
-            seen_unused = True
+    # HATCHED overlay over the EXCLUDED (not-used) profiles, drawn on top of the full RCS matrix
+    # so the signal stays visible underneath: cloud-flagged columns get red "///" hatching,
+    # other unused columns get grey "\\\" hatching. Contiguous runs are merged into one span so
+    # the hatch reads cleanly rather than as per-bin slivers.
+    def _hatched_runs(mask, facecolor, hatch, label):
+        idx = np.where(mask)[0]
+        if idx.size == 0:
+            return
+        runs = np.split(idx, np.where(np.diff(idx) > 1)[0] + 1)
+        first = True
+        for run in runs:
+            x0 = hours_since_start[run[0]]
+            j = run[-1]
+            x1 = hours_since_start[j + 1] if j < n_t - 1 else hours_since_start[j] + dt
+            ax_r.axvspan(x0, x1, facecolor="none", edgecolor=facecolor, hatch=hatch,
+                         linewidth=0.0, alpha=0.85, zorder=3,
+                         label=(label if first else None))
+            first = False
+
+    _hatched_runs(not_used & flagged, "red", "///", "flagged (low cloud)")
+    _hatched_runs(not_used & ~flagged, "0.25", "\\\\", "screened / not used")
 
     # cloud detections (lowest cloud base over time)
     if cbh0 is not None and np.any(np.isfinite(cbh0)):
@@ -832,7 +831,8 @@ def plot_rayleigh_diagnostics_compact(
 
     ax_r.set_xlabel("Hours since start")
     ax_r.set_ylabel("Range (km)")
-    ax_r.set_title("RCS — molecular layer, cloud detections, used vs flagged / unused")
+    ax_r.set_title("Range-corrected signal — full matrix, molecular layer (gold), "
+                   "cloud base (dots), excluded profiles hatched")
     ax_r.grid(True, alpha=0.2)
     ax_r.legend(loc="upper right", fontsize=7, framealpha=0.85, ncol=2)
 

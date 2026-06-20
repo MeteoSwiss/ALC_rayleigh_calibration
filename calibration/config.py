@@ -176,8 +176,10 @@ class CalibrationOptions:
     screen_profile_outliers: bool = True
     profile_outlier_nmad: float = 4.0
 
-    # Plotting flags
+    # Plotting flags. plot_main -> the single compact Rayleigh diagnostics dashboard only.
+    # plot_all -> additionally emit the simple per-step RCS plots (time-series + annotated).
     plot_main: bool = False
+    plot_all: bool = False
 
     # Cloud detection
     z_low_cloud: float = 4000.0  # Maximum altitude for low cloud detection (m)
@@ -270,6 +272,7 @@ class CalibrationOptions:
             screen_profile_outliers=bool(data.get("screen_profile_outliers", 1)),
             profile_outlier_nmad=float(data.get("profile_outlier_nmad", 4.0)),
             plot_main=bool(data.get("plot_main", 0)),
+            plot_all=bool(data.get("plot_all", 0)),
             z_low_cloud=float(data.get("z_low_cloud", 4000)),
             max_ratio_cloudy=float(data.get("max_ratio_cloudy", 0.5)),
             lidar_ratio_aerosol=float(data.get("LRaer", 52)),

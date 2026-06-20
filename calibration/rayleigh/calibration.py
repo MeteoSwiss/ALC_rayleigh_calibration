@@ -325,8 +325,8 @@ def calibrate_rayleigh(
             message="No profiles in nighttime window",
         )
 
-    # ── Plot: RCS time-series (before cloud filtering) ──
-    if options.plot_main:
+    # ── Plot: RCS time-series (before cloud filtering) — extra detail, gated on plot_all ──
+    if options.plot_all:
         pdir = _plot_dir(options, info, date_str)
         tag = _plot_tag(info, date_str)
         try:
@@ -560,8 +560,8 @@ def calibrate_rayleigh(
         rcs_mean_samples.append(_agg(rcs_use[idx], axis=0))
         time_subset_indices.append(keep_idx[idx])   # map back to original indices
 
-    # ── Plot: RCS with molecular window annotation ──
-    if options.plot_main:
+    # ── Plot: RCS with molecular window annotation — extra detail, gated on plot_all ──
+    if options.plot_all:
         pdir = _plot_dir(options, info, date_str)
         tag = _plot_tag(info, date_str)
         # Calculate sensitivity range (window ± max altitude shift)

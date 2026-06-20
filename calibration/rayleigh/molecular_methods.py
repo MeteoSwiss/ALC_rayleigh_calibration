@@ -92,8 +92,14 @@ DEFAULT_PARAMS: Dict[str, Dict[str, Any]] = {
     "eprof_v0.25": dict(min_r2=0.5, range_end_cap_m=5000.0),
     "earlinet": dict(min_window_start_m=2000.0, max_residual_pct=10.0,
                      max_ratio_std=0.30, max_scattering_ratio=1.1, max_rel_error=15.0),
-    "eprof_v2": dict(min_window_start_m=2000.0, min_r2=0.5, max_residual_pct=12.0,
-                     max_scattering_ratio=1.1, max_ratio_std=0.30, max_temporal_cv=0.5,
+    # Gates optimized 2026-06 over 24 instruments x both levels x all clear nights (see
+    # validation/run_v2_sweep.py + doc/reports/v2_optimization_report.md, config "C8"). The
+    # scattering-ratio gate was the dominant cause of clear-night rejections (esp. CL61), so it
+    # was relaxed 1.10 -> 1.15; start/r2/residual/ratio_std/temporal were eased moderately. This
+    # raises valid-night yield on every instrument type and level while holding sigma_SD ~flat.
+    # Previous baseline: start=2000, r2=0.5, residual=12, scattering=1.1, ratio_std=0.30, tcv=0.5.
+    "eprof_v2": dict(min_window_start_m=1500.0, min_r2=0.40, max_residual_pct=16.0,
+                     max_scattering_ratio=1.15, max_ratio_std=0.40, max_temporal_cv=0.8,
                      max_rel_error=15.0, w_ratio=0.25, w_resid=0.20, w_snr=0.10,
                      w_npts=0.10, w_tvar=0.35, w_rel=0.20,
                      flag_nmad=4.0, flag_min_excess=0.25),
