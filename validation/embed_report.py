@@ -35,9 +35,9 @@ def main():
         return f"![{caption}](data:image/png;base64,{b64})"
 
     out = IMG.sub(repl, text)
-    dst = report.with_name(report.stem + "_embedded.md")
+    dst = report                      # embed in place -> a single report file with figures
     dst.write_text(out, encoding="utf-8")
-    print(f"wrote {dst}  ({dst.stat().st_size/1e6:.2f} MB)")
+    print(f"embedded figures in place: {dst}  ({dst.stat().st_size/1e6:.2f} MB)")
     if missing:
         print("  WARNING missing figures:", *missing, sep="\n   ")
 
