@@ -1,7 +1,7 @@
 """
 analyze_network.py — summarize the network-wide v2(C8)-vs-v1.1 comparison (run_network_v2_vs_v11.py).
 Per stream and per level: valid% (valid calibrations / clear nights) and sigma_SD (robust
-successive-difference precision, % of median C). Aggregated per instrument type, with PAIRED
+successive-difference precision, % of median C_L). Aggregated per instrument type, with PAIRED
 per-stream deltas (v2 - v1.1). Landscape figures + a summary JSON + a markdown report fragment.
 """
 from __future__ import annotations
@@ -110,7 +110,7 @@ def fig_bars(agg, path):
             ax.set_xticks(x); ax.set_xticklabels([f"{t}\n(n={agg[lvl][t]['n_streams']})" for t in TYPES])
             ax.set_title(ttl, fontweight="bold"); ax.grid(axis="y", alpha=0.3); ax.legend()
         a_valid.set_ylabel("valid calibrations (%)  median over streams")
-        a_sd.set_ylabel("σ_SD (% of median C)  median over streams")
+        a_sd.set_ylabel("σ_SD (% of median C_L)  median over streams")
     fig.suptitle("Network-wide: optimized E-PROF v2 (C8) vs E-PROF v1.1 — 164 streams, 2026",
                  fontsize=15)
     fig.tight_layout()
