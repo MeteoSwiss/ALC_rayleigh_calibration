@@ -159,12 +159,19 @@ On native L1 (3 streams/type, K6 gates) we swept `average_time_s` ∈ {30 … 12
 "fully-attenuating + temporally-consistent" gates and biasing ∫β dz. Rayleigh averages to lift the
 *weak* molecular signal aloft — cloud calibration has the opposite need.
 
-**This reframes L1 vs L2:** L2's advantage is the calibrated β_att (correct variable/units), **not**
-averaging — its fixed 5‑min grid is actually a sub‑optimal point on this curve. Native-resolution L1
-(no averaging) out-yields L2 @ 300 s for CL31 (79 vs 67 %) and CL61 (68 vs 42 %), though with higher
-σ_SD. Practical guidance: **don't pre-average** (`average_time_s` → native/None); on L2 you are capped at
-the 300 s grid regardless. (CL51 is omitted from the averaging table — the 3 sampled streams have too few
-valid cloud days to be reliable.)
+**Mechanism confirmed by a stage trace** (CL61 0‑20000‑0‑03808, K6): native L1 carries **1437 profiles/day**
+(~60 s) vs 288 at 300 s. The `n_consecutive` temporal-consistency gate needs several consecutive in-cloud
+profiles within tolerance — at 60 s that is ~minutes of stable cloud, at 300 s it is ~15 min, so coarse
+binning collapses the valid count: 2026‑02‑04 **71 → 3**, 2026‑02‑12 **64 → 0**. Crucially, at the *same*
+300 s grid **L1 ≈ L2** (3 vs 3, 0 vs 0) — so the L1↔L2 cloud difference is the **cadence/averaging**, not a
+data-quality gap (the L1↔L2 Rayleigh difference is the *same grid story, opposite sign*: Rayleigh needs the
+coarser L2 grid, cloud needs the fine native grid).
+
+**This reframes L1 vs L2:** L2's only structural disadvantage for cloud is its **fixed 5‑min grid** — a
+sub‑optimal point on this curve. Native-resolution L1 (no averaging) out-yields L2 @ 300 s for CL31
+(79 vs 67 %) and CL61 (68 vs 42 %), though with higher σ_SD. Practical guidance: **don't pre-average**
+(`average_time_s` → native/None); on L2 you are capped at the 300 s grid regardless. (CL51 omitted from the
+averaging table — the 3 sampled streams have too few valid cloud days to be reliable.)
 
 ## Reproduce
 ```
