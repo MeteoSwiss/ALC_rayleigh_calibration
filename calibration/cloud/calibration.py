@@ -27,9 +27,10 @@ The reported calibration constant is the Wiegner lidar constant ``C_L = RCS / be
 (the SAME definition and units as the Rayleigh product), so the cloud and Rayleigh
 constants are directly comparable on one axis. The O'Connor cloud coefficient ``C`` is a
 MULTIPLIER on the file's already-calibrated backscatter:  ``beta_true = C * beta_file``.
-``C ~ 1`` only when the file's ``calibration_constant_0`` is already the true constant;
-E-PROFILE L2 often stores a nominal placeholder (CL61=1.0, CL31/CL51=1e8), so C absorbs the
-offset (e.g. CL31 C~1.6e-6) and the absolute constant below recovers the true value. Because
+``C ~ 1`` only when the file's ``calibration_constant_0`` is already the true constant. In
+E-PROFILE L2, CL31/CL51 store a FIXED nominal placeholder (1e8) so C is far from 1 (e.g. CL31
+C~1.6e-6); CL61 carries a real per-stream constant near 1 (~0.9-1.1) so C~1. Either way the
+absolute constant below recovers the true value. Because
 the file's ``beta_att`` was produced with the applied constant ``calibration_constant_0``
 (= RCS/beta_att = the operationally-applied C_L), the absolute Wiegner constant is
 

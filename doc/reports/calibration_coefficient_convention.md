@@ -50,12 +50,18 @@ C = S_apparent / 18.8 = β_true / β_att,file
 `C` is therefore the **inverse sense** of `C_L` (`C ∝ β/signal`, `C_L ∝ signal/β`): the two
 conventions are reciprocals, `C_r = 1/C_c` in the user's shorthand.
 
-`C ≈ 1` **only when the file's `calibration_constant_0` is already the true lidar constant.**
-E-PROFILE L2 frequently stores a *nominal placeholder* instead (observed: **CL61 = 1.0**,
-**CL31 / CL51 = 1×10⁸**), so `C` departs from 1 to absorb the nominal-vs-true offset (e.g. CL31
-`C ≈ 1.6×10⁻⁶`). That is expected, not an error: the absolute constant below recovers the true
-value regardless of the placeholder. Because CL31/CL51 cannot be Rayleigh-calibrated, this
-cloud-derived `C_L` is their **only** absolute calibration.
+`C ≈ 1` only when the file's `calibration_constant_0` is already the true lidar constant. Across
+the 2026 network this splits by type (sampled, 8 streams/type):
+
+- **CL31 / CL51 L2 store a fixed nominal placeholder `calibration_constant_0 = 1×10⁸`** (these
+  cannot be Rayleigh-calibrated). So `C` is far from 1 (e.g. CL31 `C ≈ 1.6×10⁻⁶`), and
+  `C_L = calibration_constant_0 / C` is their **only** absolute calibration.
+- **CL61 L2 carries a real per-stream constant near 1** (observed 0.91–1.10), so for CL61
+  `C ≈ 1` and `C_L ≈ calibration_constant_0 × (1/C)` ≈ the operational value times the cloud
+  correction.
+
+Either way the absolute `C_L` is the headline; a `C` far from 1 is **expected** for CL31/CL51,
+not an error.
 
 To report in the Wiegner convention, note the file's `β_att,file` was made with the applied
 constant `calibration_constant_0` (= `RCS/β_att,file` = the operationally-applied `C_L`). Hence
