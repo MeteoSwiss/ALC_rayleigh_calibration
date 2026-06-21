@@ -26,10 +26,12 @@ Coefficient convention (Wiegner & Geiss 2012)
 The reported calibration constant is the Wiegner lidar constant ``C_L = RCS / beta_att``
 (the SAME definition and units as the Rayleigh product), so the cloud and Rayleigh
 constants are directly comparable on one axis. The O'Connor cloud coefficient ``C`` is a
-MULTIPLIER on the file's already-calibrated backscatter:  ``beta_true = C * beta_file``,
-with ``C ~ 1`` when the file is well calibrated. Because the file's ``beta_att`` was
-produced with the applied constant ``calibration_constant_0`` (= RCS/beta_att = the
-operationally-applied C_L), the absolute Wiegner constant from the cloud method is
+MULTIPLIER on the file's already-calibrated backscatter:  ``beta_true = C * beta_file``.
+``C ~ 1`` only when the file's ``calibration_constant_0`` is already the true constant;
+E-PROFILE L2 often stores a nominal placeholder (CL61=1.0, CL31/CL51=1e8), so C absorbs the
+offset (e.g. CL31 C~1.6e-6) and the absolute constant below recovers the true value. Because
+the file's ``beta_att`` was produced with the applied constant ``calibration_constant_0``
+(= RCS/beta_att = the operationally-applied C_L), the absolute Wiegner constant is
 
       C_L = calibration_constant_0 / C .
 
@@ -1306,6 +1308,10 @@ class CloudCalResults:
     calibration_factor: float = float("nan")      # 1 / C  (Wiegner-sense inverse)
     # C (O'Connor 2004 multiplier): beta_true = C * beta_file; ~1 when the file is well calibrated.
     calibration_coefficient: float = float("nan")  # C  (O'Connor multiplier, diagnostic)
+    # Operationally-applied constant from the file (calibration_constant_0); used to map the
+    # per-profile O'Connor C to per-profile Wiegner C_L = calibration_constant_applied / C.
+    # NaN when the file carries no applied constant (e.g. raw L1).
+    calibration_constant_applied: float = float("nan")
     lidar_ratios: NDArray = field(default_factory=lambda: np.array([]))
     cal_mean: float = float("nan")
     cal_median: float = float("nan")
@@ -1580,9 +1586,10 @@ def liquid_cloud_calibration_from_data(data: CeiloData, config: CloudCalConfig) 
     # Absolute Wiegner lidar constant C_L = calibration_constant_applied / C, comparable to the
     # Rayleigh product. NaN when the input file carried no applied constant (e.g. raw L1).
     cc_applied = getattr(data, "calibration_constant_applied", None)
-    if (cc_applied is not None and np.isfinite(cc_applied)
-            and np.isfinite(cal_median) and cal_median != 0.0):
-        res.lidar_constant = float(cc_applied / cal_median)
+    if cc_applied is not None and np.isfinite(cc_applied):
+        res.calibration_constant_applied = float(cc_applied)
+        if np.isfinite(cal_median) and cal_median != 0.0:
+            res.lidar_constant = float(cc_applied / cal_median)
     res.lidar_ratios = S_consistent[valid_idx]
     res.cal_mean = cal_mean
     res.cal_median = cal_median

@@ -44,11 +44,18 @@ and integrates it through a fully-attenuating liquid cloud, comparing to the the
 `1/(2·S)` with `S = 18.8 sr`. Its native output is the **O'Connor multiplier**
 
 ```
-C = S_apparent / 18.8 = β_true / β_att,file        (C ≈ 1 when the file is well calibrated)
+C = S_apparent / 18.8 = β_true / β_att,file
 ```
 
 `C` is therefore the **inverse sense** of `C_L` (`C ∝ β/signal`, `C_L ∝ signal/β`): the two
 conventions are reciprocals, `C_r = 1/C_c` in the user's shorthand.
+
+`C ≈ 1` **only when the file's `calibration_constant_0` is already the true lidar constant.**
+E-PROFILE L2 frequently stores a *nominal placeholder* instead (observed: **CL61 = 1.0**,
+**CL31 / CL51 = 1×10⁸**), so `C` departs from 1 to absorb the nominal-vs-true offset (e.g. CL31
+`C ≈ 1.6×10⁻⁶`). That is expected, not an error: the absolute constant below recovers the true
+value regardless of the placeholder. Because CL31/CL51 cannot be Rayleigh-calibrated, this
+cloud-derived `C_L` is their **only** absolute calibration.
 
 To report in the Wiegner convention, note the file's `β_att,file` was made with the applied
 constant `calibration_constant_0` (= `RCS/β_att,file` = the operationally-applied `C_L`). Hence
@@ -73,8 +80,8 @@ Code: `CloudCalResults` exposes, in order of preference —
 | field | symbol | meaning |
 |---|---|---|
 | `lidar_constant` | `C_L` | absolute Wiegner constant `= calibration_constant_0 / C` (headline; NaN if the file has no applied constant, e.g. raw L1) |
-| `calibration_factor` | `1/C` | dimensionless Wiegner-sense correction (≈ 1) — *the inverse, reported whenever possible* |
-| `calibration_coefficient` | `C` | O'Connor multiplier (internal/diagnostic) |
+| `calibration_factor` | `1/C` | dimensionless Wiegner-sense correction — *the inverse, reported whenever possible* |
+| `calibration_coefficient` | `C` | O'Connor multiplier (internal/diagnostic; ≈1 only if the file constant is the true one) |
 
 ## Variability metric is convention-independent
 
