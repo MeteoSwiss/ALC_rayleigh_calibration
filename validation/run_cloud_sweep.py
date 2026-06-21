@@ -130,9 +130,10 @@ def run_one(args):
 def select(phase):
     if phase == "2":
         return list(MANIFEST)
+    n = int(os.environ.get("RC_NTYPE", "10"))   # phase 1: top-n streams per type
     sub = []
     for t in ("CL31", "CL51", "CL61"):
-        sub += sorted([m for m in MANIFEST if m["group"] == t], key=lambda m: -m["n_days"])[:10]
+        sub += sorted([m for m in MANIFEST if m["group"] == t], key=lambda m: -m["n_days"])[:n]
     return sub
 
 
