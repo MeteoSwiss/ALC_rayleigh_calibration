@@ -62,34 +62,48 @@ def outlier_pct(c):
     return float(100 * np.mean(np.abs(r) > 3 * s)) if s > 0 else 0.0
 
 
-def load_station(label):
-    m = META[label]
-    netf = NET / f"net_L1_{label}.json"
-    lite = DIR / f"diaglite_{label}.json"
+def _net_metrics(level, label, n_days):
+    """v2 metrics from a net_<level>_<label>.json: (cl_dts, cls, n_fit, clear%, valid-of-clear%,
+    valid-of-archive%, sigma_SD, outlier%). Returns None if the file is missing."""
+    netf = NET / f"net_{level}_{label}.json"
     if not netf.exists():
         return None
     nights = json.loads(netf.read_text())
     order = sorted(nights)
-    n_fit = len(order)
     cl_dts, cls = [], []
     for ds in order:
         ok, cl, rel = nights[ds]["v2"]
         if ok and np.isfinite(cl) and cl > 0 and np.isfinite(rel) and rel <= QC:
             cl_dts.append(datetime.strptime(ds, "%Y%m%d")); cls.append(cl)
     cls = np.asarray(cls, float)
-    hk = json.loads(lite.read_text()) if lite.exists() else {}
-    n_days = max(int(m.get("n_days", n_fit)), 1)
-    return dict(
-        label=label, group=m["group"], site=m.get("site", label),
-        n_days=n_days, n_fit=n_fit, n_valid=int(cls.size), cl_dts=cl_dts, cls=cls,
-        clear_frac=100.0 * n_fit / n_days,
-        valid_of_data=100.0 * cls.size / n_days,
-        scat_med=float(hk.get("scat", np.nan)),
-        sig_med=float(hk.get("sig", np.nan)),
-        bg_noise=float(hk.get("bg", np.nan)),
-        laser_med=float(hk.get("laser", np.nan)),
-        wt_med=float(hk.get("wtrans", np.nan)),
-        sigma_sd=sigma_sd(cls), outlier=outlier_pct(cls))
+    n_fit = len(order)
+    return dict(cl_dts=cl_dts, cls=cls, n_fit=n_fit, n_valid=int(cls.size),
+                clear_frac=100.0 * n_fit / n_days,
+                valid_of_clear=100.0 * cls.size / n_fit if n_fit else np.nan,
+                valid_of_data=100.0 * cls.size / n_days,
+                sigma_sd=sigma_sd(cls), outlier=outlier_pct(cls))
+
+
+def load_station(label):
+    m = META[label]
+    n_days = max(int(m.get("n_days", 1)), 1)
+    L1 = _net_metrics("L1", label, n_days)
+    if L1 is None:
+        return None
+    L2 = _net_metrics("L2", label, n_days)
+    hk = json.loads((DIR / f"diaglite_{label}.json").read_text()) if (DIR / f"diaglite_{label}.json").exists() else {}
+    r = dict(
+        label=label, group=m["group"], site=m.get("site", label), n_days=n_days,
+        n_fit=L1["n_fit"], n_valid=L1["n_valid"], cl_dts=L1["cl_dts"], cls=L1["cls"],
+        clear_frac=L1["clear_frac"], valid_of_clear=L1["valid_of_clear"],
+        valid_of_data=L1["valid_of_data"], sigma_sd=L1["sigma_sd"], outlier=L1["outlier"],
+        scat_med=float(hk.get("scat", np.nan)), sig_med=float(hk.get("sig", np.nan)),
+        bg_noise=float(hk.get("bg", np.nan)), laser_med=float(hk.get("laser", np.nan)),
+        wt_med=float(hk.get("wtrans", np.nan)))
+    # L2 comparison metrics (NaN if no L2 stream)
+    for k in ("clear_frac", "valid_of_clear", "valid_of_data", "sigma_sd", "outlier"):
+        r[f"L2_{k}"] = L2[k] if L2 else np.nan
+    return r
 
 
 def classify(rows):
@@ -190,19 +204,60 @@ def overview(rows, path):
     fig.tight_layout(rect=[0, 0, 1, 0.97]); fig.savefig(path, dpi=130); plt.close(fig)
 
 
+def fig_l1_vs_l2(rows, path):
+    """Paired per-stream L1 vs L2 (v2): clear-sky reach, yield-on-clear, sigma_SD, outlier%."""
+    from matplotlib.patches import Patch
+    panels = [("clear_frac", "clear-sky reach (% of archive days)", (0, 100), "above=L2 reaches more"),
+              ("valid_of_clear", "valid / clear nights (%)", (0, 100), "above=L2 higher yield"),
+              ("sigma_sd", "σ_SD (%)", (0, 25), "below=L2 more precise"),
+              ("outlier", "outlier rate (%)", (0, 35), "below=L2 fewer outliers")]
+    fig, axes = plt.subplots(1, 4, figsize=(24, 6))
+    for ax, (key, lab, lim, hint) in zip(axes, panels):
+        for r in rows:
+            x, y = r.get(key), r.get(f"L2_{key}")
+            if x is not None and y is not None and np.isfinite(x) and np.isfinite(y):
+                ax.scatter(x, y, s=26, color=CAUSE_COLOR.get(r["cause"], "#7f7f7f"),
+                           alpha=0.7, edgecolor="k", linewidth=0.2)
+        ax.plot(lim, lim, "k--", lw=1, alpha=0.6)
+        ax.set_xlim(lim); ax.set_ylim(lim)
+        ax.set_xlabel(f"L1 — {lab}"); ax.set_ylabel(f"L2 — {lab}")
+        ax.set_title(f"{lab}\n({hint})", fontsize=10); ax.grid(alpha=0.3)
+    axes[0].legend(handles=[Patch(color=c, label=k) for k, c in CAUSE_COLOR.items()], fontsize=7, ncol=2)
+    fig.suptitle("Rayleigh calibration L1 vs L2, same streams (v2; colour = L1-diagnosed cause)", fontsize=14)
+    fig.tight_layout(rect=[0, 0, 1, 0.96]); fig.savefig(path, dpi=130); plt.close(fig)
+
+
+def l1l2_aggregate(rows):
+    out = {}
+    for t in ["CHM15k", "Mini-MPL"]:
+        sub = [r for r in rows if r["group"] == t]
+        def med(key):
+            v = [r[key] for r in sub if isinstance(r.get(key), (int, float)) and np.isfinite(r.get(key))]
+            return float(np.median(v)) if v else float("nan")
+        out[t] = {k: med(k) for k in
+                  ("clear_frac", "valid_of_clear", "sigma_sd", "outlier",
+                   "L2_clear_frac", "L2_valid_of_clear", "L2_sigma_sd", "L2_outlier")}
+        out[t]["n"] = len(sub)
+    return out
+
+
 def main():
     labels = [Path(f).stem[len("net_L1_"):] for f in glob.glob(str(NET / "net_L1_*.json"))]
     rows = [r for r in (load_station(l) for l in labels
                         if META.get(l, {}).get("group") in ("CHM15k", "Mini-MPL")) if r]
     classify(rows)
-    keep = ["label", "group", "site", "n_days", "n_fit", "n_valid", "clear_frac", "valid_of_data",
-            "scat_med", "sig_med", "bg_noise", "snr", "laser_med", "wt_med", "sigma_sd", "outlier",
+    keep = ["label", "group", "site", "n_days", "n_fit", "n_valid", "clear_frac", "valid_of_clear",
+            "valid_of_data", "scat_med", "sig_med", "bg_noise", "snr", "laser_med", "wt_med",
+            "sigma_sd", "outlier", "L2_clear_frac", "L2_valid_of_clear", "L2_sigma_sd", "L2_outlier",
             "problematic", "cause", "causes"]
     (DIR / "rayleigh_diag_summary.json").write_text(
         json.dumps([{k: r.get(k) for k in keep} for r in rows], indent=1, default=float), encoding="utf-8")
     npages = ts_pages(rows, "CHM15k", "fig_ts_CHM15k")
     ts_pages(rows, "Mini-MPL", "fig_ts_MiniMPL", ncol=5, nrow=1)
     overview(rows, DIR / "fig_cause_overview.png")
+    fig_l1_vs_l2(rows, DIR / "fig_l1_vs_l2.png")
+    agg = l1l2_aggregate(rows)
+    (DIR / "l1l2_aggregate.json").write_text(json.dumps(agg, indent=1), encoding="utf-8")
 
     prob = sorted([r for r in rows if r["problematic"]], key=lambda r: (r["group"], r["valid_of_data"]))
     L = ["# Problematic Rayleigh stations — diagnosed cause\n\n",
@@ -219,6 +274,12 @@ def main():
     print(f"{len(rows)} streams; {len(prob)} problematic; CHM15k TS pages={npages}")
     print("cause breakdown:", dict(Counter(r["cause"] for r in rows)))
     print("problematic by cause:", dict(Counter(r["cause"] for r in prob)))
+    print("\n=== L1 vs L2 (median over streams) ===")
+    for t, a in agg.items():
+        print(f"{t:9s} n={a['n']:3d} | clear% L1 {a['clear_frac']:.0f}->L2 {a['L2_clear_frac']:.0f} | "
+              f"valid/clear% L1 {a['valid_of_clear']:.0f}->L2 {a['L2_valid_of_clear']:.0f} | "
+              f"σ_SD L1 {a['sigma_sd']:.1f}->L2 {a['L2_sigma_sd']:.1f} | "
+              f"out% L1 {a['outlier']:.0f}->L2 {a['L2_outlier']:.0f}".replace("nan", "-"))
 
 
 if __name__ == "__main__":
