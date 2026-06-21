@@ -106,10 +106,11 @@ def run_one(args):
     prefix = "L1" if level == "L1" else "L2"
     d0 = datetime.strptime(inst["first"], "%Y%m%d")
     d1 = datetime.strptime(inst["last"], "%Y%m%d")
+    step = int(os.environ.get("RC_DAYSTEP", "1"))   # >1 = sample every Nth day (full-network speedup)
     per_day = {}
     d = d0
     while d <= d1:
-        ds = d.strftime("%Y%m%d"); d += timedelta(days=1)
+        ds = d.strftime("%Y%m%d"); d += timedelta(days=step)
         fp = root / inst["wmo"] / "2026" / ds[4:6] / f"{prefix}_{inst['wmo']}_{inst['ident']}{ds}.nc"
         if not fp.exists():
             continue
@@ -135,7 +136,26 @@ def select(phase):
     return sub
 
 
+def run_slice(phase, level, slice_i, n_slices):
+    """Single-process: handle insts[slice_i::n_slices] for one level, sequentially. Robust on
+    Windows (no ProcessPoolExecutor -> no orphaned worker grandchildren); parallelism comes from
+    launching N independent slice processes from the shell."""
+    insts = select(phase)[slice_i::n_slices]
+    print(f"slice {slice_i}/{n_slices} {level}: {len(insts)} streams", flush=True)
+    for k, inst in enumerate(insts):
+        try:
+            _, label, group, ndays, nval = run_one((level, inst))
+            print(f"  [{slice_i}:{k+1}/{len(insts)}] {level} {label:22s} ({group}) days={ndays:3d} valid={nval:3d}", flush=True)
+        except Exception as e:
+            print(f"  [{slice_i}] FAILED {inst['label']}: {e}", flush=True)
+    print(f"SLICE_{slice_i}_DONE", flush=True)
+
+
 def main():
+    # slice mode: <phase> <level> <slice_i> <n_slices>  (single-process, shell-parallel)
+    if len(sys.argv) >= 5:
+        run_slice(sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4]))
+        return
     phase = sys.argv[1] if len(sys.argv) > 1 else "1"
     only_level = sys.argv[2] if len(sys.argv) > 2 else None
     insts = select(phase)

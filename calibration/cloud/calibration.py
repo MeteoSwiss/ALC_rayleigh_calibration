@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
 
@@ -564,11 +565,18 @@ def _nw_from_T_RH(T: NDArray, RH: NDArray) -> NDArray:
     return nw
 
 
+@lru_cache(maxsize=32)
 def _cams_levels_all_times(
     cams_file: str, latitude: float, longitude: float,
 ) -> Tuple[NDArray, NDArray, NDArray, NDArray]:
     """Read CAMS T/q at the nearest grid point for ALL time steps and integrate the
     L137 half-level geopotential, exactly like get_Beta_CAMS_oper_monthly.m (z=[] path).
+
+    Cached by (file, lat, lon): a station processes many days from the same monthly CAMS
+    file at one location, so without the cache the (tens-of-MB) file is re-read and the
+    hydrostatic integration redone for every single day (~8 s each). The returned arrays
+    are treated as read-only by ``compute_wv_transmission`` (it only interpolates from
+    them), so sharing them across days is safe.
 
     Returns
     -------
