@@ -333,27 +333,28 @@ chain. The Cloudnet CL61 raw was pulled through the open Cloudnet API
 RAW per-day layout) and calibrated with the RAW reader (WV-corrected) and the seven
 molecular-window methods (`calibrate_cloudnet_cl61.py`):
 
-| method | nights calibrated / 49 | median C_L | robust CV | median rel. err |
+*Re-run 2026-06-21 with the grid fix (RAW binned to the L2 grid, 30 m × 300 s, `l1_bin_to_l2_grid`),
+A:\CL61_Cloudnet\Lindenberg, 36 sampled clear-reaching nights, all 7 E-PROF methods (`calipso` retired):*
+
+| method | nights calibrated / 36 | median C_L | robust CV | median rel. err |
 |---|---|---|---|---|
-| eprof_v1.2 (improved) | 18 | 2.77 | 46 % | 16 % |
-| eprof_v1.1 (main) | 18 | 2.11 | 45 % | 10 % |
-| eprof_v0.25 (matlab) | 16 | 1.86 | 49 % | 12 % |
-| earlinet | 2 | 2.21 | 30 % | 8 % |
-| eprof_v2 / bellini | 0 | — | — | — |
+| eprof_v1.1 | 33 | 1.38 | 34 % | 11 % |
+| eprof_v1.2 | 33 | 2.07 | 54 % | 13 % |
+| eprof_v0.25 | 32 | 1.50 | 39 % | 11 % |
+| **eprof_v2** | **23** | **1.33** | **28 %** | **8 %** |
+| earlinet | 11 | 1.16 | 21 % | 9 % |
+| bellini | 12 | 1.16 | 13 % | 5 % |
 
-*(Original native-grid run, relabelled to the current method names; the `calipso` row is removed —
-that method is retired. These are **native RAW 4.8 m × 60 s** results.)*
-
-The Cloudnet CL61 **calibrates cleanly from raw via the same pipeline** (the high-yield methods
-on 16–18 of 49 sampled nights, median relative error 9–16 %), demonstrating that the calibration
-is portable across data sources. The strict gated methods (**`eprof_v2`, `bellini`**) calibrate **0**
-nights here — but this is now understood to be the **native-grid handicap**, not a property of the
-CL61 data: the gated v2 over-rejects the fine native grid (its temporal-variability gate on the noisy
-per-profile stack), exactly as on native L1 CHM15k. The fix (`l1_bin_to_l2_grid`: bin native L1/RAW to
-the L2 30 m × 300 s grid before the fit, commit `a0873f8`) recovers v2 — see
-[network_v2_vs_v11_report.md](network_v2_vs_v11_report.md). **Re-running `calibrate_cloudnet_cl61.py`
-with the grid fix (RAW → L2 grid) is the immediate next step and is expected to lift the v2 yield to
-the v1.1/v1.2 level.** The **profile-level β_att intercomparison** against the
+The Cloudnet CL61 **calibrates cleanly from raw via the same pipeline**, demonstrating the calibration
+is portable across data sources. **The grid fix recovers `eprof_v2` from 0 → 23/36 nights (64 %)** — the
+earlier 0-night result was the **native-grid handicap** (v2's temporal-variability gate over-rejects the
+fine native 4.8 m × ~60 s CL61 grid), *not* a property of the CL61 data, exactly as on native L1 CHM15k.
+After binning native RAW to the L2 grid (`l1_bin_to_l2_grid`, commits `a0873f8`/`088f351`), **v2 has the
+best precision–yield balance of the high-yield methods** (23 nights at robust CV 28 %, median rel. err
+**8 %** — the lowest of the high-yield set), confirming the fix on a cross-source CL61. (`v1.1`/`v1.2`
+calibrate the most nights, 33, but at a much higher night-to-night CV of 34–54 %; `bellini`/`earlinet`
+are the most stable but lowest-yield.) See [network_v2_vs_v11_report.md](network_v2_vs_v11_report.md) for
+the same grid effect on native L1. The **profile-level β_att intercomparison** against the
 colocated E-PROFILE CHM15k (overlap 2025-01→2025-04) is the cross-source validation enabled by
 this calibration; the calibration constants and their night-to-night stability are reported here,
 and the gridded β_att comparison is the immediate next step.
