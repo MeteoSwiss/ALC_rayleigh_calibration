@@ -1,0 +1,15 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "caldash",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m", "http.server", "8732",
+        "--bind", "127.0.0.1",
+        "--directory", "C:/DATA/Projects/202606_E-PROFILE_calibration/dashboard"
+      ],
+      "port": 8732
+    }
+  ]
+}
