@@ -171,6 +171,15 @@ class CalibrationOptions:
     # filtering/fitting. Disabled by default; the Lindenberg runner enables 60 s / 30 m.
     average_time_s: Optional[float] = None
     average_range_m: Optional[float] = None
+    # Native L1 sits on a fine grid (e.g. CHM15k 15 m x 15 s) that the gated molecular
+    # methods (v2/earlinet) over-reject (v2 via temporal-variability rejection, earlinet via
+    # the per-bin R2 test), even though the signal matches L2's beta_att (R2~0.96). Binning
+    # native L1 to the standard L2 grid (30 m x 300 s) makes L1 and L2 calibrate consistently.
+    # Applied ONLY for data_level==L1 when no explicit average_time_s/average_range_m is set;
+    # L2/RAW are untouched (and a coarser native grid is a no-op). See network_v2_vs_v11_report.md.
+    l1_bin_to_l2_grid: bool = True
+    l1_grid_time_s: float = 300.0
+    l1_grid_range_m: float = 30.0
     # Drop residual-aerosol/cloud/noise outlier PROFILES before the mean (MAD-based on
     # the molecular-band signal) -> robust without the median's noise penalty.
     screen_profile_outliers: bool = True
@@ -269,6 +278,9 @@ class CalibrationOptions:
             time_aggregation=str(data.get("time_aggregation", "mean")),
             average_time_s=(None if data.get("average_time_s", None) is None else float(data.get("average_time_s"))),
             average_range_m=(None if data.get("average_range_m", None) is None else float(data.get("average_range_m"))),
+            l1_bin_to_l2_grid=bool(data.get("l1_bin_to_l2_grid", 1)),
+            l1_grid_time_s=float(data.get("l1_grid_time_s", 300.0)),
+            l1_grid_range_m=float(data.get("l1_grid_range_m", 30.0)),
             screen_profile_outliers=bool(data.get("screen_profile_outliers", 1)),
             profile_outlier_nmad=float(data.get("profile_outlier_nmad", 4.0)),
             plot_main=bool(data.get("plot_main", 0)),

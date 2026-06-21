@@ -57,10 +57,11 @@ def base_options(level):
 
 def date_strs(first, last):
     d0, d1 = datetime.strptime(first, "%Y%m%d"), datetime.strptime(last, "%Y%m%d")
+    step = int(os.environ.get("RC_DAYSTEP", "1"))   # >1 = sample every Nth day (re-run speedup)
     d = d0
     while d <= d1:
         yield d.strftime("%Y%m%d")
-        d += timedelta(days=1)
+        d += timedelta(days=step)
 
 
 def eval_night(signal, p_mol, rng, stack):
@@ -103,7 +104,27 @@ def run_one(args):
     return level, inst["label"], inst["group"], len(per_night), n2, n1
 
 
+def run_slice(level, slice_i, n_slices):
+    """Single-process: handle MANIFEST[slice_i::n_slices] for one level (Windows-safe — no
+    ProcessPoolExecutor orphans; parallelism comes from launching N slice processes)."""
+    warnings.filterwarnings("ignore"); logging.getLogger().setLevel(logging.ERROR)
+    insts = MANIFEST[slice_i::n_slices]
+    print(f"slice {slice_i}/{n_slices} {level}: {len(insts)} streams", flush=True)
+    for k, inst in enumerate(insts):
+        try:
+            _, label, group, n_fit, n2, n1 = run_one((level, inst))
+            print(f"  [{slice_i}:{k+1}/{len(insts)}] {level} {label:22s} ({group:8s}) "
+                  f"fit={n_fit:3d} v2={n2:3d} v11={n1:3d}", flush=True)
+        except Exception as e:
+            print(f"  [{slice_i}] FAILED {inst['label']}: {e}", flush=True)
+    print(f"NETSLICE_{slice_i}_DONE", flush=True)
+
+
 def main():
+    # slice mode: <level> <slice_i> <n_slices>  (single-process, shell-parallel)
+    if len(sys.argv) >= 4:
+        run_slice(sys.argv[1], int(sys.argv[2]), int(sys.argv[3]))
+        return
     only_level = sys.argv[1] if len(sys.argv) > 1 else None
     jobs = [(lvl, inst) for lvl in ROOTS for inst in MANIFEST
             if only_level is None or lvl == only_level]

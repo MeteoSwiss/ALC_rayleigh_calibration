@@ -18,7 +18,7 @@ import time as timing
 import numpy as np
 from numpy.typing import NDArray
 
-from ..config import InstrumentInfo, CalibrationOptions, CalibrationResult
+from ..config import InstrumentInfo, CalibrationOptions, CalibrationResult, DataLevel
 from ..io.data_loader import (
     build_file_paths,
     load_l1_data,
@@ -291,14 +291,27 @@ def calibrate_rayleigh(
 
     logger.info(f"Loaded {len(data.time)} profiles")
 
-    # Optional pre-averaging: reduces the Rayleigh input to coarser 1 min / 30 m
-    # blocks before any filtering or fitting, matching the cloud-calibration speedup.
+    # Optional pre-averaging: reduces the Rayleigh input to coarser blocks before any
+    # filtering or fitting, matching the cloud-calibration speedup.
+    avg_time_s = getattr(options, "average_time_s", None)
+    avg_range_m = getattr(options, "average_range_m", None)
+    # Native L1 is on a fine grid (e.g. CHM15k 15 m x 15 s) that the gated molecular methods
+    # (v2/earlinet) over-reject even though the signal matches L2's beta_att; bin it to the
+    # standard L2 grid (30 m x 300 s) so L1 and L2 calibrate consistently. Only when the level
+    # is L1 and no explicit averaging was requested (L2/RAW untouched; a coarser native grid is
+    # a no-op). See network_v2_vs_v11_report.md ("L1 vs L2 - the tie on L1 is a native-grid effect").
+    if (avg_time_s is None and avg_range_m is None
+            and getattr(options, "data_level", None) == DataLevel.L1
+            and getattr(options, "l1_bin_to_l2_grid", True)):
+        avg_time_s = getattr(options, "l1_grid_time_s", 300.0)
+        avg_range_m = getattr(options, "l1_grid_range_m", 30.0)
+        logger.info("L1 native grid -> binning to the L2 grid (%.0f s x %.0f m)", avg_time_s, avg_range_m)
     data = average_ceilometer_data(
         data,
-        average_time_s=getattr(options, "average_time_s", None),
-        average_range_m=getattr(options, "average_range_m", None),
+        average_time_s=avg_time_s,
+        average_range_m=avg_range_m,
     )
-    if getattr(options, "average_time_s", None) or getattr(options, "average_range_m", None):
+    if avg_time_s or avg_range_m:
         logger.info(
             "Averaged Rayleigh input to %s profiles x %s range bins",
             len(data.time), len(data.range_alc),
