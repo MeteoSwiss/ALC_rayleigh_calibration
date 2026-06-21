@@ -2,6 +2,17 @@
 
 *Maxime Hervo (MeteoSwiss), June 2026. Working notes for the E-PROFILE ALC paper.*
 
+> **2026-06-21 update (Python calibration campaign).** Coefficients now follow the **Wiegner lidar
+> constant `C_L = RCS/β_att`** throughout ([calibration_coefficient_convention.md](calibration_coefficient_convention.md));
+> the cloud O'Connor coefficient `C` (`β_true = C·β_L2`) maps to it as `C_L = calibration_constant_0 / C`.
+> Two findings from the same campaign are folded in below: **(i)** the L1↔L2 Rayleigh difference is a
+> **method/grid interaction, not a data difference** — the gated methods over-reject the fine *native*
+> grid; fixed by binning native L1/RAW to the L2 grid (30 m × 300 s, `l1_bin_to_l2_grid`; directly
+> relevant to §7.6) — see [network_v2_vs_v11_report.md](network_v2_vs_v11_report.md). **(ii)** the cloud
+> calibration prefers the **native cadence** (the temporal-consistency gate) — see
+> [cloud_optimization_report.md](cloud_optimization_report.md). The Python package was renamed
+> `rayleigh_calibration` → `calibration`; the molecular `calipso` method has been retired.
+
 ## 1. Objective and scope
 
 We validate the **calibrated attenuated backscatter coefficient** β_att produced by the
@@ -81,7 +92,7 @@ is shown below; it reveals seasonal calibration cycles tracked by the filter, a 
 in the Payerne CL31 around 2024, and the widening Kalman uncertainty across data gaps
 (e.g. Magurele 2022–2024).
 
-![Calibration coefficient time series for all instruments: raw daily values (× crosses) and the Kalman estimate (red line, ±1σ band). Rayleigh channels show the lidar constant C_L (a.u.); cloud channels the dimensionless coefficient C.](figs_paper_validation/calibration_timeseries.png)
+![Calibration coefficient time series for all instruments: raw daily values (× crosses) and the Kalman estimate (red line, ±1σ band). Rayleigh channels show the Wiegner lidar constant C_L = RCS/β_att (a.u.); cloud channels the O'Connor multiplier C (β_true = C·β_L2), which maps to the Wiegner constant as C_L = calibration_constant_0 / C (see calibration_coefficient_convention.md).](figs_paper_validation/calibration_timeseries.png)
 
 ## 4. Harmonisation corrections
 
@@ -139,7 +150,7 @@ hourly (colocated) or matched (EARLINET) attenuated-backscatter values.
 > available through 2026-05, so the **910 nm** sections (Payerne §7.1, Uccle §7.3) use a real
 > per-month water-vapor correction (no fallback); months without CAMS (e.g. June 2026) are
 > excluded, not fallback-corrected. The Python Rayleigh calibration applies the WV correction
-> itself (rayleigh_calibration/water_vapor.py, validated against the MATLAB reference to 0.4 %
+> itself (calibration/water_vapor_correction/water_vapor.py, validated against the MATLAB reference to 0.4 %
 > and against ACTRIS-Cloudnet atmoslib — see tests/WATER_VAPOR_AUDIT.md). The CL61 Rayleigh
 > constants were regenerated WV-corrected: e.g. CL_L2/CL_Rayleigh = 0.502/0.638 ≈ 0.79 ≈
 > T²_wv(ref) at Payerne, confirming the operational L2 constant was the WV-*uncorrected* one and
@@ -324,19 +335,25 @@ molecular-window methods (`calibrate_cloudnet_cl61.py`):
 
 | method | nights calibrated / 49 | median C_L | robust CV | median rel. err |
 |---|---|---|---|---|
-| improved | 18 | 2.77 | 46 % | 16 % |
-| calipso | 18 | 2.23 | 43 % | 9 % |
-| main | 18 | 2.11 | 45 % | 10 % |
-| matlab | 16 | 1.86 | 49 % | 12 % |
+| eprof_v1.2 (improved) | 18 | 2.77 | 46 % | 16 % |
+| eprof_v1.1 (main) | 18 | 2.11 | 45 % | 10 % |
+| eprof_v0.25 (matlab) | 16 | 1.86 | 49 % | 12 % |
 | earlinet | 2 | 2.21 | 30 % | 8 % |
-| optimal / bellini | 0 | — | — | — |
+| eprof_v2 / bellini | 0 | — | — | — |
+
+*(Original native-grid run, relabelled to the current method names; the `calipso` row is removed —
+that method is retired. These are **native RAW 4.8 m × 60 s** results.)*
 
 The Cloudnet CL61 **calibrates cleanly from raw via the same pipeline** (the high-yield methods
 on 16–18 of 49 sampled nights, median relative error 9–16 %), demonstrating that the calibration
-is portable across data sources. As at the other 910 nm sites, the strict gated methods
-(`optimal`, `bellini`) reject the noisy CL61 910 nm molecular column — consistent with the
-molecular-methods study, where 910 nm instruments are better served by the high-yield Rayleigh
-methods or the liquid-cloud calibration. The **profile-level β_att intercomparison** against the
+is portable across data sources. The strict gated methods (**`eprof_v2`, `bellini`**) calibrate **0**
+nights here — but this is now understood to be the **native-grid handicap**, not a property of the
+CL61 data: the gated v2 over-rejects the fine native grid (its temporal-variability gate on the noisy
+per-profile stack), exactly as on native L1 CHM15k. The fix (`l1_bin_to_l2_grid`: bin native L1/RAW to
+the L2 30 m × 300 s grid before the fit, commit `a0873f8`) recovers v2 — see
+[network_v2_vs_v11_report.md](network_v2_vs_v11_report.md). **Re-running `calibrate_cloudnet_cl61.py`
+with the grid fix (RAW → L2 grid) is the immediate next step and is expected to lift the v2 yield to
+the v1.1/v1.2 level.** The **profile-level β_att intercomparison** against the
 colocated E-PROFILE CHM15k (overlap 2025-01→2025-04) is the cross-source validation enabled by
 this calibration; the calibration constants and their night-to-night stability are reported here,
 and the gridded β_att comparison is the immediate next step.
@@ -389,5 +406,5 @@ The Lindenberg cross-source CL61 (§7.6) is in `C:\Users\hervo\OneDrive\Document
 `calibrate_cloudnet_cl61.py` (RAW reader, WV-corrected, seven molecular-window methods).
 **Fog exclusion** (CL31/CL51/CL61 `vertical_visibility` > 0 ⇒ fog ⇒ excluded) is applied in both
 pipelines: MATLAB `paper_val_process.m/screen_profiles`, and Python
-`rayleigh_calibration/data_loader.py/filter_cloudy_profiles` (verified on Edmonton 2026-02-01,
+`calibration/io/data_loader.py/filter_cloudy_profiles` (verified on Edmonton 2026-02-01,
 where 66/155 night profiles were fog).
