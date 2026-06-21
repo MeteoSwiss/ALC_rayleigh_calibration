@@ -903,14 +903,18 @@ def filter_cloudy_profiles(
     if is_clear_night:
         return data, True, False
 
-    # Calculate profiles per minute
-    if len(data.hours_since_start) > 1:
+    # Profiles per minute. MUST stay a float: rounding to int collapses to 0 for coarse data
+    # (e.g. L2 at ~5-min cadence -> 1/(0.083*60)=0.2 -> round 0), which would zero out
+    # min_profiles and the contamination window and effectively DISABLE cloud screening — so a
+    # cloudy L2 night would pass as "clear". Keeping the float makes the time-based thresholds
+    # resolution-independent and identical to L1 at native resolution.
+    if len(data.hours_since_start) > 1 and (data.hours_since_start[1] - data.hours_since_start[0]) > 0:
         dt_hours = data.hours_since_start[1] - data.hours_since_start[0]
-        profiles_per_min = int(np.round(1 / (dt_hours * 60)))
+        profiles_per_min = 1.0 / (dt_hours * 60.0)
     else:
-        profiles_per_min = 1
+        profiles_per_min = 1.0
 
-    min_profiles = int(options.min_time_range * 60 * profiles_per_min)
+    min_profiles = max(1, int(round(options.min_time_range * 60 * profiles_per_min)))
 
     # Find profiles with low clouds (below threshold and not "no cloud")
     has_low_cloud = np.logical_and(
@@ -924,8 +928,8 @@ def filter_cloudy_profiles(
     if n_clear < min_profiles:
         return data, False, False
 
-    # Mark profiles contaminated by nearby clouds (15 min window)
-    contamination_window = int(profiles_per_min * 15)
+    # Mark profiles contaminated by nearby clouds (15 min window); >=1 profile even on coarse data
+    contamination_window = max(1, int(round(profiles_per_min * 15)))
     contaminated = np.zeros(len(data.time), dtype=bool)
 
     for i in range(len(data.time)):
