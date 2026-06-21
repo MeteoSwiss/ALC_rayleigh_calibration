@@ -330,21 +330,9 @@ class CalibrationResult:
 
     @property
     def flag_meaning(self) -> str:
-        """Get human-readable meaning of the flag value."""
-        meanings = {
-            1: "Successful",
-            0.5: "Partially clear night",
-            0: "No data",
-            -1: "Not a clear night",
-            -2: "Signal not proportional to molecular scattering",
-            -3: "Bad quality ratio between methods",
-            -4: "Missing model data",
-            -5: "RCS contains only NaN",
-            -6: "Uncertainties higher than CL values",
-            -7: "Negative Rayleigh fit",
-            -8: "Rayleigh fit issue: |b| > a",
-        }
-        return meanings.get(int(self.flag), "Unknown flag")
+        """Human-readable meaning of the flag (shared cloud/Rayleigh table, calibration.flags)."""
+        from .flags import flag_label
+        return flag_label(self.flag)
 
 
 def load_instruments(filepath: Path) -> list[InstrumentInfo]:

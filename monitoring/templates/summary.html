@@ -1,15 +1,15 @@
 {% extends "base.html" %}
 {% block title %}Calibration monitor — summary{% endblock %}
-{% block headerextra %}<span class="asof">as of {{ summary.as_of or "—" }}</span>{% endblock %}
+{% block headerextra %}<span class="asof">{{ summary.date_min or "—" }} → {{ summary.as_of or "—" }}</span>{% endblock %}
 
 {% block content %}
 <h1>Network summary</h1>
 
 <section class="kpis">
   <div class="kpi"><div class="kpi-val">{{ summary.n_stations }}</div><div class="kpi-lbl">instruments</div></div>
-  <div class="kpi"><div class="kpi-val">{{ summary.n_calibrations }}</div><div class="kpi-lbl">calibration nights</div></div>
+  <div class="kpi"><div class="kpi-val">{{ summary.n_series }}</div><div class="kpi-lbl">method series</div></div>
+  <div class="kpi"><div class="kpi-val">{{ summary.n_calibrations }}</div><div class="kpi-lbl">calibrations</div></div>
   <div class="kpi"><div class="kpi-val">{{ summary.success_rate | fmt('{:.1f}') }}%</div><div class="kpi-lbl">overall success</div></div>
-  <div class="kpi"><div class="kpi-val">{{ summary.date_min or "—" }} → {{ summary.date_max or "—" }}</div><div class="kpi-lbl">date range</div></div>
 </section>
 
 <section class="grid2">
@@ -21,12 +21,13 @@
 <section class="watch">
   <h2>Watchlist <span class="muted">({{ watch | length }})</span></h2>
   <table class="watchtable paginated" data-page-size="15">
-    <thead><tr><th>Station</th><th>Type</th><th>Issue</th><th>Detail</th><th>Last date</th></tr></thead>
+    <thead><tr><th>Station</th><th>Type</th><th>Method</th><th>Issue</th><th>Detail</th><th>Last date</th></tr></thead>
     <tbody>
     {% for w in watch %}
       <tr>
         <td><a href="stations/{{ w.key }}.html">{{ w.key }}</a></td>
         <td>{{ w.itype }}</td>
+        <td>{{ method_label(w.method) }}</td>
         <td><span class="issue issue-{{ w.issue | replace(' ', '') }}">{{ w.issue }}</span></td>
         <td>{{ w.detail }}</td>
         <td>{{ w.date }}</td>
@@ -36,7 +37,7 @@
   </table>
 </section>
 {% else %}
-<section class="watch"><h2>Watchlist</h2><p class="muted">No stations currently flagged.</p></section>
+<section class="watch"><h2>Watchlist</h2><p class="muted">No series currently flagged.</p></section>
 {% endif %}
 
 <section class="grid2">
@@ -45,19 +46,20 @@
 </section>
 
 <section>
-  <h2>Stations <span class="muted">(click a header to sort)</span></h2>
+  <h2>Series <span class="muted">(one row per station × method — click a header to sort)</span></h2>
   <table class="sortable stationtable" id="stations">
     <thead>
       <tr>
         <th data-type="str">Station</th>
         <th data-type="str">Type</th>
+        <th data-type="str">Method</th>
         <th data-type="num">Success %</th>
-        <th data-type="num">Nights</th>
-        <th data-type="num">Median C_L</th>
+        <th data-type="num">Cal'ns</th>
+        <th data-type="num">Median value</th>
         <th data-type="num">Rel. unc %</th>
         <th data-type="str">Last date</th>
         <th data-type="num">Last flag</th>
-        <th>C_L trend</th>
+        <th>Value trend</th>
       </tr>
     </thead>
     <tbody>
@@ -65,14 +67,16 @@
       <tr>
         <td><a href="stations/{{ r.key }}.html">{{ r.key }}</a></td>
         <td>{{ r.itype }}</td>
+        <td><span class="mtag mtag-{{ r.method }}">{{ r.method_label }}</span></td>
         <td data-val="{{ r.success_rate if r.success_rate is not none else -1 }}">{{ r.success_rate | fmt('{:.0f}') }}</td>
         <td data-val="{{ r.n_dates or 0 }}">{{ r.n_dates or 0 }}</td>
         <td data-val="{{ r.median_cl if r.median_cl is not none else 0 }}">{{ r.median_cl | fmt('{:.3e}') }}</td>
         <td data-val="{{ r.median_rel_unc if r.median_rel_unc is not none else -1 }}">{{ r.median_rel_unc | fmt('{:.0f}') }}</td>
         <td>{{ r.last_date }}</td>
-        <td data-val="{{ r.last_flag if r.last_flag is not none else -99 }}">
+        {% set lf = r.last_flag if (r.last_flag is not none and r.last_flag == r.last_flag) else none %}
+        <td data-val="{{ lf if lf is not none else -99 }}">
           <span class="dot" style="background:{{ flag_color(r.last_flag) }}" title="{{ flag_label(r.last_flag) }}"></span>
-          {{ r.last_flag if r.last_flag is not none else "—" }}
+          {{ lf if lf is not none else "—" }}
         </td>
         <td>{{ r.spark | safe }}</td>
       </tr>

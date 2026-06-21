@@ -49,6 +49,8 @@ def main() -> None:
                     help="index only the first N stations (debug)")
     ap.add_argument("--limit-pages", type=int, default=None,
                     help="render only the first N station pages (summary still covers all indexed)")
+    ap.add_argument("--start", default=None, help="restrict to dates >= YYYYMMDD")
+    ap.add_argument("--end", default=None, help="restrict to dates <= YYYYMMDD")
     ap.add_argument("--open", action="store_true", help="open the result in a browser when done")
     args = ap.parse_args()
 
@@ -58,9 +60,10 @@ def main() -> None:
     t0 = time.perf_counter()
     print(f"Indexing {args.fullcal} ...", flush=True)
     stats = index.build_index(args.fullcal, args.manifest, db_path, limit=args.limit,
-                              types=types, l2_dir=args.l2dir)
-    print(f"  {stats['n_stations']} stations, {stats['n_calibrations']} nights, "
-          f"as of {stats['as_of']}  ({time.perf_counter() - t0:.1f}s)", flush=True)
+                              types=types, l2_dir=args.l2dir, start=args.start, end=args.end)
+    print(f"  {stats['n_stations']} stations, {stats['n_series']} series, "
+          f"{stats['n_calibrations']} calibrations, {stats['date_min']}..{stats['as_of']}  "
+          f"({time.perf_counter() - t0:.1f}s)", flush=True)
 
     print("Rendering site ...", flush=True)
     site = render.build_site(db_path, args.out, limit_pages=args.limit_pages)

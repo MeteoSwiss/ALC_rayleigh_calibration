@@ -1,7 +1,7 @@
-"""Plotly figure builders (+ a cheap inline-SVG sparkline for the station table).
+"""Plotly figure builders (+ a cheap inline-SVG sparkline for tables).
 
-Every figure is emitted as a `<div>` via fig_to_div(); the shared plotly.min.js is loaded
-once per page (see render.py), so figures use include_plotlyjs=False.
+Everything is per *series* = (station, method). Figures are emitted as <div> via fig_to_div();
+the shared plotly.min.js is loaded once per page (see render.py), so include_plotlyjs=False.
 """
 from __future__ import annotations
 
@@ -11,174 +11,231 @@ import plotly.graph_objects as go
 
 from monitoring import config, kalman
 
-# Compact, consistent styling for every figure.
-_LAYOUT = dict(
-    template="plotly_white",
-    margin=dict(l=60, r=20, t=40, b=40),
-    font=dict(size=12),
-    height=340,
-)
+_LAYOUT = dict(template="plotly_white", margin=dict(l=64, r=20, t=44, b=40),
+               font=dict(size=12), height=340)
+
+# What the "calibration value" is, per method (for axis/hover labels).
+_VALUE_NAME = {"rayleigh": "C_L", "cloud": "coefficient C"}
 
 
 def fig_to_div(fig: go.Figure, div_id: str) -> str:
-    """Render a figure to a standalone <div> that reuses the page-global Plotly."""
     return fig.to_html(full_html=False, include_plotlyjs=False, div_id=div_id,
                        config={"displaylogo": False, "responsive": True})
 
 
+def _value_name(method: str) -> str:
+    return _VALUE_NAME.get(str(method), "value")
+
+
 # --- Summary-page figures ---------------------------------------------------
 
-def network_map(st: pd.DataFrame) -> go.Figure:
-    """Station map over Europe, colored by overall success rate, sized by activity."""
-    d = st.dropna(subset=["lat", "lon"]).copy()
+def network_map(keystats: pd.DataFrame) -> go.Figure:
+    """Station map over Europe, colored by per-station success rate (max over its methods)."""
+    d = keystats.dropna(subset=["lat", "lon"]).copy()
+    if d.empty:
+        # Empty result (e.g. a date window or type filter with no calibrations): render an
+        # empty map rather than crashing Plotly's marker validator on an object-dtype Series.
+        fig = go.Figure()
+        fig.update_geos(scope="europe", resolution=50, showcountries=True, countrycolor="#bbbbbb",
+                        showland=True, landcolor="#f5f5f5",
+                        lataxis_range=config.MAP_LAT_RANGE, lonaxis_range=config.MAP_LON_RANGE)
+        fig.update_layout(**{**_LAYOUT, "height": 460, "margin": dict(l=0, r=0, t=40, b=0)},
+                          title="Network — no calibrations in range")
+        return fig
+    n_dates = np.asarray(d["n_dates"].fillna(1), dtype=float)
     fig = go.Figure(go.Scattergeo(
         lat=d["lat"], lon=d["lon"],
-        text=[f"{k}<br>{t} · {sr:.0f}% success · {nd} nights"
-              for k, t, sr, nd in zip(d["key"], d["itype"],
-                                      d["success_rate"].fillna(0), d["n_dates"].fillna(0))],
+        text=[f"{k}<br>{t} · {m} · {sr:.0f}% success · {nd} cal"
+              for k, t, m, sr, nd in zip(d["key"], d["itype"], d["methods"],
+                                         d["success_rate"].fillna(0), d["n_dates"].fillna(0))],
         hoverinfo="text",
-        marker=dict(
-            size=np.clip(np.sqrt(d["n_dates"].fillna(1)) / 2.0, 5, 18),
-            color=d["success_rate"].fillna(0), colorscale="RdYlGn", cmin=0, cmax=80,
-            colorbar=dict(title="success %"), line=dict(width=0.4, color="#555"),
-        ),
+        marker=dict(size=np.clip(np.sqrt(n_dates) / 2.0, 5, 18),
+                    color=np.asarray(d["success_rate"].fillna(0), dtype=float),
+                    colorscale="RdYlGn", cmin=0, cmax=80,
+                    colorbar=dict(title="success %"), line=dict(width=0.4, color="#555")),
     ))
-    fig.update_geos(scope="europe", resolution=50, showcountries=True,
-                    countrycolor="#bbbbbb", showland=True, landcolor="#f5f5f5",
+    fig.update_geos(scope="europe", resolution=50, showcountries=True, countrycolor="#bbbbbb",
+                    showland=True, landcolor="#f5f5f5",
                     lataxis_range=config.MAP_LAT_RANGE, lonaxis_range=config.MAP_LON_RANGE)
     fig.update_layout(**{**_LAYOUT, "height": 460, "margin": dict(l=0, r=0, t=40, b=0)},
                       title="Network — success rate by station")
     return fig
 
 
-def success_by_type(by_type: pd.DataFrame) -> go.Figure:
-    """Bar of overall success rate per instrument type."""
-    d = by_type.copy()
-    fig = go.Figure(go.Bar(
-        x=d["itype"], y=d["success_rate"],
-        marker_color=[config.TYPE_COLORS.get(t, "#888") for t in d["itype"]],
-        text=[f"{v:.0f}%" for v in d["success_rate"]], textposition="outside",
-        hovertext=[f"{n} stations · {s}/{t} nights"
-                   for n, s, t in zip(d["n_stations"], d["n_success"], d["n_dates"])],
-    ))
-    fig.update_layout(**_LAYOUT, title="Success rate by instrument type",
-                      yaxis_title="success %", yaxis_range=[0, 100])
+def success_by_type_method(by_tm: pd.DataFrame) -> go.Figure:
+    """Grouped bar: success rate per instrument type, one bar per method."""
+    fig = go.Figure()
+    for method in config.METHOD_ORDER:
+        d = by_tm[by_tm["method"] == method]
+        if not len(d):
+            continue
+        fig.add_trace(go.Bar(
+            x=d["itype"], y=d["success_rate"], name=config.method_label(method),
+            marker_color=config.METHOD_COLORS.get(method, "#888"),
+            text=[f"{v:.0f}%" for v in d["success_rate"]], textposition="outside",
+            hovertext=[f"{n} series · {s}/{t} cal" for n, s, t in
+                       zip(d["n_series"], d["n_success"], d["n_dates"])],
+        ))
+    fig.update_layout(**_LAYOUT, barmode="group", title="Success rate by type & method",
+                      yaxis_title="success %", yaxis_range=[0, 100],
+                      legend=dict(orientation="h", y=1.14))
     return fig
 
 
 def flag_distribution_bar(flags: pd.DataFrame) -> go.Figure:
-    """Horizontal bar of night counts per flag meaning (good at top)."""
-    d = flags.iloc[::-1]  # reverse so 'Successful' renders at the top
-    fig = go.Figure(go.Bar(
-        x=d["count"], y=d["label"], orientation="h",
-        marker_color=d["color"],
-        text=d["count"], textposition="auto",
-    ))
-    fig.update_layout(**{**_LAYOUT, "height": 380, "margin": dict(l=220, r=20, t=40, b=40)},
-                      title="Outcome distribution (all nights)", xaxis_title="nights")
+    """Horizontal bar of calibration counts per flag meaning (good at top)."""
+    d = flags.iloc[::-1]
+    fig = go.Figure(go.Bar(x=d["count"], y=d["label"], orientation="h",
+                           marker_color=d["color"], text=d["count"], textposition="auto"))
+    fig.update_layout(**{**_LAYOUT, "height": 380, "margin": dict(l=230, r=20, t=44, b=40)},
+                      title="Outcome distribution (all series)", xaxis_title="calibrations")
     return fig
 
 
-def cl_by_type_box(st: pd.DataFrame) -> go.Figure:
-    """Box plot of per-station median C_L grouped by instrument type (log axis)."""
-    fig = go.Figure()
-    for t in config.TYPE_ORDER:
-        vals = st.loc[(st["itype"] == t) & (st["median_cl"] > 0), "median_cl"]
-        if len(vals):
-            fig.add_trace(go.Box(y=vals, name=t, marker_color=config.TYPE_COLORS.get(t, "#888"),
-                                 boxpoints="all", jitter=0.4, pointpos=0))
-    fig.update_layout(**_LAYOUT, title="Per-station median C_L by type",
-                      yaxis_title="C_L", yaxis_type="log", showlegend=False)
-    fig.update_yaxes(exponentformat="e")  # scientific notation on the log axis
-    return fig
+def value_by_type_method_box(series: pd.DataFrame) -> go.Figure:
+    """Box of per-series median value, grouped by type, colored by method (log axis).
 
-
-# --- Station-page figures ---------------------------------------------------
-
-def cl_timeseries(g: pd.DataFrame) -> go.Figure:
-    """Lidar constant over time: successful nights + E-PROFILE Kalman best estimate.
-
-    The red line/band is the operational random-walk Kalman best estimate (see
-    monitoring/kalman.py) -- the same routine E-PROFILE uses for the reprocessed
-    best-estimate, not a plain rolling median.
+    Magnitudes differ hugely (Rayleigh C_L ~1e11, cloud coefficient ~1 for CL61 / ~1e-8 for
+    CL31/CL51), so a log axis is essential and the value is method-specific, not comparable
+    across methods — this chart is for spotting per-type outliers, not cross-method ratios.
     """
-    ok = g[g["success"] == 1].sort_values("datetime")
+    fig = go.Figure()
+    for method in config.METHOD_ORDER:
+        for t in config.TYPE_ORDER:
+            vals = series.loc[(series["itype"] == t) & (series["method"] == method)
+                              & (series["median_cl"] > 0), "median_cl"]
+            if len(vals):
+                fig.add_trace(go.Box(y=vals, name=t, legendgroup=method,
+                                     marker_color=config.METHOD_COLORS.get(method, "#888"),
+                                     boxpoints="all", jitter=0.4, pointpos=0,
+                                     offsetgroup=method, showlegend=False))
+    fig.update_layout(**_LAYOUT, title="Per-series median value by type (log; method-colored)",
+                      yaxis_title="calibration value", yaxis_type="log", boxmode="group")
+    fig.update_yaxes(exponentformat="e")
+    return fig
+
+
+# --- Station-page figures (one set per method) ------------------------------
+
+def series_timeseries(g_m: pd.DataFrame, kal_m: pd.DataFrame, method: str) -> go.Figure:
+    """Calibration value over time for ONE method: successes + uncertainty + Kalman best estimate.
+
+    The Kalman line/band is the operational E-PROFILE random-walk best estimate, preferring
+    the precomputed series (kal_m) and falling back to an on-the-fly fit.
+    """
+    vname = _value_name(method)
+    color = config.METHOD_COLORS.get(method, "#1f77b4")
+    ok = g_m[g_m["success"] == 1].sort_values("datetime")
     fig = go.Figure()
     if len(ok):
         fig.add_trace(go.Scatter(
-            x=ok["datetime"], y=ok["lidar_constant"], mode="markers",
-            name="C_L (nightly)", marker=dict(size=5, color="#1f77b4", opacity=0.7),
+            x=ok["datetime"], y=ok["cal_value"], mode="markers", name=f"{vname} (per cal)",
+            marker=dict(size=5, color=color, opacity=0.7),
             error_y=dict(type="data", array=ok["uncertainty"], visible=True,
-                         thickness=0.6, width=0, color="rgba(31,119,180,0.3)"),
-            hovertemplate="%{x|%Y-%m-%d}<br>C_L=%{y:.3e}<extra></extra>",
-        ))
-        # Operational Kalman best estimate + ±1σ band.
-        kt, ks, kstd = kalman.kalman_best_estimate(ok["datetime"].tolist(),
-                                                   ok["lidar_constant"].to_numpy())
-        if kt.size:
+                         thickness=0.6, width=0, color="rgba(120,120,120,0.3)"),
+            hovertemplate="%{x|%Y-%m-%d}<br>" + vname + "=%{y:.3e}<extra></extra>"))
+        kt, ks, kstd = _kalman_xy(ok, kal_m)
+        if len(kt):
             fig.add_trace(go.Scatter(
                 x=np.concatenate([kt, kt[::-1]]),
                 y=np.concatenate([ks + kstd, (ks - kstd)[::-1]]),
-                fill="toself", fillcolor="rgba(214,39,40,0.12)",
-                line=dict(width=0), hoverinfo="skip", showlegend=False))
+                fill="toself", fillcolor="rgba(214,39,40,0.12)", line=dict(width=0),
+                hoverinfo="skip", showlegend=False))
             fig.add_trace(go.Scatter(x=kt, y=ks, mode="lines", name="Kalman best estimate",
                                      line=dict(color="#d62728", width=2),
                                      hovertemplate="%{x|%Y-%m-%d}<br>Kalman=%{y:.3e}<extra></extra>"))
-    fig.update_layout(**_LAYOUT, title="Lidar constant C_L over time — nightly + Kalman",
-                      yaxis_title="C_L", legend=dict(orientation="h", y=1.12))
-    fig.update_yaxes(exponentformat="e")  # scientific notation (1e11), not SI ("100G")
+    fig.update_layout(**_LAYOUT, yaxis_title=vname, legend=dict(orientation="h", y=1.14),
+                      title=f"{config.method_label(method)} — {vname} over time + Kalman")
+    fig.update_yaxes(exponentformat="e")
     return fig
 
 
-def monthly_flag_bars(g: pd.DataFrame) -> go.Figure:
-    """Stacked monthly bars of outcome counts -- shows when a station goes bad."""
-    d = g.copy()
+def _kalman_xy(ok: pd.DataFrame, kal_m: pd.DataFrame):
+    """Precomputed Kalman (kal_m) if present, else an on-the-fly fit of the successes."""
+    if kal_m is not None and len(kal_m):
+        k = kal_m.sort_values("date").copy()
+        k["dt"] = pd.to_datetime(k["date"], format="%Y%m%d", errors="coerce")
+        k = k.dropna(subset=["dt", "kalman"])
+        if len(k):
+            return (k["dt"].to_numpy(), k["kalman"].to_numpy(dtype=float),
+                    k["kalman_std"].fillna(0).to_numpy(dtype=float))
+    kt, ks, kstd = kalman.kalman_best_estimate(ok["datetime"].tolist(),
+                                               ok["cal_value"].to_numpy())
+    return kt, ks, kstd
+
+
+def monthly_flag_bars(g_m: pd.DataFrame, method: str) -> go.Figure:
+    """Stacked monthly outcome counts for ONE method."""
+    d = g_m.copy()
     d["month"] = d["datetime"].dt.to_period("M").dt.to_timestamp()
     fig = go.Figure()
-    # One trace per flag value present, stacked, ordered good-to-bad.
-    flags_present = sorted(d["flag"].dropna().unique(), key=lambda f: -float(f))
-    for f in flags_present:
-        sub = d[d["flag"] == f]
-        counts = sub.groupby("month").size()
+    for f in sorted(d["flag"].dropna().unique(), key=lambda f: -float(f)):
+        counts = d[d["flag"] == f].groupby("month").size()
         fig.add_trace(go.Bar(x=counts.index, y=counts.values, name=config.flag_label(f),
                              marker_color=config.flag_color(f)))
     fig.update_layout(**{**_LAYOUT, "height": 320}, barmode="stack",
-                      title="Monthly outcomes", yaxis_title="nights",
-                      legend=dict(orientation="h", y=-0.25, font=dict(size=10)))
+                      title=f"{config.method_label(method)} — monthly outcomes",
+                      yaxis_title="calibrations", legend=dict(orientation="h", y=-0.25, font=dict(size=10)))
     return fig
 
 
-def window_timeseries(g: pd.DataFrame) -> go.Figure:
-    """Rayleigh fit window (bottom/top height) over time for successful nights."""
-    ok = g[(g["success"] == 1) & g["bottom_height"].notna()].sort_values("datetime")
+def aux_timeseries(g_m: pd.DataFrame, method: str) -> go.Figure:
+    """Rayleigh -> calibration window (bottom/top); cloud -> number of in-cloud profiles."""
     fig = go.Figure()
-    if len(ok):
-        fig.add_trace(go.Scatter(x=ok["datetime"], y=ok["top_height"], mode="markers",
-                                 name="top", marker=dict(size=4, color="#2ca02c")))
-        fig.add_trace(go.Scatter(x=ok["datetime"], y=ok["bottom_height"], mode="markers",
-                                 name="bottom", fill="tonexty", fillcolor="rgba(44,160,44,0.12)",
-                                 marker=dict(size=4, color="#8c564b")))
-    fig.update_layout(**{**_LAYOUT, "height": 300}, title="Calibration window (m AGL)",
-                      yaxis_title="height (m)", legend=dict(orientation="h", y=1.12))
+    if method == "rayleigh":
+        ok = g_m[(g_m["success"] == 1) & g_m["bottom_height"].notna()].sort_values("datetime")
+        if len(ok):
+            fig.add_trace(go.Scatter(x=ok["datetime"], y=ok["top_height"], mode="markers",
+                                     name="top", marker=dict(size=4, color="#2ca02c")))
+            fig.add_trace(go.Scatter(x=ok["datetime"], y=ok["bottom_height"], mode="markers",
+                                     name="bottom", fill="tonexty", fillcolor="rgba(44,160,44,0.12)",
+                                     marker=dict(size=4, color="#8c564b")))
+        fig.update_layout(**{**_LAYOUT, "height": 300}, yaxis_title="height (m AGL)",
+                          title="Calibration window", legend=dict(orientation="h", y=1.14))
+    else:
+        ok = g_m[g_m["success"] == 1].sort_values("datetime")
+        fig.add_trace(go.Scatter(x=ok["datetime"], y=ok["n_profiles"], mode="markers",
+                                 marker=dict(size=5, color="#2ca02c"), name="in-cloud profiles"))
+        fig.update_layout(**{**_LAYOUT, "height": 300}, yaxis_title="# in-cloud profiles",
+                          title="Cloud profiles per calibration", showlegend=False)
     return fig
 
 
-# --- Cheap inline sparkline (no Plotly, one per table row) -------------------
+def normalized_overlay(by_method: dict) -> go.Figure:
+    """Overlay value/median for each method (CL61) to compare temporal trends across methods.
 
-def sparkline_svg(values, width: int = 110, height: int = 26) -> str:
-    """Tiny inline-SVG line of the last C_L values, normalized. Empty string if too few."""
+    Absolute magnitudes differ by method, so each series is divided by its own median; the
+    cross-check is whether the two methods DRIFT together, not whether their ratio is 1.
+    """
+    fig = go.Figure()
+    for method, g_m in by_method.items():
+        ok = g_m[g_m["success"] == 1].sort_values("datetime")
+        if len(ok) < 3:
+            continue
+        med = float(np.nanmedian(ok["cal_value"]))
+        if not np.isfinite(med) or med == 0:
+            continue
+        fig.add_trace(go.Scatter(x=ok["datetime"], y=ok["cal_value"] / med, mode="markers",
+                                 name=config.method_label(method),
+                                 marker=dict(size=5, color=config.METHOD_COLORS.get(method, "#888"),
+                                             opacity=0.75)))
+    fig.add_hline(y=1.0, line=dict(color="#999", width=1, dash="dot"))
+    fig.update_layout(**_LAYOUT, title="Rayleigh vs cloud — normalized to each method's median",
+                      yaxis_title="value / median", legend=dict(orientation="h", y=1.14))
+    return fig
+
+
+# --- Cheap inline sparkline -------------------------------------------------
+
+def sparkline_svg(values, width: int = 110, height: int = 26, color: str = "#1f77b4") -> str:
+    """Tiny inline-SVG line of the last values, normalized. Empty string if too few."""
     v = np.asarray([x for x in values if np.isfinite(x)], dtype=float)
     if len(v) < 3:
         return ""
     lo, hi = float(v.min()), float(v.max())
     span = (hi - lo) or 1.0
     n = len(v)
-    pts = []
-    for i, y in enumerate(v):
-        px = (i / (n - 1)) * (width - 2) + 1
-        py = height - 1 - ((y - lo) / span) * (height - 2)
-        pts.append(f"{px:.1f},{py:.1f}")
-    return (f'<svg class="spark" width="{width}" height="{height}" '
-            f'viewBox="0 0 {width} {height}">'
-            f'<polyline fill="none" stroke="#1f77b4" stroke-width="1.2" '
-            f'points="{" ".join(pts)}"/></svg>')
+    pts = [f"{(i/(n-1))*(width-2)+1:.1f},{height-1-((y-lo)/span)*(height-2):.1f}"
+           for i, y in enumerate(v)]
+    return (f'<svg class="spark" width="{width}" height="{height}" viewBox="0 0 {width} {height}">'
+            f'<polyline fill="none" stroke="{color}" stroke-width="1.2" points="{" ".join(pts)}"/></svg>')

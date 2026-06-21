@@ -7,7 +7,7 @@ including creating new files and appending to existing ones.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 import time
@@ -175,11 +175,15 @@ def write_calibration_result(
     time_end: float,
     wavelength_nm: float,
     housekeeping: dict,
+    method: int = 0,
 ) -> Path:
     """
     Write calibration result to NetCDF file.
 
-    Creates a new file if one doesn't exist, or appends to existing file.
+    Creates a new file if one doesn't exist, or appends to existing file. ``method`` tags
+    the row in the ``calibration_method`` variable (0=Rayleigh, 1=Liquid_water_clouds, ...);
+    a Rayleigh (night) row and a cloud (day) row for the same calendar day coexist because
+    the same-day de-duplication below also keys on the method.
 
     Parameters
     ----------
@@ -205,8 +209,10 @@ def write_calibration_result(
     Path
         Path to output file.
     """
-    # Determine output year from date
-    year = int(1970 + date_epoch / 365.25)  # Approximate
+    # Output year from the actual calendar day (NOT a 365.25-day approximation, which
+    # buckets some Jan-1 dates into the wrong year and would split a same-day Rayleigh
+    # night [integer epoch] and cloud day [+0.5 epoch] into different yearly files).
+    year = (datetime(1970, 1, 1) + timedelta(days=float(np.floor(date_epoch)))).year
     filepath = get_output_filepath(output_dir, info, year)
 
     if not filepath.exists():
@@ -217,19 +223,17 @@ def write_calibration_result(
         # Open existing file
         ncid = Dataset(filepath, 'a')
 
-        # Check if this date already exists
+        # Overwrite a same-day row ONLY if it is the same method; otherwise append.
+        # This lets a Rayleigh (method 0, night) row and a cloud (method 1, day) row for
+        # the same calendar day coexist, while a re-run of the same method updates in place.
         existing_times = ncid.variables['time'][:]
-        matching = np.where(np.floor(existing_times) == np.floor(date_epoch))[0]
+        existing_methods = ncid.variables['calibration_method'][:]
+        same_day = np.floor(existing_times) == np.floor(date_epoch)
+        matching = np.where(same_day & (existing_methods == method))[0]
 
         if len(matching) > 0:
-            # Check calibration method - overwrite if same method
-            idx = matching[0]
-            if ncid.variables['calibration_method'][idx] == 0:
-                print(f"  Overwriting existing Rayleigh calibration for this date")
-            else:
-                # Different method exists, append
-                idx = len(existing_times)
-                print(f"  Another calibration method exists, appending")
+            idx = int(matching[0])
+            print(f"  Overwriting existing calibration (method={method}) for this date")
         else:
             idx = len(existing_times)
 
@@ -246,7 +250,7 @@ def write_calibration_result(
     if result.calibration_top_height is not None:
         ncid.variables['calibration_top_height'][idx] = result.calibration_top_height
 
-    ncid.variables['calibration_method'][idx] = 0  # Rayleigh method
+    ncid.variables['calibration_method'][idx] = method  # 0=Rayleigh, 1=Liquid_water_clouds
 
     ncid.variables['laser_wavelength'][idx] = wavelength_nm
 

@@ -16,21 +16,21 @@ DEFAULT_OUT_DIR = _PROJECT / "dashboard"                # generated static site
 DB_NAME = "calib_index.sqlite"
 
 # --- Flag meanings ----------------------------------------------------------
-# MIRROR of calibration/config.py :: CalibrationResult.flag_meaning. Kept local on purpose
-# so the dashboard runs without importing (or installing) the calibration package.
-# -99 is the runner's "exception during calibration" sentinel (run_all_l2monthly.py).
+# MIRROR of calibration/flags.py :: FLAG_MEANINGS (the homogenized cloud/Rayleigh table).
+# Kept local on purpose so the dashboard runs without importing (or installing) the heavy
+# calibration package. Keep in sync with calibration/flags.py.
 FLAG_MEANINGS = {
     1: "Successful",
-    0.5: "Partially clear night",
+    0.5: "Partial success",
     0: "No data",
-    -1: "Not a clear night",
+    -1: "Unsuitable conditions",
     -2: "Signal not proportional to molecular",
-    -3: "Bad quality ratio between methods",
+    -3: "Method disagreement",
     -4: "Missing model data (CAMS)",
-    -5: "RCS contains only NaN",
-    -6: "Uncertainty higher than CL",
-    -7: "Negative Rayleigh fit",
-    -8: "Rayleigh fit issue: |b| > a",
+    -5: "Signal all-NaN",
+    -6: "Uncertainty exceeds value",
+    -7: "Negative fit slope",
+    -8: "Fit issue: |b| > a",
     -99: "Exception during calibration",
 }
 
@@ -62,6 +62,15 @@ TYPE_COLORS = {
     "Mini-MPL": "#9467bd",
 }
 TYPE_ORDER = ["CHM15k", "CL31", "CL51", "CL61", "Mini-MPL"]
+
+# Calibration methods (a station can carry one or both; CL61 carries both).
+METHOD_LABELS = {"rayleigh": "Rayleigh", "cloud": "Liquid-cloud"}
+METHOD_COLORS = {"rayleigh": "#1f77b4", "cloud": "#2ca02c"}
+METHOD_ORDER = ["rayleigh", "cloud"]
+
+
+def method_label(method) -> str:
+    return METHOD_LABELS.get(str(method), str(method))
 
 # --- Watchlist thresholds (tunable) -----------------------------------------
 RECENT_WINDOW_DAYS = 60       # span of the "recent" success-rate metric

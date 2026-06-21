@@ -66,9 +66,20 @@ td a:hover { text-decoration: underline; }
 .spark { vertical-align: middle; }
 .watchtable td { font-size: 13px; }
 .issue { font-size: 12px; padding: 1px 7px; border-radius: 9px; color: #fff; }
-.issue-C_Ldrift { background: #b45309; }
+.issue-Valuedrift { background: #b45309; }
 .issue-Failurestreak { background: #b91c1c; }
 .issue-Lowrecentsuccess { background: #6d28d9; }
+
+/* Method tags (pills) */
+.mtag { font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 10px;
+  color: #fff; vertical-align: middle; margin-left: 4px; }
+.mtag-rayleigh { background: #1f77b4; }
+.mtag-cloud { background: #2ca02c; }
+
+/* Per-method section on a station page */
+.methodblock { border-top: 2px solid var(--line); margin-top: 22px; padding-top: 6px; }
+.methodblock h2 { display: flex; align-items: baseline; gap: 10px; }
+.methodblock h3 { font-size: 13px; margin: 16px 0 8px; font-weight: 600; }
 
 /* Pagination controls */
 .pager { display: flex; align-items: center; gap: 12px; margin: 10px 0 4px; }

@@ -81,7 +81,8 @@ from numpy.typing import NDArray
 from netCDF4 import Dataset
 
 # Re-use the verified-equivalent pieces from the Rayleigh WV module.
-from ..water_vapor_correction.water_vapor import wv_t2eff_core, load_abs_cross_section, _A137, _B137
+from ..water_vapor_correction.water_vapor import (
+    wv_t2eff_core, load_abs_cross_section, in_water_vapor_band, _A137, _B137)
 from ..io.cams import ensure_cams_file
 
 # --- Constants matching the MATLAB exactly ---------------------------------
@@ -175,6 +176,11 @@ def set_defaults(config: CloudCalConfig) -> CloudCalConfig:
         wl, fwhm = 910.74, 1.0
     elif inst == "CHM15K":
         wl, fwhm = 1064.47, 0.5
+    elif inst in ("MINI-MPL", "MINIMPL", "MINI_MPL", "MPL"):
+        # Mini-MPL is a 532 nm system (M. Hervo): far outside the 910 nm water-vapor
+        # band, so it must NEVER get the WV correction. Giving it the correct wavelength
+        # makes the wavelength-based WV gate (below) skip it by physics.
+        wl, fwhm = 532.0, 0.5
     else:
         wl, fwhm = 910.0, 3.4
     # set_defaults always overwrites wavelength/laser_fwhm from the instrument switch
@@ -1513,7 +1519,11 @@ def liquid_cloud_calibration_from_data(data: CeiloData, config: CloudCalConfig) 
     data = average_ceilo_data(data, config)
 
     # --- Water-vapor absorption correction ---
-    in_wv_band = config.instrument.strip().upper() in ("CL31", "CL51", "CL61")
+    # Gate on the laser WAVELENGTH, not the instrument name: the WV correction applies
+    # only inside the 900-920 nm H2O absorption band (CL31/CL51/CL61). 1064 nm (CHM15k)
+    # and 532 nm (Mini-MPL) are outside it and must never be WV-corrected — enforced here
+    # by physics rather than a hard-coded instrument list (mirrors the Rayleigh path).
+    in_wv_band = in_water_vapor_band(config.wavelength)
     if config.apply_wv_correction and in_wv_band:
         try:
             trans2 = compute_wv_transmission(data, config)

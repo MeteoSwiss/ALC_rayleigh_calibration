@@ -3,7 +3,9 @@
 {% block headerextra %}<a class="back" href="{{ base }}index.html">&larr; summary</a>{% endblock %}
 
 {% block content %}
-<h1>{{ key }} <span class="badge">{{ meta.itype }}</span></h1>
+<h1>{{ key }} <span class="badge">{{ meta.itype }}</span>
+  {% for b in blocks %}<span class="mtag mtag-{{ b.method }}">{{ b.label }}</span>{% endfor %}
+</h1>
 <p class="subtitle">
   {%- set bits = [] -%}
   {%- if meta.name %}{{ bits.append(meta.name) or "" }}{% endif -%}
@@ -16,36 +18,39 @@
   <span><b>WMO</b> {{ meta.wmo or "—" }}</span>
   <span><b>Lat/Lon</b> {{ meta.lat | fmt('{:.3f}') }}, {{ meta.lon | fmt('{:.3f}') }}</span>
   <span><b>Alt</b> {{ meta.alt | fmt('{:.0f}') }} m</span>
-  <span><b>Nights</b> {{ meta.n_dates or 0 }}</span>
-  <span><b>Success</b> {{ meta.success_rate | fmt('{:.0f}') }}% ({{ meta.n_success or 0 }})</span>
-  <span><b>Median C_L</b> {{ meta.median_cl | fmt('{:.3e}') }}</span>
-  <span><b>Median rel. unc</b> {{ meta.median_rel_unc | fmt('{:.0f}') }}%</span>
-  <span><b>Range</b> {{ meta.first_date or "—" }} → {{ meta.last_date or "—" }}</span>
 </section>
 
-<section class="card">{{ figs.cl | safe }}</section>
-<section class="grid2">
-  <div class="card">{{ figs.flags | safe }}</div>
-  <div class="card">{{ figs.window | safe }}</div>
-</section>
+{% if overlay %}
+<section class="card">{{ overlay | safe }}</section>
+{% endif %}
 
-<section>
-  <h2>Recent calibrations <span class="muted">(last {{ recent | length }} nights)</span></h2>
+{% for b in blocks %}
+<section class="methodblock">
+  <h2><span class="mtag mtag-{{ b.method }}">{{ b.label }}</span>
+    <span class="muted">{{ b.meta.success_rate | fmt('{:.0f}') }}% success · {{ b.meta.n_success or 0 }}/{{ b.meta.n_dates or 0 }} ·
+    median {{ b.meta.median_cl | fmt('{:.3e}') }} · rel. unc {{ b.meta.median_rel_unc | fmt('{:.0f}') }}%</span></h2>
+  <div class="card">{{ b.figs.ts | safe }}</div>
+  <div class="grid2">
+    <div class="card">{{ b.figs.flags | safe }}</div>
+    <div class="card">{{ b.figs.aux | safe }}</div>
+  </div>
+  <h3 class="muted">Recent {{ b.label }} calibrations (last {{ b.recent | length }})</h3>
   <table class="stationtable">
-    <thead><tr><th>Date</th><th>Flag</th><th>C_L</th><th>Uncertainty</th><th>Window (m)</th><th>Message</th></tr></thead>
+    <thead><tr><th>Date</th><th>Flag</th><th>Value</th><th>Uncertainty</th><th>Extra</th><th>Message</th></tr></thead>
     <tbody>
-    {% for r in recent %}
+    {% for r in b.recent %}
       <tr>
         <td>{{ r.date }}</td>
         <td><span class="dot" style="background:{{ flag_color(r.flag) }}"></span>
             {{ r.flag }} <span class="muted">{{ flag_label(r.flag) }}</span></td>
-        <td>{{ r.lidar_constant | fmt('{:.3e}') if r.success else "—" }}</td>
+        <td>{{ r.cal_value | fmt('{:.3e}') if r.success else "—" }}</td>
         <td>{{ r.uncertainty | fmt('{:.2e}') if r.success else "—" }}</td>
-        <td>{% if r.bottom_height == r.bottom_height %}{{ r.bottom_height | fmt('{:.0f}') }}–{{ r.top_height | fmt('{:.0f}') }}{% else %}—{% endif %}</td>
+        <td>{% if b.method == 'cloud' %}{{ r.n_profiles | fmt('{:.0f}') }} prof{% elif r.bottom_height == r.bottom_height %}{{ r.bottom_height | fmt('{:.0f}') }}–{{ r.top_height | fmt('{:.0f}') }} m{% else %}—{% endif %}</td>
         <td class="msg">{{ r.message }}</td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
 </section>
+{% endfor %}
 {% endblock %}

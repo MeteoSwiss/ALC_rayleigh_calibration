@@ -7,7 +7,7 @@
       "runtimeArgs": [
         "-m", "http.server", "8732",
         "--bind", "127.0.0.1",
-        "--directory", "C:/DATA/Projects/202606_E-PROFILE_calibration/dashboard"
+        "--directory", "C:/DATA/Projects/202606_E-PROFILE_calibration/dashboard_l1_2026"
       ],
       "port": 8732
     }

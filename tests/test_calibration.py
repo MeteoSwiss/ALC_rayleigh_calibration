@@ -101,7 +101,9 @@ class TestCalibrationResult:
         assert result.flag_meaning == "Successful"
         
         result = CalibrationResult(lidar_constant=-1, flag=-1, uncertainty=0)
-        assert result.flag_meaning == "Not a clear night"
+        # Homogenized cloud/Rayleigh label (calibration.flags); the Rayleigh-specific
+        # reason ("not a clear night") is carried in the result message, not the label.
+        assert result.flag_meaning == "Unsuitable conditions"
 
 
 class TestAtmosphere:
