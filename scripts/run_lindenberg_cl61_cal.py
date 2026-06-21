@@ -335,15 +335,15 @@ def _cloud_one(ds: str) -> dict:
                 aerosol_lidar_ratio=50.0,
             )
             res = liquid_cloud_calibration(cfg)
-            ok = res.n_profiles > 0 and np.isfinite(res.cal_mean) and res.cal_mean > 0
-            # Wiegner (2014) convention: C_L = 1 / C  where C is the cloud multiplier
-            # (C = beta_true / beta_measured).  Storing C_L makes both Rayleigh and
-            # cloud directly comparable on the same axis.
-            cl = 1.0 / res.cal_mean if ok else float("nan")
+            ok = res.n_profiles > 0 and np.isfinite(res.lidar_constant) and res.lidar_constant > 0
+            # Wiegner & Geiss (2012) convention: report the absolute lidar constant
+            # C_L = calibration_constant_0 / C, where C is the O'Connor cloud multiplier
+            # (C = beta_true / beta_file). This puts cloud and Rayleigh C_L on the same axis.
+            cl = res.lidar_constant if ok else float("nan")
             rec[f"cl_{tag}"] = f"{cl:.6f}" if ok else "nan"
             rec[f"n_{tag}"] = str(int(res.n_profiles))
-            # std propagated through the inversion: std(C_L) ≈ std(C) / C^2
-            cl_std = res.cal_std / (res.cal_mean ** 2) if ok else float("nan")
+            # std propagated through C_L = calConst / C:  std(C_L) = C_L * std(C) / median(C)
+            cl_std = res.lidar_constant * res.cal_std / res.cal_median if ok else float("nan")
             rec[f"std_{tag}"] = f"{cl_std:.6f}" if ok else "nan"
         except Exception as exc:  # noqa: BLE001
             rec[f"cl_{tag}"] = "nan"

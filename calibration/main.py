@@ -219,7 +219,7 @@ def run_calibration_batch(
                 assert result is not None
                 results[key] = result
                 if result.is_successful:
-                    logger.info(f"✓ Success: CL = {result.lidar_constant:.4e}")
+                    logger.info(f"✓ Success: C_L = {result.lidar_constant:.4e}")
                 else:
                     logger.warning(f"✗ Failed: {result.flag_meaning}")
         return results, errors, not_implemented
@@ -244,7 +244,7 @@ def run_calibration_batch(
                 assert result is not None
                 results[key] = result
                 if result.is_successful:
-                    logger.info(f"✓ {name}: CL = {result.lidar_constant:.4e}")
+                    logger.info(f"✓ {name}: C_L = {result.lidar_constant:.4e}")
                 else:
                     logger.warning(f"✗ {name}: {result.flag_meaning}")
 

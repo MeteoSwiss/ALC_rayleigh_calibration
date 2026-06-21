@@ -107,7 +107,9 @@ def _create_calibration_file(
     units = info.instrument_type.lidar_constant_units
 
     nc_cl = ncid.createVariable('lidar_constant', 'f8', ('time',), zlib=True, fill_value=-999.9)
-    nc_cl.long_name = "Value of the lidar constant"
+    nc_cl.long_name = "Lidar constant C_L (Wiegner & Geiss 2012)"
+    nc_cl.definition = ("C_L = RCS / beta_att (range-corrected signal divided by attenuated "
+                        "total backscatter); calibrate via beta_att = RCS / C_L")
     nc_cl.units = units
 
     nc_cl_unc = ncid.createVariable('lidar_constant_uncertainty', 'f8', ('time',), zlib=True, fill_value=-999.9)

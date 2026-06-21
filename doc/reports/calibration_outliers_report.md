@@ -3,6 +3,9 @@
 *Generated 2026-06-21 (L2 recomputed after the coarse-cadence cloud-screening fix, commit `0fb4cc4`).
 `validation/outliers_timeseries.py` on the network run. Optimized E-PROF v2 (C8) vs v1.1, L1 + L2.*
 
+> The nightly coefficient `C` here is the Wiegner lidar constant `C_L = RCS/β_att` (Rayleigh method);
+> see [calibration_coefficient_convention.md](calibration_coefficient_convention.md) for the full convention.
+
 ## Outlier definition (drift-aware, robust)
 
 For each calibration (stream × level × method) the date-ordered **valid** nightly lidar constants are

@@ -111,7 +111,10 @@ def fig_pareto(agg, path, phase):
         ax.annotate("best ↘\n(more valid, lower σ)", xy=(0.97, 0.05), xycoords="axes fraction",
                     ha="right", va="bottom", fontsize=8, color="green",
                     bbox=dict(boxstyle="round", fc="honeydew", ec="green", alpha=0.7))
-    axes[0].set_ylabel("σ_SD (% of median C) — short-term variability")
+    # sigma_SD is a relative successive-difference metric, invariant under C -> 1/C and under a
+    # constant scale, so it is identical whether expressed as the O'Connor C, its inverse, or the
+    # Wiegner C_L = calibration_constant_0 / C. Labelled as C_L for coherence with the Rayleigh side.
+    axes[0].set_ylabel("σ_SD (% of median C_L) — short-term variability")
     h = [plt.Line2D([], [], marker="o", color="0.5", ls="", label="L1"),
          plt.Line2D([], [], marker="s", color="0.5", ls="", label="L2")]
     h += [plt.Line2D([], [], marker="o", color=COLORS[c], ls="", label=CLABEL[c]) for c in CONFIGS]

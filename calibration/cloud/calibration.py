@@ -18,10 +18,25 @@ read data
   -> apparent lidar ratio  S_apparent = 1/(2 * integral(beta_corrected dz))
   -> cloud filters (+/-300 m around the peak, aerosol ratio, CBH range)
   -> temporal-consistency filter (N consecutive profiles within +/-X% of their mean)
-  -> C = S_consistent / 18.8     (S_theoretical for liquid water)
+  -> C = S_consistent / 18.8     (S_theoretical for liquid water; O'Connor 2004 multiplier)
   -> stats (mean / median / mode / std), optional transmission correction.
 
-C is a MULTIPLIER:  beta_true = C * beta_L2.
+Coefficient convention (Wiegner & Geiss 2012)
+---------------------------------------------
+The reported calibration constant is the Wiegner lidar constant ``C_L = RCS / beta_att``
+(the SAME definition and units as the Rayleigh product), so the cloud and Rayleigh
+constants are directly comparable on one axis. The O'Connor cloud coefficient ``C`` is a
+MULTIPLIER on the file's already-calibrated backscatter:  ``beta_true = C * beta_file``,
+with ``C ~ 1`` when the file is well calibrated. Because the file's ``beta_att`` was
+produced with the applied constant ``calibration_constant_0`` (= RCS/beta_att = the
+operationally-applied C_L), the absolute Wiegner constant from the cloud method is
+
+      C_L = calibration_constant_0 / C .
+
+:class:`CloudCalResults` therefore exposes, in order of preference:
+  - ``lidar_constant``           = C_L            (headline, Wiegner; NaN if no applied const)
+  - ``calibration_factor``       = 1 / C          (dimensionless Wiegner-sense inverse)
+  - ``calibration_coefficient``  = C              (O'Connor multiplier; internal/diagnostic)
 
 Water vapor
 -----------
@@ -185,6 +200,11 @@ class CeiloData:
     laser_energy: Optional[NDArray]
     altitude_warning: bool = False
     trans2_wv: Optional[NDArray] = None  # (n_range, n_time)
+    # Operationally-applied Wiegner lidar constant C_L = RCS/beta_att that produced the
+    # file's attenuated_backscatter (E-PROFILE L2 'calibration_constant_0'). Used to turn
+    # the O'Connor multiplier C into an absolute C_L = calibration_constant_applied / C.
+    # None when the file carries no such constant (e.g. raw L1 in counts).
+    calibration_constant_applied: Optional[float] = None
 
 
 def _matlab_datenum(dt64: NDArray) -> NDArray:
@@ -498,6 +518,20 @@ def read_ceilometer_data(nc_file: str, config: CloudCalConfig) -> Tuple[CeiloDat
                 laser_energy = np.asarray(
                     nc.variables["laser_pulse_energy"][:], dtype="float64").ravel()
 
+            # --- operationally-applied lidar constant (E-PROFILE L2 'calibration_constant_0') ---
+            # This is the Wiegner C_L = RCS/beta_att already baked into the file's
+            # attenuated_backscatter; it lets the cloud method report an absolute
+            # C_L = calibration_constant_applied / C (see module docstring). Robust median over
+            # the finite, positive values; None when the variable is absent (e.g. raw L1).
+            calibration_constant_applied = None
+            for nm in ("calibration_constant_0", "calibration_constant"):
+                if nm in var_names:
+                    cc = np.asarray(nc.variables[nm][:], dtype="float64").ravel()
+                    cc = cc[np.isfinite(cc) & (cc > 0)]
+                    if cc.size:
+                        calibration_constant_applied = float(np.median(cc))
+                    break
+
         data = CeiloData(
             time=time_dt, time_num=time_num,
             station_altitude=station_altitude,
@@ -505,6 +539,7 @@ def read_ceilometer_data(nc_file: str, config: CloudCalConfig) -> Tuple[CeiloDat
             range=rng, range_resol=range_resol, beta=beta, cbh=cbh,
             quality_flag=quality_flag, window_transmission=window_transmission,
             laser_energy=laser_energy, altitude_warning=altitude_warning,
+            calibration_constant_applied=calibration_constant_applied,
         )
         return data, 0
     except Exception as exc:  # noqa: BLE001 - mirror MATLAB's try/catch -> status=1
@@ -1263,8 +1298,14 @@ def _find_last(mask: NDArray) -> Optional[int]:
 # ===========================================================================
 @dataclass
 class CloudCalResults:
-    calibration_factor: float = float("nan")
-    calibration_coefficient: float = float("nan")
+    # Wiegner lidar constant C_L = RCS / beta_att (same definition/units as the Rayleigh
+    # product). For the cloud method C_L = calibration_constant_applied / C, where C is the
+    # O'Connor multiplier below. NaN when the file carries no applied constant (e.g. raw L1).
+    lidar_constant: float = float("nan")          # C_L  (headline, Wiegner)
+    # 1/C: dimensionless Wiegner-sense correction factor (multiply the file's C_L by this).
+    calibration_factor: float = float("nan")      # 1 / C  (Wiegner-sense inverse)
+    # C (O'Connor 2004 multiplier): beta_true = C * beta_file; ~1 when the file is well calibrated.
+    calibration_coefficient: float = float("nan")  # C  (O'Connor multiplier, diagnostic)
     lidar_ratios: NDArray = field(default_factory=lambda: np.array([]))
     cal_mean: float = float("nan")
     cal_median: float = float("nan")
@@ -1536,6 +1577,12 @@ def liquid_cloud_calibration_from_data(data: CeiloData, config: CloudCalConfig) 
     # No valid in-cloud profiles (cal_median 0/NaN) -> report NaN rather than crash.
     res.calibration_factor = (1.0 / cal_median) if (np.isfinite(cal_median) and cal_median != 0.0) else float("nan")
     res.calibration_coefficient = cal_median
+    # Absolute Wiegner lidar constant C_L = calibration_constant_applied / C, comparable to the
+    # Rayleigh product. NaN when the input file carried no applied constant (e.g. raw L1).
+    cc_applied = getattr(data, "calibration_constant_applied", None)
+    if (cc_applied is not None and np.isfinite(cc_applied)
+            and np.isfinite(cal_median) and cal_median != 0.0):
+        res.lidar_constant = float(cc_applied / cal_median)
     res.lidar_ratios = S_consistent[valid_idx]
     res.cal_mean = cal_mean
     res.cal_median = cal_median

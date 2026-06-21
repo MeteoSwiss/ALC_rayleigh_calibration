@@ -330,8 +330,8 @@ def plot_lidar_constant(
 
     r_km = range_alc * 1e-3
 
-    # CL(z)
-    ax.plot(cl_profile, r_km, color="#1f77b4", lw=0.6, label="CL(z)")
+    # C_L(z)
+    ax.plot(cl_profile, r_km, color="#1f77b4", lw=0.6, label=r"$C_L(z)$")
 
     # Median + uncertainty band
     ax.axvline(cl_median, color="#d62728", ls="-", lw=1.2,
@@ -353,9 +353,9 @@ def plot_lidar_constant(
     ax.axhspan(fit_range_start * 1e-3, fit_range_end * 1e-3,
                color="gold", alpha=0.15, label="Molecular window")
 
-    ax.set_xlabel("Lidar Constant (a.u.)")
+    ax.set_xlabel(r"Lidar constant $C_L$ (a.u.)")
     ax.set_ylabel("Range (km)")
-    ax.set_title(title or "Lidar Constant Profile")
+    ax.set_title(title or r"Lidar constant $C_L$ profile")
     ax.legend(loc="upper right", fontsize=9)
     ax.grid(True, alpha=0.25)
 
@@ -575,7 +575,7 @@ def plot_sensitivity_analysis(
         )
         ax2.legend(fontsize=8, loc="upper right")
 
-    ax2.set_ylabel("Lidar Constant")
+    ax2.set_ylabel(r"Lidar constant $C_L$")
     ax2.set_title("All Combinations")
     ax2.set_xticks([])
     ax2.grid(True, axis="y", alpha=0.25)
@@ -611,7 +611,7 @@ def plot_sensitivity_analysis(
         ax3.set_xticks(positions)
         ax3.set_xticklabels(labels, rotation=45, ha="right", fontsize=8)
         ax3.set_xlabel("Time sample")
-        ax3.set_ylabel("Lidar Constant")
+        ax3.set_ylabel(r"Lidar constant $C_L$")
         ax3.set_title("Time-Sample Spread")
         ax3.legend(fontsize=8, loc="upper right")
         ax3.grid(True, axis="y", alpha=0.25)
@@ -759,8 +759,8 @@ def plot_rayleigh_diagnostics_compact(
         ax_s3.legend(fontsize=7, loc="best")
     ax_s3.set_xlim(0.7, 1.3)
     ax_s3.set_xticks([])
-    ax_s3.set_title("Lidar-constant spread")
-    ax_s3.set_ylabel("Lidar constant")
+    ax_s3.set_title(r"Lidar constant $C_L$ spread")
+    ax_s3.set_ylabel(r"Lidar constant $C_L$")
     ax_s3.grid(True, axis="y", alpha=0.25)
 
     # --- Annotated RCS pcolor: molecular layer, cloud detections, profile usage ---

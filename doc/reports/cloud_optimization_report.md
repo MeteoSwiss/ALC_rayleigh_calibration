@@ -4,6 +4,12 @@
 Sweep of 8 gate configurations of the O'Connor/Hopkin liquid-cloud calibration, measuring the number of
 **valid cloud calibrations** and the **short-term variability** (σ_SD) of the calibration coefficient.*
 
+> **Coefficient convention.** All coefficients follow the Wiegner lidar constant `C_L = RCS/β_att`
+> (see [calibration_coefficient_convention.md](calibration_coefficient_convention.md)). The cloud method's
+> native O'Connor multiplier `C` (`β_true = C·β_file`, ≈1) is reported as the absolute
+> `C_L = calibration_constant_0 / C`, with the dimensionless inverse `1/C` alongside. `σ_SD` is a relative
+> metric, identical for `C`, `1/C` and `C_L`, so the variability results below are convention-independent.
+
 ## TL;DR
 
 - **`n_consecutive` (the temporal-consistency requirement) is the key yield lever** — analogous to the
@@ -25,7 +31,8 @@ pre-average + water-vapour correction — the expensive steps, with CAMS now cac
 
 - **valid %** = days with a valid cloud calibration (`cal_median > 0`, ≥1 qualifying in-cloud profile)
   ÷ processed days.
-- **σ_SD** = robust successive-difference precision of the nightly coefficient (% of median; lower better).
+- **σ_SD** = robust successive-difference precision of the nightly `C_L` (% of median; lower better;
+  invariant under `C → 1/C`, so computed on the stored `cal_median`).
 
 8 configurations (gates not listed at the MATLAB defaults: `n_consecutive=5, consistency_range=10,
 ratio_filter=0.05, cbh/cal_max=2400, temp=-20, attenuation_factor=20`):

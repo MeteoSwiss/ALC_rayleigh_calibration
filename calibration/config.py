@@ -301,6 +301,8 @@ class CalibrationOptions:
 @dataclass
 class CalibrationResult:
     """Result of a Rayleigh calibration attempt."""
+    # Wiegner & Geiss (2012) lidar constant C_L = RCS / beta_att (calibrate via
+    # beta_att = RCS / C_L). Same definition/units as the cloud product's lidar_constant.
     lidar_constant: float
     flag: int
     uncertainty: float
