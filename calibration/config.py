@@ -171,12 +171,13 @@ class CalibrationOptions:
     # filtering/fitting. Disabled by default; the Lindenberg runner enables 60 s / 30 m.
     average_time_s: Optional[float] = None
     average_range_m: Optional[float] = None
-    # Native L1 sits on a fine grid (e.g. CHM15k 15 m x 15 s) that the gated molecular
-    # methods (v2/earlinet) over-reject (v2 via temporal-variability rejection, earlinet via
-    # the per-bin R2 test), even though the signal matches L2's beta_att (R2~0.96). Binning
-    # native L1 to the standard L2 grid (30 m x 300 s) makes L1 and L2 calibrate consistently.
-    # Applied ONLY for data_level==L1 when no explicit average_time_s/average_range_m is set;
-    # L2/RAW are untouched (and a coarser native grid is a no-op). See network_v2_vs_v11_report.md.
+    # Native L1/RAW sit on a fine grid (e.g. CHM15k 15 m x 15 s, CL61 raw 4.8 m x ~60 s) that the
+    # gated molecular methods (v2/earlinet) over-reject (v2 via temporal-variability rejection,
+    # earlinet via the per-bin R2 test), even though the signal matches L2's beta_att (R2~0.96).
+    # Binning native L1/RAW to the standard L2 grid (30 m x 300 s) makes them calibrate consistently
+    # with L2. Applied for data_level in {L1, RAW} when no explicit average_time_s/average_range_m is
+    # set; L2 is already on that grid (no-op) and a coarser native grid is a no-op too.
+    # See network_v2_vs_v11_report.md and attbsc_validation_technical.md sec 7.6.
     l1_bin_to_l2_grid: bool = True
     l1_grid_time_s: float = 300.0
     l1_grid_range_m: float = 30.0

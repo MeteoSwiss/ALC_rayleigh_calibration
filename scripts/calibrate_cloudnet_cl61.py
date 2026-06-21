@@ -18,15 +18,15 @@ from pathlib import Path
 import numpy as np
 from calibration import calibrate_rayleigh, CalibrationOptions, InstrumentInfo, DataLevel
 from calibration.config import InstrumentType
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "validation"))
 from compare_molecular_methods import METHODS, run_methods, calibrates
 
-ROOT = Path("R:/CL61/RAW_cloudnet_dl")
+ROOT = Path("A:/CL61_Cloudnet")
 OUT = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/figs_paper_validation/cloudnet_cl61")
 OUT.mkdir(parents=True, exist_ok=True)
 SAMPLE = [3, 9, 15, 21, 27]
 SITES = [
-    dict(label="Lindenberg_CL61", wmo="lindenberg", lat=52.21, lon=14.12, alt=123.0),
-    dict(label="Hyytiala_CL61",   wmo="hyy",        lat=61.845, lon=24.287, alt=179.0),  # existing folder is 'hyy' (1-min files)
+    dict(label="Lindenberg_CL61", wmo="Lindenberg", lat=52.21, lon=14.12, alt=123.0),
 ]
 
 

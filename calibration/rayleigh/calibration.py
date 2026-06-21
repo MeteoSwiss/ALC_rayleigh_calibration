@@ -295,13 +295,14 @@ def calibrate_rayleigh(
     # filtering or fitting, matching the cloud-calibration speedup.
     avg_time_s = getattr(options, "average_time_s", None)
     avg_range_m = getattr(options, "average_range_m", None)
-    # Native L1 is on a fine grid (e.g. CHM15k 15 m x 15 s) that the gated molecular methods
-    # (v2/earlinet) over-reject even though the signal matches L2's beta_att; bin it to the
-    # standard L2 grid (30 m x 300 s) so L1 and L2 calibrate consistently. Only when the level
-    # is L1 and no explicit averaging was requested (L2/RAW untouched; a coarser native grid is
-    # a no-op). See network_v2_vs_v11_report.md ("L1 vs L2 - the tie on L1 is a native-grid effect").
+    # Native L1/RAW are on a fine grid (e.g. CHM15k 15 m x 15 s, CL61 raw 4.8 m x ~60 s) that the
+    # gated molecular methods (v2/earlinet) over-reject even though the signal matches L2's beta_att;
+    # bin to the standard L2 grid (30 m x 300 s) so L1/RAW and L2 calibrate consistently. Only when
+    # the level is L1 or RAW and no explicit averaging was requested (L2 is already on that grid -> a
+    # no-op; a coarser native grid is also a no-op). See network_v2_vs_v11_report.md ("L1 vs L2 - the
+    # tie on L1 is a native-grid effect") and attbsc_validation_technical.md sec 7.6.
     if (avg_time_s is None and avg_range_m is None
-            and getattr(options, "data_level", None) == DataLevel.L1
+            and getattr(options, "data_level", None) in (DataLevel.L1, DataLevel.RAW)
             and getattr(options, "l1_bin_to_l2_grid", True)):
         avg_time_s = getattr(options, "l1_grid_time_s", 300.0)
         avg_range_m = getattr(options, "l1_grid_range_m", 30.0)
