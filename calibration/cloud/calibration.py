@@ -26,13 +26,17 @@ Coefficient convention (Wiegner & Geiss 2012)
 The reported calibration constant is the Wiegner lidar constant ``C_L = RCS / beta_att``
 (the SAME definition and units as the Rayleigh product), so the cloud and Rayleigh
 constants are directly comparable on one axis. The O'Connor cloud coefficient ``C`` is a
-MULTIPLIER on the file's already-calibrated backscatter:  ``beta_true = C * beta_file``.
-``C ~ 1`` only when the file's ``calibration_constant_0`` is already the true constant. In
-E-PROFILE L2, CL31/CL51 store a FIXED nominal placeholder (1e8) so C is far from 1 (e.g. CL31
-C~1.6e-6); CL61 carries a real per-stream constant near 1 (~0.9-1.1) so C~1. Either way the
-absolute constant below recovers the true value. Because
-the file's ``beta_att`` was produced with the applied constant ``calibration_constant_0``
-(= RCS/beta_att = the operationally-applied C_L), the absolute Wiegner constant is
+MULTIPLIER on the file's PHYSICAL attenuated backscatter:  ``beta_true = C * beta_file``.
+The method first brings the input onto a physical 1/(m*sr) scale so the apparent lidar ratio
+is ~18 sr: the L2 product (stored "1E-6*1/(m*sr)" == Mm^-1 sr^-1) is multiplied by 1e-6, and a
+RAW range-corrected signal (L1 rcs_0 in V*m^2, counts) is divided by the calibration constant C
+(``beta = rcs_0 / C``; ``config.calibration_constant`` or the per-instrument default). RAW/L1
+and L2 therefore feed the SAME physical beta and return the SAME C. ``C ~ 1`` when the applied
+constant is the true one (CL61: S_apparent ~18-22 sr, C ~1.1); a FIXED nominal placeholder
+(CL31/CL51 calibration_constant_0 = 1e8) leaves the apparent lidar ratio high (~78 sr) so C ~4
+(= 78/18.8) is the genuine correction. Because the file's ``beta_att`` was produced with the
+applied constant ``calibration_constant_0`` (= RCS/beta_att = the operationally-applied C_L),
+the absolute Wiegner constant is
 
       C_L = calibration_constant_0 / C .
 
@@ -149,6 +153,15 @@ class CloudCalConfig:
 
     # Optional 'YYYYMM' override for CAMS retrieval (else derived from data.time[0])
     date_str: Optional[str] = None
+
+    # Calibration constant C used to turn a RAW range-corrected signal (L1 rcs_0 in V*m^2,
+    # CHM counts, Mini-MPL photon rate) into physical attenuated backscatter beta = rcs_0 / C
+    # (the L1->L2 conversion is attbsc_0[Mm^-1 sr^-1] = rcs_0 / C * 1e6, so physical beta =
+    # attbsc_0 * 1e-6 = rcs_0 / C). This brings the apparent lidar ratio onto the ~18 sr scale
+    # so RAW/L1 and the already-calibrated L2 give the same cloud coefficient. None -> use the
+    # per-instrument default (INSTRUMENT_CAL_DEFAULT). Ignored for already-physical inputs
+    # (L2 attbsc_0, CL61 L1 beta_att).
+    calibration_constant: Optional[float] = None
 
     # --- Optional pre-averaging (NOT in the MATLAB reference) ----------------
     # Downsample the raw beta grid in time and range *before* the (expensive) WV
@@ -308,6 +321,12 @@ def _beta_conversion_factor(instrument: str, units: Optional[str]) -> float:
     # explicitly 1e-8-scaled backscatter (legacy CL31/CL51 L1 form)
     if any(f in u for f in ("1e-8sr^-1.m^-1", "1e-8sr^-1*m^-1", "1e-8*sr^-1.m^-1", "1e-8*sr^-1*m^-1")):
         return 1e-8
+    # E-PROFILE L2 attenuated backscatter: stored as "1E-6 * 1/(m*sr)" == Mm^-1 sr^-1. Multiply
+    # by 1e-6 to recover physical 1/(m*sr) so the apparent lidar ratio is ~18 sr (NOT ~1e-5).
+    # MUST precede the bare "1/(m*sr)" raw form below, which it contains as a substring.
+    if any(f in u for f in ("1e-6*1/(m*sr)", "1e-6*1/(sr*m)", "1e-6*1/(m.sr)", "1e-6*1/(sr.m)",
+                            "1e-6sr^-1*m^-1", "1e-6sr^-1.m^-1", "1e-6m^-1*sr^-1", "1e-6m^-1.sr^-1")):
+        return 1e-6
     known = (
         # physical 1/(m*sr) backscatter (CL61 L1) and the stored 1e-6*1/(m*sr) L2 product
         "1/(m*sr)", "1/(sr*m)", "1/(m.sr)", "1/(sr.m)",
@@ -322,6 +341,21 @@ def _beta_conversion_factor(instrument: str, units: Optional[str]) -> float:
         f"Unrecognized beta units {units!r} for {instrument}: using conversion factor 1.0 "
         "(the liquid-cloud coefficient is then on the input's arbitrary scale).", UserWarning)
     return 1.0
+
+
+# Per-instrument default calibration constant C used to turn a RAW range-corrected signal into
+# physical attenuated backscatter (beta = rcs_0 / C). From the L1->L2 code (section 2): these are
+# the fallbacks used when no instrument-specific lidar_constant_0 is available.
+INSTRUMENT_CAL_DEFAULT = {"CL31": 1e8, "CL51": 1e8, "CL61": 1.0, "CHM15k": 3e11, "Mini-MPL": 5e5}
+
+
+def _is_raw_signal(units: Optional[str]) -> bool:
+    """True for a RAW range-corrected signal (V*m^2, counts, MHz*km^2/uJ) that must be divided by
+    the calibration constant C to become physical backscatter; False for already-physical
+    backscatter (the 1/(m*sr) forms, including the 1e-6-scaled L2 product and CL61 L1 beta_att)."""
+    u = _normalize_beta_units(units)
+    return any(f in u for f in ("v*m^2", "v*m2", "m^2*counts/s", "m2*counts/s", "counts",
+                                "mhz.km^2.uj^-1", "mhz*km^2*uj^-1", "mhz.km^2*uj^-1"))
 
 
 # ===========================================================================
@@ -458,6 +492,18 @@ def read_ceilometer_data(nc_file: str, config: CloudCalConfig) -> Tuple[CeiloDat
 
             beta_factor = _beta_conversion_factor(config.instrument, beta_units)
             beta = beta_raw.astype("float64") * beta_factor
+            # RAW range-corrected signals (L1 rcs_0, counts) are NOT physical backscatter: divide by
+            # the calibration constant C so beta = rcs_0 / C is physical 1/(m*sr) (apparent lidar
+            # ratio ~18 sr), the SAME scale as the already-calibrated L2 attbsc_0 (which is
+            # rcs_0 / C * 1e6, recovered by the *1e-6 factor above). This makes RAW/L1 and L2 give
+            # the same cloud coefficient.
+            raw_ccal = None
+            if _is_raw_signal(beta_units):
+                raw_ccal = config.calibration_constant
+                if raw_ccal is None:
+                    raw_ccal = INSTRUMENT_CAL_DEFAULT.get(config.instrument, 1.0)
+                if raw_ccal and np.isfinite(raw_ccal) and raw_ccal != 0:
+                    beta = beta / raw_ccal
 
             # Orient to (range, time) -- exact MATLAB transpose logic on the MATLAB-order array
             if beta.ndim == 2 and beta.shape[0] == n_time and beta.shape[1] == n_range:
@@ -540,6 +586,10 @@ def read_ceilometer_data(nc_file: str, config: CloudCalConfig) -> Tuple[CeiloDat
                     if cc.size:
                         calibration_constant_applied = float(np.median(cc))
                     break
+            # RAW L1 carries no calibration_constant_0; the C we divided rcs_0 by IS the applied
+            # constant, so report it (matches the L2 calibration_constant_0 -> same absolute C_L).
+            if calibration_constant_applied is None and raw_ccal:
+                calibration_constant_applied = float(raw_ccal)
 
         data = CeiloData(
             time=time_dt, time_num=time_num,
@@ -656,17 +706,16 @@ def _cams_levels_all_times(
         dim_names = tvar.dimensions  # e.g. ('time','level','latitude','longitude')
 
         def _read_profile(var):
-            arr = np.asarray(var[:], dtype="float64")
-            # Move to (level, time) regardless of stored dim order
+            # Slice the NetCDF variable DIRECTLY so only this station's (level, time) column
+            # is read from disk. Never materialise the full 4-D (time, level, lat, lon) array
+            # via var[:] -- that is multi-GB for a monthly CAMS file and was the cause of the
+            # ~10 GB/worker RSS growth (freed numpy memory is not returned to the OS).
             axes = {nm: k for k, nm in enumerate(dim_names)}
-            # build an index tuple selecting li/ai on lon/lat, full on level/time
-            idx = [slice(None)] * arr.ndim
+            idx = [slice(None)] * len(dim_names)
             idx[axes["longitude"]] = li
             idx[axes["latitude"]] = ai
-            sub = arr[tuple(idx)]  # remaining dims: level and time (in their orig order)
-            # figure out remaining axis order
+            sub = np.asarray(var[tuple(idx)], dtype="float64")  # remaining dims: level, time (orig order)
             remaining = [nm for nm in dim_names if nm in ("level", "time")]
-            # sub axes correspond to remaining in order
             lev_pos = remaining.index("level")
             sub = np.moveaxis(sub, lev_pos, 0)  # (level, time)
             return sub
@@ -677,14 +726,13 @@ def _cams_levels_all_times(
         # z, lnsp are surface fields stored at a single (top) level slot.
         # MATLAB reads them at level index 1 (start=1,count=1) for all times.
         def _read_surface(var):
-            arr = np.asarray(var[:], dtype="float64")
             axes = {nm: k for k, nm in enumerate(dim_names)}
-            idx = [slice(None)] * arr.ndim
+            idx = [slice(None)] * len(dim_names)
             idx[axes["longitude"]] = li
             idx[axes["latitude"]] = ai
             idx[axes["level"]] = 0  # MATLAB start index 1 -> python 0 (first level slot)
-            sub = arr[tuple(idx)]   # remaining dim: time
-            return np.asarray(sub, dtype="float64").ravel()
+            sub = np.asarray(var[tuple(idx)], dtype="float64")  # read only the column; remaining dim: time
+            return sub.ravel()
 
         z_surf = _read_surface(zvar)     # (n_t,) surface geopotential [m^2/s^2]
         lnsp = _read_surface(spvar)      # (n_t,) ln surface pressure

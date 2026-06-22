@@ -331,13 +331,10 @@ def process(cfg):
         if cal is not None and ch["calib"] != "none":
             ck = interp_calib(cal[0], cal[1], l2["time"])
             # Rayleigh: correction = calibration_constant_0 / C_L (divide by the stored lidar constant).
-            # Cloud: the O'Connor coefficient C calibrates beta_true = C * beta_obs. The cloud reader
-            # integrates the L2 attbsc_0 on its stored scale (units "1e-6*1/(m*sr)" = Mm^-1 sr^-1, i.e.
-            # beta_factor 1), so the returned C is 1e6x too small relative to the physical 1/(m*sr)
-            # integral; multiplying by 1e6 restores the physical multiplier on attbsc_0 [Mm^-1 sr^-1].
-            # Uniform across instruments (CL31/CL51/CL61 L2 share the units string); calibration_constant_0
-            # does NOT enter (the cloud method uses attbsc_0, not the reconstructed RCS).
-            corr = (l2["calc"] / ck) if ch["calib"] == "rayleigh" else (ck * 1e6)
+            # Cloud: the O'Connor coefficient C is now a physical O(1) multiplier on the attenuated
+            # backscatter (the cloud reader applies beta_factor 1e-6 to the L2 "1E-6*1/(m*sr)" product,
+            # so the apparent lidar ratio is ~18 sr and C ~ 1). beta_true [Mm^-1 sr^-1] = C * attbsc_0.
+            corr = (l2["calc"] / ck) if ch["calib"] == "rayleigh" else ck
             beta = beta * corr[:, None]
             med_corr = float(np.nanmedian(corr))
         else:

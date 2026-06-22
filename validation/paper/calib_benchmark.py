@@ -181,10 +181,10 @@ def _raw_cl61_ceilodata(raw_root, date, ch):
     if te.size == 0:
         return None
     rng = np.asarray(d.range_alc, float)
-    beta = np.asarray(d.rcs, float)
+    beta = np.asarray(d.rcs, float)            # CL61 raw beta_att is physical 1/(m sr)
     if beta.shape[0] == te.size:
         beta = beta.T                          # -> (range, time)
-    beta = beta * 1e6                          # 1/(m sr) -> Mm^-1 sr^-1 (E-PROFILE L2 stored scale)
+    # physical 1/(m sr) -> the cloud method computes the apparent lidar ratio (~18 sr) directly
     cbh = np.asarray(d.cbh, float) if getattr(d, "cbh", None) is not None else np.full(te.size, np.nan)
     if cbh.ndim > 1:
         cbh = cbh[:, 0] if cbh.shape[0] == te.size else cbh[0, :]
