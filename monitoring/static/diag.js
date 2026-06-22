@@ -1,17 +1,20 @@
-// Per-station diagnostic viewer: shows the latest successful calibration image, a month
-// calendar (non-calibration days greyed), prev/next + arrow-key navigation, and syncs with a
-// click on the Plotly time series. One viewer per method section (.diag). No dependencies
-// beyond the page-global Plotly. Station pages live at stations/<key>.html, so image paths
+// Per-station diagnostic viewer: shows the diagnostic image for a chosen day, a month calendar
+// (good calibrations green, rejected-but-imaged days grey, days with no image blank), and two
+// navigation axes:
+//   * Left / Right  (and the prev/next buttons): step between VALID (successful) calibrations.
+//   * Up / Down     (and the up/down buttons):   step through ALL imaged days (success + rejected).
+// Also syncs with a click on the Plotly time series and on a date in the "all calibrations" table.
+// One viewer per method section (.diag). Station pages live at stations/<key>.html, so image paths
 // (stored site-root-relative as "diag/<key>/<file>") are prefixed with "../".
 (function () {
-  var active = null;  // viewer that arrow keys control (last interacted with)
+  var active = null;  // viewer that the arrow keys control (last interacted with)
 
   function pad(n) { return (n < 10 ? "0" : "") + n; }
 
-  function buildCalendar(calEl, dates, onPick) {
-    var avail = {};
-    dates.forEach(function (d) { avail[d] = 1; });
-    var first = dates[0], last = dates[dates.length - 1];
+  function buildCalendar(calEl, items, onPick) {
+    var info = {};
+    items.forEach(function (it) { info[it.date] = !!it.success; });
+    var first = items[0].date, last = items[items.length - 1].date;
     var y = +first.slice(0, 4), m = +first.slice(4, 6) - 1;
     var y1 = +last.slice(0, 4), m1 = +last.slice(4, 6) - 1;
     var WD = ["M", "T", "W", "T", "F", "S", "S"];
@@ -24,7 +27,8 @@
       var nd = new Date(y, m + 1, 0).getDate();
       for (var dd = 1; dd <= nd; dd++) {
         var ds = "" + y + pad(m + 1) + pad(dd);
-        html += '<div class="cal-day ' + (avail[ds] ? "avail" : "none") + '" data-date="' + ds + '">' + dd + "</div>";
+        var cls = (ds in info) ? ("avail " + (info[ds] ? "good" : "rejected")) : "none";
+        html += '<div class="cal-day ' + cls + '" data-date="' + ds + '">' + dd + "</div>";
       }
       html += "</div></div>";
       m++; if (m > 11) { m = 0; y++; }
@@ -60,11 +64,13 @@
     items.sort(function (a, b) { return a.date < b.date ? -1 : 1; });
     var dates = items.map(function (it) { return it.date; });
     var pos = {}; dates.forEach(function (d, i) { pos[d] = i; });
+    var validIdx = [];
+    items.forEach(function (it, i) { if (it.success) validIdx.push(i); });
     var img = section.querySelector(".diag-img");
     var link = section.querySelector(".diag-imglink");
     var label = section.querySelector(".diag-date");
     var calEl = section.querySelector(".diag-cal");
-    var idx = items.length - 1;  // default: latest successful
+    var idx = validIdx.length ? validIdx[validIdx.length - 1] : items.length - 1;  // default: latest valid
 
     function show(i) {
       if (i < 0 || i >= items.length) return;
@@ -72,15 +78,17 @@
       var it = items[idx], src = "../" + it.rel;
       img.src = src; link.href = src;
       label.textContent = it.date.slice(0, 4) + "-" + it.date.slice(4, 6) + "-" + it.date.slice(6, 8) +
-        "  (" + (idx + 1) + " of " + items.length + ")";
+        (it.success ? "  ✓ valid" : "  ✗ rejected") + "  (day " + (idx + 1) + " of " + items.length + ")";
       Array.prototype.forEach.call(calEl.querySelectorAll(".cal-day.sel"), function (c) { c.classList.remove("sel"); });
       var cell = calEl.querySelector('.cal-day[data-date="' + it.date + '"]');
       if (cell) cell.classList.add("sel");
       active = viewer;
     }
     var viewer = {
-      prev: function () { show(idx - 1); },
-      next: function () { show(idx + 1); },
+      prevValid: function () { var c = null; validIdx.forEach(function (p) { if (p < idx) c = p; }); if (c !== null) show(c); },
+      nextValid: function () { for (var k = 0; k < validIdx.length; k++) { if (validIdx[k] > idx) { show(validIdx[k]); return; } } },
+      prevAny: function () { show(idx - 1); },
+      nextAny: function () { show(idx + 1); },
       jump: function (d) { if (d in pos) show(pos[d]); },
       jumpNearest: function (d) {
         var best = null, bd = Infinity;
@@ -89,9 +97,12 @@
       },
     };
 
-    buildCalendar(calEl, dates, function (d) { viewer.jump(d); active = viewer; });
-    section.querySelector(".diag-prev").addEventListener("click", function () { viewer.prev(); });
-    section.querySelector(".diag-next").addEventListener("click", function () { viewer.next(); });
+    buildCalendar(calEl, items, function (d) { viewer.jump(d); active = viewer; });
+    section.querySelector(".diag-prev").addEventListener("click", function () { viewer.prevValid(); });
+    section.querySelector(".diag-next").addEventListener("click", function () { viewer.nextValid(); });
+    var up = section.querySelector(".diag-up"), dn = section.querySelector(".diag-down");
+    if (up) up.addEventListener("click", function () { viewer.prevAny(); });
+    if (dn) dn.addEventListener("click", function () { viewer.nextAny(); });
     section.addEventListener("mouseenter", function () { active = viewer; });
     section.addEventListener("focus", function () { active = viewer; });
     wireTimeSeries(section.getAttribute("data-ts"), viewer);
@@ -113,8 +124,10 @@
 
   document.addEventListener("keydown", function (e) {
     if (!active || e.target.tagName === "SELECT" || e.target.tagName === "INPUT") return;
-    if (e.key === "ArrowLeft") { active.prev(); e.preventDefault(); }
-    else if (e.key === "ArrowRight") { active.next(); e.preventDefault(); }
+    if (e.key === "ArrowLeft") { active.prevValid(); e.preventDefault(); }
+    else if (e.key === "ArrowRight") { active.nextValid(); e.preventDefault(); }
+    else if (e.key === "ArrowUp") { active.prevAny(); e.preventDefault(); }
+    else if (e.key === "ArrowDown") { active.nextAny(); e.preventDefault(); }
   });
 
   Array.prototype.forEach.call(document.querySelectorAll(".diag"), buildViewer);

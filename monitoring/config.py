@@ -32,8 +32,19 @@ FLAG_MEANINGS = {
     -7: "Negative fit slope",
     -8: "Fit issue: |b| > a",
     -9: "Aerosol below molecular window",
+    -20: "Cloud: window transmission too low",
+    -21: "Cloud: laser energy too low",
+    -22: "Cloud: peak not sharp above",
+    -23: "Cloud: peak not sharp below",
+    -24: "Cloud: aerosol below cloud",
+    -25: "Cloud: cloud base out of range",
+    -26: "Cloud: inconsistent neighbours",
     -99: "Exception during calibration",
 }
+
+#: Cloud rejection flags (a cloud was present but a filter rejected it) -- treated as "unsuitable"
+#: like -1 for success-rate purposes (excluded from the denominator).
+CLOUD_REJECT_FLAGS = (-20, -21, -22, -23, -24, -25, -26)
 
 # A calibration "succeeded" on a night if its flag is one of these.
 SUCCESS_FLAGS = (1.0, 0.5)
@@ -52,6 +63,8 @@ FLAG_COLORS = {
     -7: "#d73027",
     -8: "#a50026",
     -9: "#e07b39",
+    -20: "#fff2cc", -21: "#ffe699", -22: "#ffd966", -23: "#f1c232",
+    -24: "#e69138", -25: "#d79b00", -26: "#bf9000",
     -99: "#000000",
 }
 
@@ -222,6 +235,47 @@ FLAG_DOCS = [
      "recognize": "Message reads 'Aerosol contamination below window: scattering ratio X'. In the "
                   "Rayleigh diagnostic the range-corrected-signal panel shows an enhanced layer "
                   "below the chosen molecular window."},
+    {"value": -20, "methods": "Cloud",
+     "summary": "Cloud rejected — window transmission too low.",
+     "detail": "Cloud rejection reasons (−20…−26) replace the generic 'no liquid cloud' when a cloud "
+               "WAS present but every candidate profile failed a filter; the dominant filter (the one "
+               "that rejected the most profiles) is reported. −20: the ceilometer window/blower "
+               "transmission was below threshold for the cloud profiles, so they are untrustworthy.",
+     "recognize": "Message 'Cloud: window transmission too low'. Genuine clear sky stays −1."},
+    {"value": -21, "methods": "Cloud",
+     "summary": "Cloud rejected — laser pulse energy too low.",
+     "detail": "The laser pulse energy was below threshold for the cloud profiles (degraded emission), "
+               "so the integrated backscatter cannot be trusted for calibration.",
+     "recognize": "Message 'Cloud: laser energy too low'."},
+    {"value": -22, "methods": "Cloud",
+     "summary": "Cloud rejected — peak not sharp enough above.",
+     "detail": "The peak-sharpness test failed on the upper side: the backscatter 300 m ABOVE the "
+               "peak was not a factor ≥ 20 smaller. The cloud did not fully attenuate the beam (not a "
+               "suitable opaque stratocumulus), so the O'Connor integral constraint does not hold.",
+     "recognize": "Message 'Cloud: peak not sharp above'."},
+    {"value": -23, "methods": "Cloud",
+     "summary": "Cloud rejected — peak not sharp enough below.",
+     "detail": "The peak-sharpness test failed on the lower side: the backscatter 300 m BELOW the peak "
+               "was not a factor ≥ 20 smaller — drizzle or a diffuse base, not a sharp liquid cloud "
+               "base, so the profile is unsuitable.",
+     "recognize": "Message 'Cloud: peak not sharp below'."},
+    {"value": -24, "methods": "Cloud",
+     "summary": "Cloud rejected — too much aerosol below the cloud.",
+     "detail": "The aerosol below the cloud contributed more than the allowed fraction (~5 %) of the "
+               "total integrated backscatter, so the integral constraint B = 1/(2ηS) would be biased "
+               "by the sub-cloud aerosol.",
+     "recognize": "Message 'Cloud: aerosol below cloud'."},
+    {"value": -25, "methods": "Cloud",
+     "summary": "Cloud rejected — cloud base out of range.",
+     "detail": "The detected cloud base fell outside the allowed [cbh_minheight, cbh_maxheight] band "
+               "(too low — overlap/near-range artefacts — or too high), so the profile is excluded.",
+     "recognize": "Message 'Cloud: cloud base out of range'."},
+    {"value": -26, "methods": "Cloud",
+     "summary": "Cloud rejected — inconsistent neighbouring profiles.",
+     "detail": "The temporal-consistency filter removed the profiles: the lidar ratio of neighbouring "
+               "in-cloud profiles did not agree within tolerance, so no stable run of consistent "
+               "profiles remained — the cloud field was too variable to calibrate.",
+     "recognize": "Message 'Cloud: inconsistent neighbours'."},
     {"value": -99, "methods": "Both",
      "summary": "Exception during calibration.",
      "detail": "The calibration code raised an unexpected error for that day — a driver / IO / edge-case bug rather than a physical rejection. The Message column carries the exception type; these are worth investigating as code issues.",

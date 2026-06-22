@@ -179,12 +179,17 @@ def _series_table_rows(cal: pd.DataFrame, series: pd.DataFrame, st: pd.DataFrame
     return rows
 
 
-def _copy_diagnostics(diag: pd.DataFrame, out_dir: Path) -> dict:
+def _copy_diagnostics(diag: pd.DataFrame, cal: pd.DataFrame, out_dir: Path) -> dict:
     """Copy per-calibration diagnostic PNGs into the site (diag/<key>/<method>_<date>.png) and
-    return {(key, method): [ {date, rel}, ... ]} sorted by date for the station-page viewer."""
+    return {(key, method): [ {date, rel, success}, ... ]} sorted by date for the station-page viewer.
+    `success` (from cal) drives the green/grey calendar and the valid-only (left/right) navigation."""
     by: dict = {}
     if not len(diag):
         return by
+    succ = set()
+    if len(cal):
+        s = cal[cal["success"] == 1]
+        succ = set(zip(s["key"].astype(str), s["method"].astype(str), s["date"].astype(str)))
     for _, r in diag.iterrows():
         src = Path(str(r["src"]))
         if not src.exists():
@@ -197,7 +202,8 @@ def _copy_diagnostics(diag: pd.DataFrame, out_dir: Path) -> dict:
             shutil.copyfile(src, dst_dir / fname)
         except OSError:
             continue
-        by.setdefault((key, method), []).append({"date": date, "rel": f"diag/{key}/{fname}"})
+        by.setdefault((key, method), []).append(
+            {"date": date, "rel": f"diag/{key}/{fname}", "success": (key, method, date) in succ})
     for k in by:
         by[k].sort(key=lambda x: x["date"])
     return by
@@ -238,7 +244,7 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
     flags = metrics.flag_distribution(cal)
     watch = metrics.watchlist(cal, st)
     keystats = _keystats(series, st)
-    diag_by = _copy_diagnostics(diag, out_dir)
+    diag_by = _copy_diagnostics(diag, cal, out_dir)
 
     # Operational calibration constant from the L2 files (optional): two ratio maps + per-station
     # black line on the time series.
@@ -254,8 +260,10 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
             "% of operational", "fig-map-op"), "fig-map-op"),
         "map": charts.fig_to_div(charts.network_map(keystats), "fig-map"),
         "success_type": charts.fig_to_div(charts.success_by_type_method(summary["by_type_method"]), "fig-stype"),
-        "flag_dist": charts.fig_to_div(charts.flag_distribution_bar(flags), "fig-flags"),
-        "cl_type": charts.fig_to_div(charts.value_by_type_method_box(series), "fig-cltype"),
+        "flag_dist_rayleigh": charts.fig_to_div(charts.flag_distribution_bar(flags, "rayleigh"), "fig-flags-r"),
+        "flag_dist_cloud": charts.fig_to_div(charts.flag_distribution_bar(flags, "cloud"), "fig-flags-c"),
+        "cl_type_abs": charts.fig_to_div(charts.value_by_type_method_box(series), "fig-cltype"),
+        "cl_type_pct": charts.fig_to_div(charts.value_pct_theoretical_box(series), "fig-cltype-pct"),
     }
     # Search index for the nav-bar station search (name + WIGOS id + key, all matchable).
     search_records = []

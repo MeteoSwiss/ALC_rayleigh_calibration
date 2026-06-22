@@ -136,14 +136,23 @@ def success_by_type_method(by_tm: pd.DataFrame) -> go.Figure:
     return fig
 
 
-def flag_distribution_bar(flags: pd.DataFrame) -> go.Figure:
-    """Horizontal bar of calibration counts per (method, outcome) — good at top."""
-    d = flags.iloc[::-1]
-    height = max(380, 22 * len(d) + 80)
-    fig = go.Figure(go.Bar(x=d["count"], y=d["label"], orientation="h",
+def flag_distribution_bar(flags: pd.DataFrame, method: str | None = None) -> go.Figure:
+    """Horizontal bar of calibration counts per outcome. With `method`, restrict to that method and
+    drop the method prefix from the labels (one chart per method)."""
+    if method is not None:
+        d = flags[flags["method"] == method].copy()
+        title = f"Outcome distribution — {config.method_label(method)}"
+    else:
+        d = flags.copy()
+        title = "Outcome distribution by method"
+    d = d.iloc[::-1]
+    ylabels = ([config.flag_label(f, method) for f in d["flag"]] if method is not None
+               else list(d["label"]))
+    height = max(300, 24 * len(d) + 80)
+    fig = go.Figure(go.Bar(x=d["count"], y=ylabels, orientation="h",
                            marker_color=d["color"], text=d["count"], textposition="auto"))
-    fig.update_layout(**{**_LAYOUT, "height": height, "margin": dict(l=250, r=20, t=44, b=40)},
-                      title="Outcome distribution by method", xaxis_title="calibrations")
+    fig.update_layout(**{**_LAYOUT, "height": height, "margin": dict(l=210, r=20, t=44, b=40)},
+                      title=title, xaxis_title="calibrations")
     return fig
 
 
@@ -163,9 +172,32 @@ def value_by_type_method_box(series: pd.DataFrame) -> go.Figure:
                                      marker_color=config.METHOD_COLORS.get(method, "#888"),
                                      boxpoints="all", jitter=0.4, pointpos=0,
                                      offsetgroup=method, showlegend=False))
-    fig.update_layout(**_LAYOUT, title="Per-series median C_L by type (log; method-colored)",
+    fig.update_layout(**_LAYOUT, title="Per-series median C_L by type — absolute (log)",
                       yaxis_title="C_L", yaxis_type="log", boxmode="group")
     fig.update_yaxes(exponentformat="e")
+    return fig
+
+
+def value_pct_theoretical_box(series: pd.DataFrame) -> go.Figure:
+    """Box of per-series median C_L expressed as a PERCENT of the theoretical value, by type
+    (linear). Putting every type on a common 0-?% scale makes the across-type comparison readable;
+    100 % (dashed) is the nominal value."""
+    fig = go.Figure()
+    for method in config.METHOD_ORDER:
+        for t in config.TYPE_ORDER:
+            theo = config.theoretical_cl(t)
+            if not theo or theo <= 0:
+                continue
+            vals = series.loc[(series["itype"] == t) & (series["method"] == method)
+                              & (series["median_cl"] > 0), "median_cl"]
+            if len(vals):
+                fig.add_trace(go.Box(y=100.0 * vals / theo, name=t, legendgroup=method,
+                                     marker_color=config.METHOD_COLORS.get(method, "#888"),
+                                     boxpoints="all", jitter=0.4, pointpos=0,
+                                     offsetgroup=method, showlegend=False))
+    fig.add_hline(y=100.0, line=dict(color="#888", width=1, dash="dash"))
+    fig.update_layout(**_LAYOUT, title="Per-series median C_L by type — % of theoretical (linear)",
+                      yaxis_title="% of theoretical", boxmode="group")
     return fig
 
 

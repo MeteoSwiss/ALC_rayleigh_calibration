@@ -155,10 +155,11 @@ def _series_aggregates(cal: pd.DataFrame) -> pd.DataFrame:
         g = g.sort_values("datetime")
         ok = g[g["success"] == 1]
         last = g.iloc[-1]
-        # Success rate counts only ATTEMPTABLE days: exclude no-data (flag 0) and unsuitable
-        # conditions (flag -1 = cloudy night for Rayleigh / clear sky for cloud). So it measures
+        # Success rate counts only ATTEMPTABLE days: exclude no-data (0), unsuitable conditions
+        # (-1 = cloudy night for Rayleigh / clear sky for cloud) and cloud filter rejections
+        # (-20..-26 = a cloud was present but not a clean, calibratable stratocumulus). So it measures
         # "when calibration was possible, how often it succeeded", not raw weather-limited yield.
-        n_suitable = int((~g["flag"].isin([0, -1])).sum())
+        n_suitable = int((~g["flag"].isin([0, -1, -20, -21, -22, -23, -24, -25, -26])).sum())
         records.append(dict(
             key=key, method=method,
             n_dates=int(len(g)), n_success=int(len(ok)), n_suitable=n_suitable,

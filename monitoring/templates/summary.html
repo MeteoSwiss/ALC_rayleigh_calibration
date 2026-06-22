@@ -33,8 +33,13 @@
 </section>
 
 <section class="grid2">
-  <div class="card">{{ figs.flag_dist | safe }}</div>
-  <div class="card">{{ figs.cl_type | safe }}</div>
+  <div class="card">{{ figs.flag_dist_rayleigh | safe }}</div>
+  <div class="card">{{ figs.flag_dist_cloud | safe }}</div>
+</section>
+
+<section class="grid2">
+  <div class="card">{{ figs.cl_type_abs | safe }}</div>
+  <div class="card">{{ figs.cl_type_pct | safe }}</div>
 </section>
 
 {% if watch %}

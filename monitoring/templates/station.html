@@ -35,10 +35,13 @@
   <section class="diag card" id="diag-{{ b.method }}" data-ts="fig-ts-{{ b.method }}" tabindex="0">
     <h3>Diagnostic — <span class="diag-date muted">latest</span>
       <span class="diag-nav">
-        <button type="button" class="diag-prev" title="Previous calibration (←)">‹ prev</button>
-        <button type="button" class="diag-next" title="Next calibration (→)">next ›</button>
+        <button type="button" class="diag-prev" title="Previous valid calibration (←)">‹ prev cal</button>
+        <button type="button" class="diag-next" title="Next valid calibration (→)">next cal ›</button>
+        <button type="button" class="diag-up" title="Previous day (↑)">↑ day</button>
+        <button type="button" class="diag-down" title="Next day (↓)">↓ day</button>
       </span>
-      <span class="muted diag-hint">— click a green date, use ← →, or click a point on the time series</span>
+      <span class="muted diag-hint">— <b>← →</b> valid calibrations, <b>↑ ↓</b> all days
+        (<span class="cal-key cal-ok"></span> good calibration · <span class="cal-key cal-bad"></span> rejected)</span>
     </h3>
     <div class="diag-body">
       <div class="diag-cal"></div>
