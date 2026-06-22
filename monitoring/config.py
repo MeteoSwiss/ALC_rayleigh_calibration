@@ -117,3 +117,69 @@ def flag_color(flag) -> str:
         return "#cccccc"
     key = f if f == 0.5 else int(f)
     return FLAG_COLORS.get(key, "#cccccc")
+
+
+def flag_anchor(flag) -> str:
+    """Stable id/anchor fragment for a flag value: 1 -> '1', -1 -> 'm1', 0.5 -> '0_5'."""
+    try:
+        f = float(flag)
+    except (TypeError, ValueError):
+        return "unknown"
+    if f != f:  # NaN
+        return "nan"
+    s = str(int(f)) if f == int(f) else ("0_5" if f == 0.5 else str(f))
+    return s.replace("-", "m").replace(".", "_")
+
+
+#: Long-form flag reference for the explanation page (flags.html). `methods` is which
+#: calibration(s) can emit the flag; `example` (optional) is a site-relative diagnostic image.
+FLAG_DOCS = [
+    {"value": 1, "methods": "Both",
+     "summary": "Calibration succeeded — a lidar constant C_L was produced and passed every check.",
+     "detail": "Rayleigh: the range-corrected signal followed the molecular (Rayleigh) profile in a clean reference region and the sensitivity-perturbation ensemble agreed. Cloud: at least three fully-attenuating liquid-cloud profiles gave a consistent O'Connor coefficient.",
+     "recognize": "Green point on the time series; a diagnostic image exists for the date."},
+    {"value": 0.5, "methods": "Both",
+     "summary": "Partial success — usable, but from limited evidence.",
+     "detail": "A calibration was produced from fewer profiles / a shorter clean period than the full-success threshold. Cloud: 1–2 valid liquid-cloud profiles (below the 3-profile bar). Rayleigh: only part of the night met the clear-sky criterion. Treat the value as lower-confidence.",
+     "recognize": "Light-green point on the time series."},
+    {"value": 0, "methods": "Both",
+     "summary": "No data — nothing could be attempted.",
+     "detail": "No usable signal for that period: the file was missing or empty, or it carried no finite backscatter in the working range. Distinct from −5 (a file existed but every sample was NaN).",
+     "recognize": "No point; the Message column reads 'No data'."},
+    {"value": -1, "methods": "Both",
+     "summary": "Unsuitable conditions — the scene is the wrong type for this method.",
+     "detail": "Rayleigh needs a CLEAR night so the signal can be matched to the molecular backscatter aloft; a cloudy / aerosol-laden night fails this. Cloud needs a fully-attenuating LIQUID cloud in the search window; a clear night legitimately has none. So −1 is expected and benign for the 'off' method, and the dashboard excludes it from success-rate denominators.",
+     "recognize": "The most common non-success flag. Cloud → 'No liquid cloud'; Rayleigh → 'Not a clear night'."},
+    {"value": -2, "methods": "Rayleigh",
+     "summary": "Signal not proportional to molecular backscatter.",
+     "detail": "In the reference region aloft the range-corrected signal should decay like the known molecular (Rayleigh) profile. When it does not track the molecular curve — residual aerosol, thin cloud, or instrument issues — there is no clean region to anchor the constant, and the fit is rejected.",
+     "recognize": "Rayleigh diagnostic: signal and molecular curves diverge inside the fit window."},
+    {"value": -3, "methods": "Rayleigh",
+     "summary": "Method disagreement.",
+     "detail": "The lidar constant is estimated by more than one independent route (different reference windows / sub-methods). When those estimates disagree by more than the allowed tolerance the result is treated as unreliable and rejected.",
+     "recognize": "Rayleigh diagnostic: candidate constants from different windows spread far apart."},
+    {"value": -4, "methods": "Both",
+     "summary": "Missing model data (CAMS).",
+     "detail": "The calibration needs auxiliary model fields — molecular density (temperature/pressure) for Rayleigh, and water vapour for the transmission correction in the cloud method. When the required CAMS file or timestep is absent the calibration cannot proceed. Usually fixable by downloading the missing CAMS day.",
+     "recognize": "Message mentions CAMS / model data."},
+    {"value": -5, "methods": "Both",
+     "summary": "Signal is all-NaN.",
+     "detail": "Every backscatter sample in the working range was NaN / fill value — a data-quality failure distinct from 'No data': a file existed, but carried no finite values.",
+     "recognize": "Message reads 'all-NaN'."},
+    {"value": -6, "methods": "Both",
+     "summary": "Uncertainty exceeds the value.",
+     "detail": "The estimated uncertainty on C_L came out larger than C_L itself — the result is not significantly different from noise. Rayleigh: the perturbation-ensemble spread was huge. Cloud: the per-profile coefficients scattered more than their median. The value is withheld.",
+     "recognize": "A value was computed but rejected; its relative uncertainty would exceed 100 %."},
+    {"value": -7, "methods": "Rayleigh",
+     "summary": "Negative fit slope.",
+     "detail": "The linear fit of signal vs molecular profile returned a negative slope, which is unphysical (the constant must be positive). Indicates the fit window did not contain a valid molecular region.",
+     "recognize": "Rayleigh-only molecular-fit diagnostic."},
+    {"value": -8, "methods": "Rayleigh",
+     "summary": "Ill-conditioned molecular fit (|b| > a).",
+     "detail": "A consistency check on the molecular-fit coefficients failed — the offset term dominates the slope term, flagging an ill-conditioned fit rather than a clean molecular signal.",
+     "recognize": "Rayleigh-only molecular-fit diagnostic."},
+    {"value": -99, "methods": "Both",
+     "summary": "Exception during calibration.",
+     "detail": "The calibration code raised an unexpected error for that day — a driver / IO / edge-case bug rather than a physical rejection. The Message column carries the exception type; these are worth investigating as code issues.",
+     "recognize": "Message shows an exception name (e.g. 'ValueError: ...')."},
+]

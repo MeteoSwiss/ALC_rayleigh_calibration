@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Calibration monitor — flag reference{% endblock %}
+{% block content %}
+<h1>Calibration flag reference</h1>
+<p class="flagintro">Every calibration carries a numeric quality flag. The Rayleigh and liquid-cloud
+methods share one flag vocabulary; a few molecular-fit flags are Rayleigh-only. A flag of
+<b>1</b> or <b>0.5</b> counts as a usable calibration, <b>0</b> means no data, and negatives are
+failures or unsuitable conditions. Click a flag in any station table to jump straight to its entry here.</p>
+
+<div class="flagdocs">
+{% for d in flag_docs %}
+  <section class="flagdoc" id="flag-{{ flag_anchor(d.value) }}">
+    <h2>
+      <span class="dot" style="background:{{ flag_color(d.value) }}"></span>
+      <span class="flagval">{{ d.value }}</span>
+      <span class="flagname">{{ flag_label(d.value) }}</span>
+      <span class="flagmethods">{{ d.methods }}</span>
+    </h2>
+    <p class="flagsummary">{{ d.summary }}</p>
+    <p>{{ d.detail }}</p>
+    <p class="flagrecog"><b>How to recognise it:</b> {{ d.recognize }}</p>
+    {% if flag_examples.get(d.value) %}
+    <div class="flagex">
+      {% for ex in flag_examples[d.value] %}
+        <figure>
+          <a href="{{ base }}{{ ex.rel }}" target="_blank" rel="noopener"><img src="{{ base }}{{ ex.rel }}" alt="flag {{ d.value }} example"></a>
+          {% if ex.caption %}<figcaption>{{ ex.caption }}</figcaption>{% endif %}
+        </figure>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </section>
+{% endfor %}
+</div>
+{% endblock %}

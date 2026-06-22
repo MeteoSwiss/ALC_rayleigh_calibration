@@ -36,8 +36,36 @@ def _env() -> Environment:
     env.filters["fmt"] = _fmt
     env.globals["flag_label"] = config.flag_label
     env.globals["flag_color"] = config.flag_color
+    env.globals["flag_anchor"] = config.flag_anchor
     env.globals["method_label"] = config.method_label
     return env
+
+
+def _copy_flag_examples(flagex_dir, out_dir: Path) -> dict:
+    """Copy curated per-flag example PNGs into the site. Source files are named
+    '<anchor>__<caption-with-underscores>.png' (e.g. 'm1__cloud_no_liquid.png'); returns
+    {flag_value: [ {rel, caption}, ... ]} for the explanation page."""
+    by: dict = {}
+    if not flagex_dir:
+        return by
+    src = Path(flagex_dir)
+    if not src.exists():
+        return by
+    anchor_to_val = {config.flag_anchor(d["value"]): d["value"] for d in config.FLAG_DOCS}
+    dst = out_dir / "flagex"
+    for png in sorted(src.glob("*.png")):
+        anchor = png.stem.split("__", 1)[0]
+        val = anchor_to_val.get(anchor)
+        if val is None:
+            continue
+        dst.mkdir(parents=True, exist_ok=True)
+        try:
+            shutil.copyfile(png, dst / png.name)
+        except OSError:
+            continue
+        cap = png.stem.split("__", 1)[1].replace("_", " ") if "__" in png.stem else ""
+        by.setdefault(val, []).append({"rel": f"flagex/{png.name}", "caption": cap})
+    return by
 
 
 def _write_assets(out_dir: Path) -> str | None:
@@ -129,12 +157,14 @@ def _method_block(key, method, cal, kal, series, diags=None):
             "flags": charts.fig_to_div(charts.monthly_flag_bars(g_m, method), f"fig-mf-{safe}"),
             "aux": charts.fig_to_div(charts.aux_timeseries(g_m, method), f"fig-aux-{safe}"),
         },
-        recent=g_m.tail(15).iloc[::-1].to_dict("records"),
+        recent=g_m.iloc[::-1].to_dict("records"),          # full archive, newest first (paginated)
+        diag_dates=sorted({d["date"] for d in (diags or [])}),  # dates that have a diagnostic image
         diags=diags or [],
     )
 
 
-def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None) -> dict:
+def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
+               flagex_dir=None) -> dict:
     out_dir = Path(out_dir)
     (out_dir / "stations").mkdir(parents=True, exist_ok=True)
     logo = _write_assets(out_dir)
@@ -177,6 +207,14 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None) -> 
         countries=countries, types=types, search_json=search_json,
     )
     (out_dir / "index.html").write_text(summary_html, encoding="utf-8")
+
+    # --- Flag explanation page (flags.html) ----------------------------------
+    flag_examples = _copy_flag_examples(flagex_dir, out_dir)
+    flags_html = env.get_template("flags.html").render(
+        base="", logo=logo, flag_docs=config.FLAG_DOCS, flag_examples=flag_examples,
+        search_json=search_json,
+    )
+    (out_dir / "flags.html").write_text(flags_html, encoding="utf-8")
 
     # --- Per-station pages (one per key; all of that key's methods) ----------
     keys = list(st["key"])

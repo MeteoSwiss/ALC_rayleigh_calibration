@@ -132,13 +132,22 @@ def plot_cloud_diagnostics_compact(data, res, title: str = "",
     ax_p.legend(loc="upper right", fontsize=8, framealpha=0.85)
 
     # --- representative selected profile ---
+    med_cbh = (float(_np.nanmedian(cbh[sel])) if (sel.any() and _np.any(_np.isfinite(cbh[sel]))) else _np.nan)
     if sel.any():
         prof = _np.nanmean(beta[:, sel], axis=1)
         ax_pr.plot(prof, rng_km, color="#2ca02c", lw=0.9, label=f"mean of {int(sel.sum())} selected")
-        med_cbh = float(_np.nanmedian(cbh[sel])) if _np.any(_np.isfinite(cbh[sel])) else _np.nan
         if _np.isfinite(med_cbh):
             ax_pr.axhline(med_cbh * 1e-3, color="#d62728", lw=1.0, ls="--", label="median cloud base")
-    ax_pr.axhspan(cal_lo * 1e-3, cal_hi * 1e-3, color="gold", alpha=0.12, label="integration range")
+    # Gold = the cal_minheight..cal_maxheight gate window = the literal bounds of the O'Connor
+    # integral B = integral(beta) dz (Hopkin et al. 2019, Eq. 1). It looks wide, but a calibration
+    # cloud FULLY attenuates the beam, so essentially all of B accumulates in the ~300 m layer at
+    # cloud base (Hogan 2003); gates above contribute ~0 and gates below are vetted by the aerosol
+    # filter. The green sub-band marks that accumulation layer (CBH -> CBH+300 m).
+    ax_pr.axhspan(cal_lo * 1e-3, cal_hi * 1e-3, color="gold", alpha=0.10,
+                  label="integration window (gate range)")
+    if _np.isfinite(med_cbh):
+        ax_pr.axhspan(med_cbh * 1e-3, (med_cbh + 300.0) * 1e-3, color="#2ca02c", alpha=0.22,
+                      label="where B accumulates (~CBH→+300 m)")
     ax_pr.set_ylim(0, min(cal_hi * 1e-3 + 1.0, float(rng_km.max())))
     ax_pr.set_xscale("log")
     ax_pr.set_xlabel(r"$\beta$")

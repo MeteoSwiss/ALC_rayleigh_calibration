@@ -95,6 +95,19 @@
     section.addEventListener("mouseenter", function () { active = viewer; });
     section.addEventListener("focus", function () { active = viewer; });
     wireTimeSeries(section.getAttribute("data-ts"), viewer);
+
+    // Clicking a date in this method's "all calibrations" table loads that diagnostic + scrolls up.
+    var block = section.closest(".methodblock");
+    if (block) {
+      Array.prototype.forEach.call(block.querySelectorAll(".diaglink[data-date]"), function (a) {
+        a.addEventListener("click", function (e) {
+          e.preventDefault();
+          viewer.jump(a.getAttribute("data-date"));
+          active = viewer;
+          section.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+      });
+    }
     show(idx);
   }
 

@@ -32,7 +32,7 @@
   <div class="card">{{ b.figs.ts | safe }}</div>
 
   {% if b.diags %}
-  <section class="diag card" data-ts="fig-ts-{{ b.method }}" tabindex="0">
+  <section class="diag card" id="diag-{{ b.method }}" data-ts="fig-ts-{{ b.method }}" tabindex="0">
     <h3>Diagnostic — <span class="diag-date muted">latest</span>
       <span class="diag-nav">
         <button type="button" class="diag-prev" title="Previous calibration (←)">‹ prev</button>
@@ -52,15 +52,17 @@
     <div class="card">{{ b.figs.flags | safe }}</div>
     <div class="card">{{ b.figs.aux | safe }}</div>
   </div>
-  <h3 class="muted">Recent {{ b.label }} calibrations (last {{ b.recent | length }})</h3>
-  <table class="stationtable">
+  <h3 class="muted">All {{ b.label }} calibrations ({{ b.recent | length }}) —
+    <span class="muted">click a date to load its diagnostic, click a flag for its meaning</span></h3>
+  <table class="stationtable paginated" data-page-size="15">
     <thead><tr><th>Date</th><th>Flag</th><th>C_L</th><th>Uncertainty</th><th>Extra</th><th>Message</th></tr></thead>
     <tbody>
     {% for r in b.recent %}
       <tr>
-        <td>{{ r.date }}</td>
+        <td>{% if r.date in b.diag_dates %}<a class="diaglink" data-date="{{ r.date }}" href="#diag-{{ b.method }}">{{ r.date }}</a>{% else %}{{ r.date }}{% endif %}</td>
         <td><span class="dot" style="background:{{ flag_color(r.flag) }}"></span>
-            {{ r.flag }} <span class="muted">{{ flag_label(r.flag, b.method) }}</span></td>
+            <a class="flaglink" href="{{ base }}flags.html#flag-{{ flag_anchor(r.flag) }}">{{ r.flag }}</a>
+            <span class="muted">{{ flag_label(r.flag, b.method) }}</span></td>
         <td>{{ r.cal_value | fmt('{:.3e}') if r.success else "—" }}</td>
         <td>{{ r.uncertainty | fmt('{:.2e}') if r.success else "—" }}</td>
         <td>{% if b.method == 'cloud' %}{{ r.n_profiles | fmt('{:.0f}') }} prof{% elif r.bottom_height == r.bottom_height %}{{ r.bottom_height | fmt('{:.0f}') }}–{{ r.top_height | fmt('{:.0f}') }} m{% else %}—{% endif %}</td>

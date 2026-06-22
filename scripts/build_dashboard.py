@@ -52,6 +52,8 @@ def main() -> None:
     ap.add_argument("--start", default=None, help="restrict to dates >= YYYYMMDD")
     ap.add_argument("--end", default=None, help="restrict to dates <= YYYYMMDD")
     ap.add_argument("--open", action="store_true", help="open the result in a browser when done")
+    ap.add_argument("--flagex", type=Path, default=None,
+                    help="dir of curated flag-example PNGs (named '<anchor>__<caption>.png') for flags.html")
     args = ap.parse_args()
 
     types = [t.strip() for t in args.types.split(",")] if args.types else None
@@ -66,7 +68,7 @@ def main() -> None:
           f"({time.perf_counter() - t0:.1f}s)", flush=True)
 
     print("Rendering site ...", flush=True)
-    site = render.build_site(db_path, args.out, limit_pages=args.limit_pages)
+    site = render.build_site(db_path, args.out, limit_pages=args.limit_pages, flagex_dir=args.flagex)
     print(f"  {site['n_pages']} station pages -> {site['out_dir']}  "
           f"({time.perf_counter() - t0:.1f}s total)", flush=True)
 
