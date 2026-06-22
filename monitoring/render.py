@@ -6,6 +6,7 @@ Each station may carry one or two method series (Rayleigh and/or cloud).
 """
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
@@ -43,7 +44,7 @@ def _write_assets(out_dir: Path) -> str | None:
     assets = out_dir / "assets"
     assets.mkdir(parents=True, exist_ok=True)
     (assets / "plotly.min.js").write_text(get_plotlyjs(), encoding="utf-8")
-    for name in ("style.css", "table-sort.js", "paginate.js", "filter.js", "diag.js"):
+    for name in ("style.css", "table-sort.js", "paginate.js", "filter.js", "diag.js", "search.js"):
         src = _STATIC / name
         if src.exists():
             shutil.copyfile(src, assets / name)
@@ -152,6 +153,19 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None) -> 
         "flag_dist": charts.fig_to_div(charts.flag_distribution_bar(flags), "fig-flags"),
         "cl_type": charts.fig_to_div(charts.value_by_type_method_box(series), "fig-cltype"),
     }
+    # Search index for the nav-bar station search (name + WIGOS id + key, all matchable).
+    search_records = []
+    for _, r in st.iterrows():
+        k = str(r["key"])
+        search_records.append({
+            "key": k,
+            "name": str(r.get("name", "") or ""),
+            "wigos": k.rsplit("_", 1)[0] if "_" in k else k,  # drop the _A/_B/_C suffix
+            "type": str(r.get("itype", "") or ""),
+            "country": str(r.get("country", "") or ""),
+        })
+    search_json = json.dumps(search_records, ensure_ascii=False)
+
     countries = sorted({str(c) for c in st.get("country", pd.Series(dtype=str)).dropna()
                         if str(c).strip()})
     types = [t for t in config.TYPE_ORDER if t in set(st["itype"])] + \
@@ -160,7 +174,7 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None) -> 
     summary_html = env.get_template("summary.html").render(
         base="", logo=logo, summary=summary, figs=summary_figs,
         watch=watch.to_dict("records"), rows=_series_table_rows(cal, series, st),
-        countries=countries, types=types,
+        countries=countries, types=types, search_json=search_json,
     )
     (out_dir / "index.html").write_text(summary_html, encoding="utf-8")
 
@@ -179,7 +193,7 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None) -> 
             by_method = {m: cal[(cal["key"] == key) & (cal["method"] == m)] for m in methods}
             overlay = charts.fig_to_div(charts.cl_overlay(by_method), "fig-overlay")
         html = station_tmpl.render(base="../", logo=logo, key=key, meta=meta,
-                                   blocks=blocks, overlay=overlay)
+                                   blocks=blocks, overlay=overlay, search_json=search_json)
         (out_dir / "stations" / f"{key}.html").write_text(html, encoding="utf-8")
 
     return dict(out_dir=str(out_dir), n_pages=len(keys), n_series=int(len(series)),

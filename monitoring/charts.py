@@ -89,9 +89,10 @@ def success_by_type_method(by_tm: pd.DataFrame) -> go.Figure:
             hovertext=[f"{n} series · {s}/{t} cal" for n, s, t in
                        zip(d["n_series"], d["n_success"], d["n_dates"])],
         ))
-    fig.update_layout(**_LAYOUT, barmode="group", title="Success rate by type & method",
-                      yaxis_title="success %", yaxis_range=[0, 100],
-                      legend=dict(orientation="h", y=1.14))
+    fig.update_layout(**{**_LAYOUT, "margin": dict(l=64, r=20, t=44, b=72)},
+                      barmode="group", title="Success rate by type & method",
+                      yaxis_title="success %", yaxis_range=[0, 110],
+                      legend=dict(orientation="h", y=-0.22, x=0.5, xanchor="center", yanchor="top"))
     return fig
 
 

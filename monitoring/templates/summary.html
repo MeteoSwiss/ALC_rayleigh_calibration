@@ -27,6 +27,11 @@
   <div class="card">{{ figs.success_type | safe }}</div>
 </section>
 
+<section class="grid2">
+  <div class="card">{{ figs.flag_dist | safe }}</div>
+  <div class="card">{{ figs.cl_type | safe }}</div>
+</section>
+
 {% if watch %}
 <section class="watch">
   <h2>Watchlist <span class="muted">({{ watch | length }})</span></h2>
@@ -49,11 +54,6 @@
 {% else %}
 <section class="watch"><h2>Watchlist</h2><p class="muted">No series currently flagged.</p></section>
 {% endif %}
-
-<section class="grid2">
-  <div class="card">{{ figs.flag_dist | safe }}</div>
-  <div class="card">{{ figs.cl_type | safe }}</div>
-</section>
 
 <section>
   <h2>Series <span class="muted">(one row per station × method — click a header to sort)</span>

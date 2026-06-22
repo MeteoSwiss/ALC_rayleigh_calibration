@@ -23,6 +23,11 @@
       {% endif %}
     </a>
     <a class="brand" href="{{ base }}index.html">E-PROFILE · Calibration monitoring</a>
+    <div class="navsearch" data-base="{{ base }}">
+      <input id="station-search" type="text" autocomplete="off" spellcheck="false"
+             placeholder="Search station — name or WIGOS ID…">
+      <div id="search-results" class="search-results" hidden></div>
+    </div>
     <span class="spacer"></span>
     {% block headerextra %}{% endblock %}
   </header>
@@ -34,7 +39,9 @@
   </footer>
   <script src="{{ base }}assets/table-sort.js"></script>
   <script src="{{ base }}assets/paginate.js"></script>
+  {% if search_json %}<script type="application/json" id="search-index">{{ search_json | safe }}</script>{% endif %}
   <script src="{{ base }}assets/filter.js"></script>
   <script src="{{ base }}assets/diag.js"></script>
+  <script src="{{ base }}assets/search.js"></script>
 </body>
 </html>

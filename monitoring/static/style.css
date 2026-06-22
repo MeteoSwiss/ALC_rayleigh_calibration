@@ -19,6 +19,23 @@ body {
 .asof, .back { color: #d6e6f2; text-decoration: none; font-size: 13px; }
 .navfilter { font: inherit; font-size: 12px; padding: 3px 7px; margin-left: 6px; max-width: 200px;
   background: #fff; color: var(--ink); border: 1px solid #2a5a82; border-radius: 6px; cursor: pointer; }
+
+/* Nav-bar station search */
+.navsearch { position: relative; margin-left: 8px; }
+.navsearch input { font: inherit; font-size: 13px; width: 300px; max-width: 40vw; padding: 5px 10px;
+  border-radius: 7px; border: 1px solid #2a5a82; background: rgba(255,255,255,.14); color: #fff; }
+.navsearch input::placeholder { color: rgba(255,255,255,.72); }
+.navsearch input:focus { outline: none; background: #fff; color: var(--ink); border-color: var(--accent); }
+.search-results { position: absolute; top: calc(100% + 4px); left: 0; z-index: 1000; width: 380px; max-width: 80vw;
+  max-height: 64vh; overflow-y: auto; background: var(--card); border: 1px solid var(--line);
+  border-radius: 8px; box-shadow: 0 8px 26px rgba(0,0,0,.22); }
+.sr { display: grid; grid-template-columns: 1fr auto; gap: 1px 10px; padding: 7px 11px; cursor: pointer;
+  border-bottom: 1px solid var(--line); }
+.sr:last-child { border-bottom: 0; }
+.sr:hover, .sr.sel { background: #eef4fb; }
+.sr-name { font-weight: 600; color: var(--ink); font-size: 13px; }
+.sr-key { font-size: 11px; color: var(--muted); font-family: ui-monospace, "Cascadia Code", monospace; text-align: right; align-self: center; }
+.sr-meta { grid-column: 1 / -1; font-size: 11px; color: var(--muted); }
 .back:hover { text-decoration: underline; }
 .container { max-width: 1280px; margin: 0 auto; padding: 18px; }
 h1 { font-size: 22px; margin: 8px 0 4px; }
