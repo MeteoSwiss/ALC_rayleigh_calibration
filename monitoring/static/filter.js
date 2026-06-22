@@ -6,12 +6,15 @@
 (function () {
   function pad(n) { return (n < 10 ? "0" : "") + n; }
 
+  // All scattergeo maps share the customdata layout [country, type, size, key, name].
+  var MAP_IDS = ["fig-map", "fig-map-theo", "fig-map-op"];
+
   // Click a map marker -> open that station's page (retry until Plotly has initialised).
-  function wireMapClick(tries) {
-    var gd = document.getElementById("fig-map");
+  function wireMapClick(id, tries) {
+    var gd = document.getElementById(id);
     if (!gd) return;
     if (typeof gd.on !== "function") {
-      if ((tries || 0) < 40) setTimeout(function () { wireMapClick((tries || 0) + 1); }, 150);
+      if ((tries || 0) < 40) setTimeout(function () { wireMapClick(id, (tries || 0) + 1); }, 150);
       return;
     }
     gd.on("plotly_click", function (data) {
@@ -20,7 +23,7 @@
       if (cd && cd[3]) window.location.href = "stations/" + cd[3] + ".html";
     });
   }
-  wireMapClick(0);
+  MAP_IDS.forEach(function (id) { wireMapClick(id, 0); });
 
   var fc = document.getElementById("f-country");
   var ft = document.getElementById("f-type");
@@ -52,14 +55,16 @@
   }
 
   function filterMap(c, t) {
-    var gd = document.getElementById("fig-map");
-    if (!gd || !gd.data || !gd.data[0] || !gd.data[0].customdata || !window.Plotly) return;
-    var cd = gd.data[0].customdata;
-    var sizes = cd.map(function (p) {
-      var ok = (!c || p[0] === c) && (!t || p[1] === t);
-      return ok ? p[2] : 0;  // 0 hides the marker
+    if (!window.Plotly) return;
+    MAP_IDS.forEach(function (id) {
+      var gd = document.getElementById(id);
+      if (!gd || !gd.data || !gd.data[0] || !gd.data[0].customdata) return;
+      var sizes = gd.data[0].customdata.map(function (p) {
+        var ok = (!c || p[0] === c) && (!t || p[1] === t);
+        return ok ? p[2] : 0;  // 0 hides the marker
+      });
+      window.Plotly.restyle(gd, { "marker.size": [sizes] }, [0]);
     });
-    window.Plotly.restyle(gd, { "marker.size": [sizes] }, [0]);
   }
 
   function apply() {

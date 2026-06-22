@@ -75,6 +75,46 @@ def network_map(keystats: pd.DataFrame) -> go.Figure:
     return fig
 
 
+def ratio_map(keystats: pd.DataFrame, col: str, title: str, cbar: str,
+              div_id: str, cmin: float = 0.0, cmax: float = 200.0) -> go.Figure:
+    """Station map colored by a percent ratio in column `col` (100 % = on target), diverging
+    around 100 %. Carries the same customdata as network_map so filter.js can filter/navigate it."""
+    base = keystats.dropna(subset=["lat", "lon"]).copy()
+    d = base[np.isfinite(pd.to_numeric(base.get(col), errors="coerce"))].copy() if col in base else base.iloc[0:0]
+    if d.empty:
+        fig = go.Figure()
+        fig.update_geos(scope="europe", resolution=50, showcountries=True, countrycolor="#bbbbbb",
+                        showland=True, landcolor="#f5f5f5",
+                        lataxis_range=config.MAP_LAT_RANGE, lonaxis_range=config.MAP_LON_RANGE)
+        fig.update_layout(**{**_LAYOUT, "height": 460, "margin": dict(l=0, r=0, t=40, b=0)},
+                          title=f"{title} — no data")
+        return fig
+    n_dates = np.asarray(d["n_dates"].fillna(1), dtype=float)
+    sizes = np.clip(np.sqrt(n_dates) / 2.0, 5, 18)
+    country = (d["country"].fillna("") if "country" in d.columns
+               else pd.Series([""] * len(d), index=d.index)).astype(str)
+    name = (d["name"].fillna("") if "name" in d.columns
+            else pd.Series([""] * len(d), index=d.index)).astype(str)
+    customdata = [[c, t, float(sz), k, nm] for c, t, sz, k, nm in
+                  zip(country.values, d["itype"].astype(str).values, sizes,
+                      d["key"].astype(str).values, name.values)]
+    vals = np.asarray(pd.to_numeric(d[col], errors="coerce"), dtype=float)
+    fig = go.Figure(go.Scattergeo(
+        lat=d["lat"], lon=d["lon"],
+        text=[f"<b>{nm or k}</b><br>{k}<br>{t} · {ct}<br>{v:.0f}% of reference · {nd:.0f} cal"
+              for k, nm, t, ct, v, nd in zip(d["key"], name, d["itype"], country, vals,
+                                             d["n_dates"].fillna(0))],
+        hoverinfo="text", customdata=customdata,
+        marker=dict(size=sizes, color=vals, colorscale="RdBu", cmin=cmin, cmax=cmax, cmid=100.0,
+                    colorbar=dict(title=cbar), line=dict(width=0.4, color="#555")),
+    ))
+    fig.update_geos(scope="europe", resolution=50, showcountries=True, countrycolor="#bbbbbb",
+                    showland=True, landcolor="#f5f5f5",
+                    lataxis_range=config.MAP_LAT_RANGE, lonaxis_range=config.MAP_LON_RANGE)
+    fig.update_layout(**{**_LAYOUT, "height": 460, "margin": dict(l=0, r=0, t=40, b=0)}, title=title)
+    return fig
+
+
 def success_by_type_method(by_tm: pd.DataFrame) -> go.Figure:
     """Grouped bar: success rate per instrument type, one bar per method."""
     fig = go.Figure()
@@ -131,8 +171,10 @@ def value_by_type_method_box(series: pd.DataFrame) -> go.Figure:
 
 # --- Station-page figures (one set per method) ------------------------------
 
-def series_timeseries(g_m: pd.DataFrame, kal_m: pd.DataFrame, method: str) -> go.Figure:
-    """Calibration value over time for ONE method: successes + uncertainty + Kalman best estimate.
+def series_timeseries(g_m: pd.DataFrame, kal_m: pd.DataFrame, method: str,
+                      op_df: pd.DataFrame | None = None) -> go.Figure:
+    """Calibration value over time for ONE method: successes + uncertainty + Kalman best estimate,
+    plus (optional) the daily OPERATIONAL calibration constant from the L2 files as a black line.
 
     The Kalman line/band is the operational E-PROFILE random-walk best estimate, preferring
     the precomputed series (kal_m) and falling back to an on-the-fly fit.
@@ -141,6 +183,12 @@ def series_timeseries(g_m: pd.DataFrame, kal_m: pd.DataFrame, method: str) -> go
     color = config.METHOD_COLORS.get(method, "#1f77b4")
     ok = g_m[g_m["success"] == 1].sort_values("datetime")
     fig = go.Figure()
+    if op_df is not None and len(op_df):
+        od = op_df.sort_values("datetime")
+        fig.add_trace(go.Scatter(
+            x=od["datetime"], y=od["op_coeff"], mode="lines", name="Operational constant (L2)",
+            line=dict(color="#111111", width=1.3),
+            hovertemplate="%{x|%Y-%m-%d}<br>operational=%{y:.3e}<extra></extra>"))
     if len(ok):
         fig.add_trace(go.Scatter(
             x=ok["datetime"], y=ok["cal_value"], mode="markers", name=f"{vname} (per cal)",

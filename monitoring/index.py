@@ -47,9 +47,13 @@ def _read_station_csv(path: Path, key: str) -> pd.DataFrame:
     df["key"] = key
     df["datetime"] = pd.to_datetime(df["date"], format="%Y%m%d", errors="coerce")
     df = df.dropna(subset=["datetime"]).copy()
-    df["success"] = df["flag"].isin(SUCCESS_FLAGS).astype(int)
-    good = (df["success"] == 1) & (df["cal_value"] > 0)
-    df["rel_uncertainty"] = np.where(good, 100.0 * df["uncertainty"] / df["cal_value"], np.nan)
+    # A calibration counts as a success only if its flag is a success flag AND it produced a
+    # positive value. This guards against rows where the flag says success but the value is
+    # invalid (seen on a few CL61 cloud days: cloud_flag passes on cal_median while the derived
+    # lidar_constant came out -1) -- those must not pollute the time series / median / counts.
+    df["success"] = (df["flag"].isin(SUCCESS_FLAGS) & (df["cal_value"] > 0)).astype(int)
+    df["rel_uncertainty"] = np.where(df["success"] == 1,
+                                     100.0 * df["uncertainty"] / df["cal_value"], np.nan)
     return df[_CAL_COLS]
 
 

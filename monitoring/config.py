@@ -63,6 +63,16 @@ TYPE_COLORS = {
 }
 TYPE_ORDER = ["CHM15k", "CL31", "CL51", "CL61", "Mini-MPL"]
 
+# Theoretical (reference) lidar constant per instrument type, on the C_L scale. Used to express a
+# station's median C_L as a percent of the nominal value. Mirrors INSTRUMENT_CAL_DEFAULT in the
+# cloud calibration core.
+THEORETICAL_CL = {"CL31": 1e8, "CL51": 1e8, "CL61": 1.0, "CHM15k": 3e11, "Mini-MPL": 5e5}
+
+
+def theoretical_cl(itype):
+    """Nominal C_L for an instrument type, or None if unknown."""
+    return THEORETICAL_CL.get(str(itype))
+
 # Calibration methods (a station can carry one or both; CL61 carries both).
 METHOD_LABELS = {"rayleigh": "Rayleigh", "cloud": "Liquid-cloud"}
 METHOD_COLORS = {"rayleigh": "#1f77b4", "cloud": "#2ca02c"}

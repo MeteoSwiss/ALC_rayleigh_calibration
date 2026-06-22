@@ -99,6 +99,66 @@ def _keystats(series: pd.DataFrame, st: pd.DataFrame) -> pd.DataFrame:
     return agg.merge(st[cols], on="key", how="left")
 
 
+def _load_opcoeff(csv) -> pd.DataFrame | None:
+    """Load the operational calibration-constant CSV (key,date,op_coeff) produced by
+    scripts/extract_l2_opcoeff.py; add a parsed datetime. Returns None if absent."""
+    if not csv:
+        return None
+    p = Path(csv)
+    if not p.exists():
+        return None
+    df = pd.read_csv(p, dtype={"key": str, "date": str})
+    df["op_coeff"] = pd.to_numeric(df["op_coeff"], errors="coerce")
+    df["datetime"] = pd.to_datetime(df["date"], format="%Y%m%d", errors="coerce")
+    return df
+
+
+def _opcoeff_ratios(cal: pd.DataFrame, op_all, st: pd.DataFrame) -> pd.DataFrame:
+    """Per-station median C_L expressed as a percent of (a) the theoretical value and (b) the
+    operational L2 constant on the day of each calibration. Uses successful calibrations only;
+    the operational ratio is a per-calibration median (robust to occasional default/garbage op)."""
+    type_by_key = dict(zip(st["key"], st["itype"]))
+    succ = cal[cal["success"] == 1]
+    rows = []
+    for key, g in succ.groupby("key"):
+        cls = pd.to_numeric(g["cal_value"], errors="coerce")
+        cls = cls[cls > 0]
+        if not len(cls):
+            continue
+        median_cl = float(cls.median())
+        theo = config.theoretical_cl(type_by_key.get(key))
+        pct_theo = 100.0 * median_cl / theo if (theo and theo > 0) else np.nan
+        pct_op = np.nan
+        if op_all is not None:
+            gop = g.merge(op_all[op_all["key"] == key][["date", "op_coeff"]], on="date", how="inner")
+            if len(gop):
+                rr = pd.to_numeric(gop["cal_value"], errors="coerce") / pd.to_numeric(gop["op_coeff"], errors="coerce")
+                rr = rr[np.isfinite(rr) & (rr > 0)]
+                if len(rr):
+                    pct_op = 100.0 * float(rr.median())
+        rows.append(dict(key=key, op_pct_theo=pct_theo, op_pct_op=pct_op, op_median_cl=median_cl))
+    return pd.DataFrame(rows, columns=["key", "op_pct_theo", "op_pct_op", "op_median_cl"])
+
+
+def _op_station_df(op_all, key, ref_cl):
+    """Daily operational-constant series for one station's time-series overlay, with implausible
+    spikes (operational defaults like 1e8 on a CL61) dropped relative to the station's C_L scale."""
+    if op_all is None:
+        return None
+    d = op_all[op_all["key"] == key]
+    if not len(d):
+        return None
+    op = pd.to_numeric(d["op_coeff"], errors="coerce").to_numpy()
+    keep = np.isfinite(op) & (op > 0)
+    ref = ref_cl if (ref_cl and np.isfinite(ref_cl) and ref_cl > 0) else (
+        float(np.median(op[keep])) if keep.any() else None)
+    if ref and np.isfinite(ref) and ref > 0:
+        keep = keep & (op >= ref / 30.0) & (op <= ref * 30.0)
+    if not keep.any():
+        return None
+    return pd.DataFrame({"datetime": d["datetime"].to_numpy()[keep], "op_coeff": op[keep]})
+
+
 def _series_table_rows(cal: pd.DataFrame, series: pd.DataFrame, st: pd.DataFrame) -> list[dict]:
     """One row per (station, method) with a value sparkline + method badge + country (for filtering)."""
     last_by = {(k, m): g[g["success"] == 1].sort_values("datetime")["cal_value"].tail(30).tolist()
@@ -143,17 +203,20 @@ def _copy_diagnostics(diag: pd.DataFrame, out_dir: Path) -> dict:
     return by
 
 
-def _method_block(key, method, cal, kal, series, diags=None):
+def _method_block(key, method, cal, kal, series, diags=None, op_all=None):
     """Figures + aggregates for one method section on a station page."""
     g_m = cal[(cal["key"] == key) & (cal["method"] == method)].sort_values("datetime")
     kal_m = kal[(kal["key"] == key) & (kal["method"] == method)] if len(kal) else kal
     srow = series[(series["key"] == key) & (series["method"] == method)]
     meta = srow.iloc[0].to_dict() if len(srow) else {}
     safe = method  # 'rayleigh'/'cloud' are id-safe
+    ref = pd.to_numeric(g_m[g_m["success"] == 1]["cal_value"], errors="coerce")
+    ref = ref[ref > 0]
+    op_df = _op_station_df(op_all, key, float(ref.median()) if len(ref) else None)
     return dict(
         method=method, label=config.method_label(method), meta=meta,
         figs={
-            "ts": charts.fig_to_div(charts.series_timeseries(g_m, kal_m, method), f"fig-ts-{safe}"),
+            "ts": charts.fig_to_div(charts.series_timeseries(g_m, kal_m, method, op_df), f"fig-ts-{safe}"),
             "flags": charts.fig_to_div(charts.monthly_flag_bars(g_m, method), f"fig-mf-{safe}"),
             "aux": charts.fig_to_div(charts.aux_timeseries(g_m, method), f"fig-aux-{safe}"),
         },
@@ -164,7 +227,7 @@ def _method_block(key, method, cal, kal, series, diags=None):
 
 
 def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
-               flagex_dir=None) -> dict:
+               flagex_dir=None, opcoeff_csv=None) -> dict:
     out_dir = Path(out_dir)
     (out_dir / "stations").mkdir(parents=True, exist_ok=True)
     logo = _write_assets(out_dir)
@@ -177,7 +240,18 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
     keystats = _keystats(series, st)
     diag_by = _copy_diagnostics(diag, out_dir)
 
+    # Operational calibration constant from the L2 files (optional): two ratio maps + per-station
+    # black line on the time series.
+    op_all = _load_opcoeff(opcoeff_csv)
+    keystats = keystats.merge(_opcoeff_ratios(cal, op_all, st), on="key", how="left")
+
     summary_figs = {
+        "map_theo": charts.fig_to_div(charts.ratio_map(
+            keystats, "op_pct_theo", "Median C_L — % of theoretical value",
+            "% of theoretical", "fig-map-theo"), "fig-map-theo"),
+        "map_op": charts.fig_to_div(charts.ratio_map(
+            keystats, "op_pct_op", "Median C_L — % of operational constant (L2)",
+            "% of operational", "fig-map-op"), "fig-map-op"),
         "map": charts.fig_to_div(charts.network_map(keystats), "fig-map"),
         "success_type": charts.fig_to_div(charts.success_by_type_method(summary["by_type_method"]), "fig-stype"),
         "flag_dist": charts.fig_to_div(charts.flag_distribution_bar(flags), "fig-flags"),
@@ -225,7 +299,7 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
         meta = st[st["key"] == key].iloc[0].to_dict()
         methods = [m for m in config.METHOD_ORDER
                    if len(cal[(cal["key"] == key) & (cal["method"] == m)])]
-        blocks = [_method_block(key, m, cal, kal, series, diag_by.get((key, m), [])) for m in methods]
+        blocks = [_method_block(key, m, cal, kal, series, diag_by.get((key, m), []), op_all) for m in methods]
         overlay = None
         if len(methods) >= 2:
             by_method = {m: cal[(cal["key"] == key) & (cal["method"] == m)] for m in methods}
