@@ -319,7 +319,11 @@ def process(cfg):
             chans.append(None); continue
         if cal is not None and ch["calib"] != "none":
             ck = interp_calib(cal[0], cal[1], l2["time"])
-            corr = (l2["calc"] / ck) if ch["calib"] == "rayleigh" else ck
+            # Rayleigh: correction = calibration_constant_0 / C_L  (beta_true = beta_L2 * CL_L2/CL_ray).
+            # Cloud: the Python cloud coefficient C is the INVERSE of the lidar constant (C = 1/C_L) and is
+            # homogenised to the m^-1 convention, so the multiplier on the L2 beta [Mm^-1 sr^-1] is
+            # (1e-6 / C): the 1/C inverts to the constant, the 1e-6 is the Mm^-1 -> m^-1 unit factor.
+            corr = (l2["calc"] / ck) if ch["calib"] == "rayleigh" else (1e-6 / ck)
             beta = beta * corr[:, None]
             med_corr = float(np.nanmedian(corr))
         else:
