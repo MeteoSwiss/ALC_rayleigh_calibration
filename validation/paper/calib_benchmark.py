@@ -59,7 +59,7 @@ def _ch(wmo, ident, itype, calib, label, lat, lon, alt, raw=None):
 PAY = (46.8137, 6.9425, 491.0)
 CL61_PAY_RAW = "A:/CL61_PAY"   # native Vaisala CL61 (the L2 product has no daily files + bad lat/lon)
 BENCHMARK = {
-    "payerne": dict(start="20260301", end="20260531", channels=[
+    "payerne": dict(start="20260301", end="20260531", calStart="20250101", calEnd="20260630", channels=[
         _ch("0-20000-0-06610", "A", "CHM15k", "rayleigh", "CHM15k (Rayleigh)", *PAY),
         _ch("0-20000-0-06610", "B", "CL31", "cloud", "CL31 (cloud)", *PAY),
         _ch("0-20000-0-06610", "C", "CL61", "cloud", "CL61 (cloud)", *PAY, raw=CL61_PAY_RAW),
@@ -68,13 +68,13 @@ BENCHMARK = {
         # on the E-PROFILE L2 product, so the Rayleigh coefficient keeps the L2_monthly source.
         _ch("0-20000-0-06610", "C", "CL61", "rayleigh", "CL61 (Rayleigh)", *PAY),
     ]),
-    "amsterdam": dict(start="20260301", end="20260531", channels=[
+    "amsterdam": dict(start="20260301", end="20260531", calStart="20250101", calEnd="20260630", channels=[
         _ch("0-20000-0-06240", "A", "CHM15k", "rayleigh", "CHM15k A", 52.317, 4.8037, 6.0),
         _ch("0-20000-0-06240", "B", "CHM15k", "rayleigh", "CHM15k B", 52.317, 4.8037, 6.0),
         _ch("0-20000-0-06240", "C", "CHM15k", "rayleigh", "CHM15k C", 52.317, 4.8037, 6.0),
         _ch("0-20000-0-06240", "D", "CHM15k", "rayleigh", "CHM15k D", 52.317, 4.8037, 6.0),
     ]),
-    "uccle": dict(start="20260301", end="20260531", channels=[
+    "uccle": dict(start="20260301", end="20260531", calStart="20250101", calEnd="20260630", channels=[
         _ch("0-20000-0-06447", "A", "CL51", "cloud", "CL51 (cloud)", 50.8, 4.35, 100.0),
         _ch("0-20000-0-06447", "B", "CL61", "cloud", "CL61 (cloud)", 50.8, 4.35, 100.0),
         _ch("0-20000-0-06447", "B", "CL61", "rayleigh", "CL61 (Rayleigh)", 50.8, 4.35, 100.0),
@@ -321,9 +321,12 @@ def main():
             if st not in BENCHMARK:
                 print(f"unknown station {st}"); continue
             cfg = BENCHMARK[st]
-            print(f"== {st} [{level}] ({cfg['start']}-{cfg['end']}) ==", flush=True)
+            # Calibration window (calStart/calEnd) may be WIDER than the inter-comparison window
+            # (start/end) so the calibration time series spans the full L1 record (2025-2026).
+            cs, ce = cfg.get("calStart", cfg["start"]), cfg.get("calEnd", cfg["end"])
+            print(f"== {st} [{level}] ({cs}-{ce}) ==", flush=True)
             for ch in cfg["channels"]:
-                run_channel(ch, cfg["start"], cfg["end"], level)
+                run_channel(ch, cs, ce, level)
     print("CALIB_BENCHMARK_DONE", flush=True)
 
 

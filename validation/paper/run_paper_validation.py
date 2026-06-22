@@ -49,7 +49,7 @@ def run_station(name):
         chans.append(d)
     cfg = dict(wmo=sc["wmo"], start=st["start"], end=st["end"], referenceChannel=sc["ref"],
                channels=chans, lambda_target=sc["target"], alpha=1.0, zMin=500, zMax=3000,
-               calibLevel="L2")   # operational reference = the L2 product (eprof_v2 + fixed cloud)
+               calibLevel="L1")   # native L1 (binned, eprof_v2 + fixed cloud); falls back to L2 where no L1
     return IC.process(cfg), cfg
 
 
@@ -104,9 +104,9 @@ def main():
         FIG.fig_multi_alc(R, cfg, OUT / f"fig_{name}.png", title)
         print(f"   -> fig_{name}.png", flush=True)
 
-    # combined calibration time-series (all channels)
-    FIG.fig_calib_timeseries(calib_channel_list(), CALIB, OUT / "fig_calib_timeseries.png")
-    print("   -> fig_calib_timeseries.png", flush=True)
+    # combined calibration time-series (all channels), L1 (binned) vs L2, eprof_v2, over 2025-2026
+    FIG.fig_calib_l1l2(calib_channel_list(), CALIB, OUT / "fig_calib_timeseries.png")
+    print("   -> fig_calib_timeseries.png (L1 vs L2, eprof_v2)", flush=True)
 
     # EARLINET 2x2 figures
     erows = []

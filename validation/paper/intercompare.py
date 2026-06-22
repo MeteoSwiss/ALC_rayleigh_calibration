@@ -139,12 +139,14 @@ def _str(nc, name):
 # --------------------------------------------------------------------------- calibration
 def load_calib_series(key, level=None):
     """Read the Kalman calibration series for a channel. level in {'L1','L2',None}: prefer
-    <key>_<level>.csv, fall back to <key>.csv (the un-suffixed/legacy series)."""
-    f = None
-    for cand in ([CALIB / f"{key}_{level}.csv"] if level else []) + [CALIB / f"{key}.csv"]:
-        if cand.exists():
-            f = cand
-            break
+    <key>_<level>.csv, then the L2 eprof_v2 series, then the legacy un-suffixed <key>.csv (so an
+    L1 request for a channel with no L1 record falls back to L2, NOT to the old eprof_v1.2 file)."""
+    cands = []
+    if level:
+        cands.append(CALIB / f"{key}_{level}.csv")
+    cands.append(CALIB / f"{key}_L2.csv")
+    cands.append(CALIB / f"{key}.csv")
+    f = next((c for c in cands if c.exists()), None)
     if f is None:
         return None
     rows = list(csv.DictReader(open(f, encoding="utf-8")))
@@ -318,13 +320,11 @@ def process(cfg):
         if l2 is None:
             chans.append(None); continue
         beta = l2["beta"].copy()
-        # calibration (from the L1- or L2-derived Kalman series, per cfg['calibLevel']).
-        # Only RAYLEIGH swaps L1<->L2: its lidar constant is on the same scale for both sources
-        # (binned L1 == L2 to ~1%). The cloud O'Connor coefficient is on the INPUT scale (raw
-        # rcs_0 V*m^2 for L1 vs the attbsc_0 Mm^-1 sr^-1 for L2), so it is NOT transferable onto
-        # the L2 beta - cloud always uses the L2 coefficient here.
-        clevel = cfg.get("calibLevel") if ch["calib"] == "rayleigh" else "L2"
-        cal = load_calib_series(ch["key"], clevel)
+        # calibration (from the L1- or L2-derived Kalman series, per cfg['calibLevel']). Both Rayleigh
+        # and cloud are on the SAME physical scale for L1 and L2 (Rayleigh lidar constant from binned
+        # L1 == L2 to ~1%; the cloud fix makes the O'Connor C physical and L1==L2), so the same level
+        # applies to both. None falls back to the un-suffixed legacy series.
+        cal = load_calib_series(ch["key"], cfg.get("calibLevel"))
         if ch["calib"] != "none" and cal is None:
             print(f"    [skip] {ch['label']}: no calibration series ({ch['key']} / {clevel})")
             chans.append(None); continue
