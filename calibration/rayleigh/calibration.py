@@ -806,32 +806,22 @@ def calibrate_rayleigh(
     cl_slope = fit_result.slope * inv_trans_ref
     error_pct = abs((cl_slope - cl_median) / cl_median * 100)
 
+    # ── Quality control: decide the outcome but DEFER the return, so a diagnostic image is still
+    #    produced for data-bearing rejections (-3 method disagreement, -6 too noisy, -9 aerosol). ──
+    qc_flag = None
+    qc_message = None
     if error_pct > options.threshold_quality:
         logger.warning(f"Method disagreement: {error_pct:.1f}% > {options.threshold_quality}%")
-        return CalibrationResult(
-            lidar_constant=-1,
-            flag=-3,
-            uncertainty=0,
-            message=f"Method disagreement: {error_pct:.1f}%",
-        )
-
-    if uncertainty > cl_median:
+        qc_flag, qc_message = -3, f"Method disagreement: {error_pct:.1f}%"
+    elif uncertainty > cl_median:
         logger.warning(f"Uncertainty exceeds CL value: {uncertainty:.2e} > {cl_median:.2e}")
-        return CalibrationResult(
-            lidar_constant=-1,
-            flag=-6,
-            uncertainty=0,
-            message=f"Uncertainty exceeds value: {uncertainty:.2e} > {cl_median:.2e}",
-        )
-
-    # ── QC: aerosol layer below the molecular window (scattering-ratio gate) ──
-    # In clean air every candidate molecular-window fit slope (a C_L proxy) is nearly equal across
-    # the 2-6 km search range (molecular two-way transmittance varies <1 %). When aerosol sits in or
-    # just below the chosen window, that window's slope is inflated relative to the cleanest
-    # (least-attenuated) window. We reject when the chosen window's slope exceeds a robust "cleanest"
-    # reference (10th percentile of the clean-window slopes) by more than the threshold. Validated on
-    # L1 Mar-May 2026: clean nights p95=1.4; aerosol cases (e.g. 0-20000-0-10838 2026-03-03) >2.8.
-    if getattr(options, "aerosol_qc_enabled", True) and fit_result.search_diagnostics is not None:
+        qc_flag, qc_message = -6, f"Uncertainty exceeds value: {uncertainty:.2e} > {cl_median:.2e}"
+    elif getattr(options, "aerosol_qc_enabled", True) and fit_result.search_diagnostics is not None:
+        # Scattering-ratio gate -- aerosol layer in/below the chosen molecular window. Each candidate
+        # window's fit slope is a C_L proxy; in clean air they are nearly equal across the 2-6 km
+        # search range (molecular two-way transmittance varies <1 %). When aerosol sits in/just below
+        # the chosen window its slope is inflated vs the cleanest (least-attenuated) window. Validated
+        # on L1 Mar-May 2026: clean nights p95=1.4; aerosol (e.g. 0-20000-0-10838 2026-03-03) >2.8.
         d = fit_result.search_diagnostics
         slp = np.asarray(d.slopes, dtype=float)
         r2g = np.asarray(d.r_squared, dtype=float)
@@ -847,14 +837,12 @@ def calibrate_rayleigh(
             thr = float(getattr(options, "aerosol_scattering_threshold", 2.0))
             if np.isfinite(scat) and scat > thr:
                 logger.warning(f"Aerosol below molecular window: scattering ratio {scat:.1f} > {thr}")
-                return CalibrationResult(
-                    lidar_constant=-1,
-                    flag=-9,
-                    uncertainty=0,
-                    message=f"Aerosol contamination below window: scattering ratio {scat:.1f}",
-                )
+                qc_flag, qc_message = -9, f"Aerosol contamination below window: scattering ratio {scat:.1f}"
 
-    # ── Plot: compact 4x4 Rayleigh diagnostics dashboard ──
+    _outcome = {None: "OK", -3: "method disagreement", -6: "too noisy",
+                -9: "aerosol below window"}.get(qc_flag, "rejected")
+
+    # ── Plot: compact 4x4 Rayleigh diagnostics dashboard (success AND data-bearing rejections) ──
     if options.plot_main:
         pdir = _plot_dir(options, info, date_str)
         tag = _plot_tag(info, date_str)
@@ -906,11 +894,17 @@ def calibrate_rayleigh(
                     cloud_base_height=data.cbh,
                     no_cloud_value=info.instrument_type.no_cloud_value,
                     z_low_cloud=options.z_low_cloud,
-                    title=f"{plot_title_base} — Rayleigh diagnostics (compact)",
+                    title=f"{plot_title_base} — Rayleigh diagnostics (compact) [{_outcome}]",
                     save_path=pdir / f"{tag}_rayleigh_diag_compact.png",
                 )
             except Exception as exc:
                 logger.warning(f"plot_rayleigh_diagnostics_compact failed: {exc}")
+
+    # The diagnostic image is now saved; emit the deferred rejection (no NetCDF for a failure).
+    if qc_flag is not None:
+        return CalibrationResult(
+            lidar_constant=-1, flag=qc_flag, uncertainty=0, message=qc_message,
+        )
 
     # =========================================================================
     # Step 11: Build result and write to NetCDF

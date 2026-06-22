@@ -36,8 +36,48 @@ FLAG_MEANINGS = {
     -7: "Negative fit slope",                        # Rayleigh-specific
     -8: "Fit issue: |b| > a",                        # Rayleigh-specific
     -9: "Aerosol below molecular window",            # Rayleigh-specific
+    # Cloud-specific rejection reasons: when no profile survives the cloud filters, the dominant
+    # rejection (the filter that removed the most profiles) is reported instead of the generic -1.
+    -20: "Cloud: window transmission too low",       # Cloud-specific
+    -21: "Cloud: laser energy too low",              # Cloud-specific
+    -22: "Cloud: peak not sharp above (300 m)",      # Cloud-specific
+    -23: "Cloud: peak not sharp below (300 m)",      # Cloud-specific
+    -24: "Cloud: aerosol below cloud > limit",       # Cloud-specific
+    -25: "Cloud: cloud base out of range",           # Cloud-specific
+    -26: "Cloud: inconsistent neighbours",           # Cloud-specific
     -99: "Exception during calibration",             # both
 }
+
+#: Cloud filter-stat key -> rejection flag (the most-rejected filter is reported for a failed cloud
+#: calibration). window/quality both map to -20 (instrument-window family).
+CLOUD_REJECT_FLAG = {
+    "window_rejected": -20,
+    "quality_flag_rejected": -20,
+    "energy_rejected": -21,
+    "above_rejected": -22,
+    "below_rejected": -23,
+    "ratio_rejected": -24,
+    "cbh_rejected": -25,
+    "n_rejected": -26,
+}
+
+
+def dominant_cloud_reject_flag(*stat_dicts):
+    """From the cloud filter-stat dicts (filter_stats, cloud_stats, consistency_stats), return
+    (flag, reason, counts) for a failed cloud calibration. If nothing was rejected (genuinely no
+    liquid cloud / clear sky) returns (-1.0, 'no liquid cloud', counts)."""
+    counts: dict = {}
+    for d in stat_dicts:
+        if d:
+            for k, v in d.items():
+                try:
+                    counts[k] = counts.get(k, 0) + int(v)
+                except (TypeError, ValueError):
+                    continue
+    if sum(counts.values()) <= 0:
+        return -1.0, "no liquid cloud", counts
+    reason = max(counts, key=counts.get)
+    return float(CLOUD_REJECT_FLAG.get(reason, -1)), reason, counts
 
 #: Flags that count as a usable calibration.
 SUCCESS_FLAGS = (1.0, 0.5)

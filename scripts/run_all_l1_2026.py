@@ -82,7 +82,7 @@ from calibration.config import InstrumentType  # noqa: E402
 from calibration.cloud import CloudCalConfig  # noqa: E402
 from calibration.cloud.calibration import (  # noqa: E402
     read_ceilometer_data, liquid_cloud_calibration_from_data, set_defaults)
-from calibration.flags import cloud_flag, flag_label  # noqa: E402
+from calibration.flags import cloud_flag, flag_label, dominant_cloud_reject_flag  # noqa: E402
 from calibration.io.output import write_calibration_result  # noqa: E402
 from calibration.plotting import plot_cloud_diagnostics_compact  # noqa: E402
 from monitoring.kalman import kalman_best_estimate  # noqa: E402  (self-contained leaf)
@@ -129,7 +129,9 @@ def _info(s):
 
 def _l1_file(wmo, ident, d):
     ds = d.strftime("%Y%m%d")
-    return L1_ROOT / wmo / "2026" / ds[4:6] / f"L1_{wmo}_{ident}{ds}.nc"
+    # The L1 archive is laid out as <root>/<wmo>/<YYYY>/<MM>/ -- use the date's own year (the tree
+    # under E-PROFILE_L1_2026 holds both 2025 and 2026), not a hard-coded year.
+    return L1_ROOT / wmo / ds[:4] / ds[4:6] / f"L1_{wmo}_{ident}{ds}.nc"
 
 
 def _days(start, end):
@@ -222,15 +224,19 @@ def _do_cloud(s, start, end):
             coef = float(res.cal_median)
             std = float(res.cal_std)
             flag = cloud_flag(n, coef, std)  # n==0 with data present -> -1 (no liquid cloud)
+            if flag == -1:
+                # No usable profile: report WHY -- the dominant filter rejection (window / energy /
+                # above / below / ratio / cbh / consistency), or genuine -1 if nothing was rejected.
+                flag, _reason, _rej = dominant_cloud_reject_flag(
+                    getattr(res, "filter_stats", None), getattr(res, "cloud_stats", None),
+                    getattr(res, "consistency_stats", None))
             # Headline value is the lidar constant C_L = applied_constant / C (Wiegner) -- the
             # operationally useful quantity, on the SAME scale as Rayleigh -- NOT the O'Connor
             # coefficient C. C_L's relative uncertainty equals the coefficient's (C_L = const / C).
             cl = float(res.lidar_constant)
             ok = _is_success(flag) and math.isfinite(cl) and cl > 0
             cl_unc = (cl * std / coef) if (ok and math.isfinite(coef) and coef != 0) else 0.0
-            msg = (f"OK ({n} profiles)" if ok
-                   else ("No liquid cloud in view" if flag == -1
-                         else f"{flag_label(flag)} ({n} profiles)"))
+            msg = (f"OK ({n} profiles)" if ok else flag_label(flag))
             rows.append(dict(date=ds, method="cloud", flag=flag,
                              cal_value=(cl if ok else -1),
                              uncertainty=(cl_unc if ok else 0), n_profiles=n,
@@ -247,16 +253,19 @@ def _do_cloud(s, start, end):
                     wavelength_nm=info.instrument_type.wavelength_nm,
                     housekeeping=_HK_NAN, method=1,
                 )
-                if PLOT_ENABLED:
-                    pdir = OUT / key / "plots" / info.wmo_id / ds[:4]
-                    pdir.mkdir(parents=True, exist_ok=True)
-                    try:
-                        plot_cloud_diagnostics_compact(
-                            data, res,
-                            title=f"{s.get('site', key)} ({info.wmo_id}) — {ds} — Cloud diagnostics",
-                            save_path=pdir / f"{ds}_{info.wmo_id}_cloud_diag_compact.png")
-                    except Exception:  # noqa: BLE001 - a plot failure must not lose the calibration
-                        pass
+            # Diagnostic image for EVERY day that has data (success or rejected) -- the station page
+            # lets you browse all of them (success green, rest grey).
+            if PLOT_ENABLED:
+                pdir = OUT / key / "plots" / info.wmo_id / ds[:4]
+                pdir.mkdir(parents=True, exist_ok=True)
+                try:
+                    plot_cloud_diagnostics_compact(
+                        data, res,
+                        title=f"{s.get('site', key)} ({info.wmo_id}) — {ds} — Cloud diagnostics "
+                              f"[{flag_label(flag) if not ok else 'OK'}]",
+                        save_path=pdir / f"{ds}_{info.wmo_id}_cloud_diag_compact.png")
+                except Exception:  # noqa: BLE001 - a plot failure must not lose the calibration
+                    pass
         except Exception as exc:  # noqa: BLE001
             msg = str(exc)
             low = msg.lower()
