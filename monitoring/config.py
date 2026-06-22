@@ -165,9 +165,25 @@ FLAG_DOCS = [
      "detail": "In the reference region aloft the range-corrected signal should decay like the known molecular (Rayleigh) profile. When it does not track the molecular curve — residual aerosol, thin cloud, or instrument issues — there is no clean region to anchor the constant, and the fit is rejected.",
      "recognize": "Rayleigh diagnostic: signal and molecular curves diverge inside the fit window."},
     {"value": -3, "methods": "Rayleigh",
-     "summary": "Method disagreement.",
-     "detail": "The lidar constant is estimated by more than one independent route (different reference windows / sub-methods). When those estimates disagree by more than the allowed tolerance the result is treated as unreliable and rejected.",
-     "recognize": "Rayleigh diagnostic: candidate constants from different windows spread far apart."},
+     "summary": "Method disagreement — two independent estimates of the lidar constant don't agree.",
+     "detail": "The Rayleigh constant is computed two ways and cross-checked. "
+               "(1) C_L^window = the median of signal / molecular-backscatter taken directly inside "
+               "the aerosol-free molecular reference window. "
+               "(2) C_L^slope = the slope of the Rayleigh fit (signal vs molecular backscatter), which "
+               "equals C_L attenuated by the aerosol two-way transmittance up to the window "
+               "(C_L·T_a²); the transmittance T_a² is then estimated independently from a Klett "
+               "aerosol-extinction inversion integrated from the ground to the window and divided out. "
+               "The relative gap |C_L^slope − C_L^window| / C_L^window is compared to the configured "
+               "tolerance (threshold_quality, ≈15 %); above it, the night is rejected as unreliable. "
+               "The two routes agree in clean air but diverge when aerosol sits between the ground and "
+               "the window — the Klett transmittance correction and the in-window value respond to it "
+               "differently — so −3 is in practice the calibration's aerosol-contamination guard. "
+               "Real example: STORNOWAY (0-20000-0-03018) on 2026-03-06 — the slope and window "
+               "estimates disagreed by 17.9 % (> tolerance) and the night was rejected. Across "
+               "Mar–May 2026 there are 183 such rejections, typically 15–18 %.",
+     "recognize": "Message reads 'Method disagreement: X%'. In the Rayleigh diagnostic, the 'Lidar "
+                  "constant C_L spread' panel shows the slope-method estimate sitting away from the "
+                  "window/perturbation ensemble (see example below)."},
     {"value": -4, "methods": "Both",
      "summary": "Missing model data (CAMS).",
      "detail": "The calibration needs auxiliary model fields — molecular density (temperature/pressure) for Rayleigh, and water vapour for the transmission correction in the cloud method. When the required CAMS file or timestep is absent the calibration cannot proceed. Usually fixable by downloading the missing CAMS day.",
