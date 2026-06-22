@@ -43,7 +43,7 @@ def _write_assets(out_dir: Path) -> str | None:
     assets = out_dir / "assets"
     assets.mkdir(parents=True, exist_ok=True)
     (assets / "plotly.min.js").write_text(get_plotlyjs(), encoding="utf-8")
-    for name in ("style.css", "table-sort.js", "paginate.js", "filter.js"):
+    for name in ("style.css", "table-sort.js", "paginate.js", "filter.js", "diag.js"):
         src = _STATIC / name
         if src.exists():
             shutil.copyfile(src, assets / name)
@@ -90,7 +90,31 @@ def _series_table_rows(cal: pd.DataFrame, series: pd.DataFrame, st: pd.DataFrame
     return rows
 
 
-def _method_block(key, method, cal, kal, series):
+def _copy_diagnostics(diag: pd.DataFrame, out_dir: Path) -> dict:
+    """Copy per-calibration diagnostic PNGs into the site (diag/<key>/<method>_<date>.png) and
+    return {(key, method): [ {date, rel}, ... ]} sorted by date for the station-page viewer."""
+    by: dict = {}
+    if not len(diag):
+        return by
+    for _, r in diag.iterrows():
+        src = Path(str(r["src"]))
+        if not src.exists():
+            continue
+        key, method, date = str(r["key"]), str(r["method"]), str(r["date"])
+        dst_dir = out_dir / "diag" / key
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        fname = f"{method}_{date}.png"
+        try:
+            shutil.copyfile(src, dst_dir / fname)
+        except OSError:
+            continue
+        by.setdefault((key, method), []).append({"date": date, "rel": f"diag/{key}/{fname}"})
+    for k in by:
+        by[k].sort(key=lambda x: x["date"])
+    return by
+
+
+def _method_block(key, method, cal, kal, series, diags=None):
     """Figures + aggregates for one method section on a station page."""
     g_m = cal[(cal["key"] == key) & (cal["method"] == method)].sort_values("datetime")
     kal_m = kal[(kal["key"] == key) & (kal["method"] == method)] if len(kal) else kal
@@ -105,6 +129,7 @@ def _method_block(key, method, cal, kal, series):
             "aux": charts.fig_to_div(charts.aux_timeseries(g_m, method), f"fig-aux-{safe}"),
         },
         recent=g_m.tail(15).iloc[::-1].to_dict("records"),
+        diags=diags or [],
     )
 
 
@@ -114,11 +139,12 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None) -> 
     logo = _write_assets(out_dir)
     env = _env()
 
-    cal, series, st, kal = metrics.load_frames(db_path)
+    cal, series, st, kal, diag = metrics.load_frames(db_path)
     summary = metrics.network_summary(cal, series, st)
     flags = metrics.flag_distribution(cal)
     watch = metrics.watchlist(cal, st)
     keystats = _keystats(series, st)
+    diag_by = _copy_diagnostics(diag, out_dir)
 
     summary_figs = {
         "map": charts.fig_to_div(charts.network_map(keystats), "fig-map"),
@@ -147,7 +173,7 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None) -> 
         meta = st[st["key"] == key].iloc[0].to_dict()
         methods = [m for m in config.METHOD_ORDER
                    if len(cal[(cal["key"] == key) & (cal["method"] == m)])]
-        blocks = [_method_block(key, m, cal, kal, series) for m in methods]
+        blocks = [_method_block(key, m, cal, kal, series, diag_by.get((key, m), [])) for m in methods]
         overlay = None
         if len(methods) >= 2:
             by_method = {m: cal[(cal["key"] == key) & (cal["method"] == m)] for m in methods}

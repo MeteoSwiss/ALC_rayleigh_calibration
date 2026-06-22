@@ -30,11 +30,11 @@
 {% if watch %}
 <section class="watch">
   <h2>Watchlist <span class="muted">({{ watch | length }})</span></h2>
-  <table class="watchtable paginated" data-page-size="15">
+  <table class="watchtable paginated filterable" data-page-size="15">
     <thead><tr><th>Station</th><th>Type</th><th>Method</th><th>Issue</th><th>Detail</th><th>Last date</th></tr></thead>
     <tbody>
     {% for w in watch %}
-      <tr>
+      <tr data-country="{{ w.country }}" data-type="{{ w.itype }}">
         <td><a href="stations/{{ w.key }}.html">{{ w.key }}</a></td>
         <td>{{ w.itype }}</td>
         <td>{{ method_label(w.method) }}</td>
@@ -58,7 +58,7 @@
 <section>
   <h2>Series <span class="muted">(one row per station × method — click a header to sort)</span>
     <span id="filter-count" class="muted"></span></h2>
-  <table class="sortable stationtable" id="stations">
+  <table class="sortable stationtable paginated filterable" id="stations" data-page-size="15">
     <thead>
       <tr>
         <th data-type="str">Station</th>

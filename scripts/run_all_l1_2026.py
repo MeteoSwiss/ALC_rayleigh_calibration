@@ -84,7 +84,12 @@ from calibration.cloud.calibration import (  # noqa: E402
     read_ceilometer_data, liquid_cloud_calibration_from_data, set_defaults)
 from calibration.flags import cloud_flag, flag_label  # noqa: E402
 from calibration.io.output import write_calibration_result  # noqa: E402
+from calibration.plotting import plot_cloud_diagnostics_compact  # noqa: E402
 from monitoring.kalman import kalman_best_estimate  # noqa: E402  (self-contained leaf)
+
+# PLOTS=1 emits a diagnostic PNG per SUCCESSFUL calibration (Rayleigh via plot_main, cloud via
+# plot_cloud_diagnostics_compact). Env-controlled so it propagates to every per-stream subprocess.
+PLOT_ENABLED = os.environ.get("PLOTS", "0") == "1"
 
 # --- Paths / configuration --------------------------------------------------
 L1_ROOT = Path("D:/E-PROFILE_L1_2026")
@@ -165,7 +170,8 @@ def _do_rayleigh(s, start, end):
     o.data_level = DataLevel.L1
     o.folder_output = OUT / key          # calibrate_rayleigh writes its NetCDF here (method 0)
     o.cams_folder = CAMS
-    o.plot_all = o.plot_main = False
+    o.plot_all = False
+    o.plot_main = PLOT_ENABLED           # PLOTS=1 -> Rayleigh diagnostic PNG per success
     rows = []
     for d in _days(start, end):
         if not _l1_file(s["wmo"], s["ident"], d).exists():
@@ -241,6 +247,16 @@ def _do_cloud(s, start, end):
                     wavelength_nm=info.instrument_type.wavelength_nm,
                     housekeeping=_HK_NAN, method=1,
                 )
+                if PLOT_ENABLED:
+                    pdir = OUT / key / "plots" / info.wmo_id / ds[:4]
+                    pdir.mkdir(parents=True, exist_ok=True)
+                    try:
+                        plot_cloud_diagnostics_compact(
+                            data, res,
+                            title=f"{s.get('site', key)} ({info.wmo_id}) — {ds} — Cloud diagnostics",
+                            save_path=pdir / f"{ds}_{info.wmo_id}_cloud_diag_compact.png")
+                    except Exception:  # noqa: BLE001 - a plot failure must not lose the calibration
+                        pass
         except Exception as exc:  # noqa: BLE001
             msg = str(exc)
             low = msg.lower()

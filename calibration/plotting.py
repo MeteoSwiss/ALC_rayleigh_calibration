@@ -50,6 +50,158 @@ def _save_and_close(fig, save_path: Optional[Path], dpi: int = 150):
     plt.close(fig)
 
 
+def plot_cloud_diagnostics_compact(data, res, title: str = "",
+                                   save_path: Optional[Path] = None) -> "Figure":
+    """Compact liquid-cloud (O'Connor) calibration diagnostics, styled like the Rayleigh one.
+
+    Built entirely from the read ``data`` (CeiloData) + the ``res`` (CloudCalResults), which
+    already carry the per-profile arrays, so the cloud core needs no change. Panels:
+      * time-height log-backscatter pcolor with cloud base (dots) and the profiles SELECTED for
+        calibration marked (green), plus the integration height band;
+      * a representative selected backscatter profile vs height (cloud peak);
+      * apparent vs consistent lidar ratio S per profile over time (+ theoretical S line);
+      * histogram of the per-profile O'Connor coefficient C (median ± std);
+      * a stats panel (C_L, C, n_profiles, filter rejections).
+    """
+    plt = _get_plt()
+    import numpy as _np
+
+    beta = _np.asarray(getattr(data, "beta", _np.array([[]])), dtype=float)   # (n_range, n_time)
+    rng = _np.asarray(getattr(data, "range", _np.array([])), dtype=float)     # (n_range,) m AGL
+    t = _np.asarray(getattr(data, "time", _np.array([])))
+    cbh = _np.asarray(getattr(data, "cbh", _np.array([])), dtype=float)       # (n_time,)
+    n_time = beta.shape[1] if beta.ndim == 2 else 0
+    if n_time == 0 or rng.size == 0:
+        fig = plt.figure(figsize=(6, 3))
+        fig.text(0.5, 0.5, "no data to plot", ha="center")
+        _save_and_close(fig, save_path)
+        return fig
+
+    # x axis: hours since the first profile
+    try:
+        hrs = (t.astype("datetime64[s]").astype("float64") - t[0].astype("datetime64[s]").astype("float64")) / 3600.0
+    except Exception:
+        hrs = _np.arange(n_time, dtype=float)
+    rng_km = rng * 1e-3
+
+    S_app = _np.asarray(res.S_apparent, dtype=float) if getattr(res, "S_apparent", None) is not None else _np.full(n_time, _np.nan)
+    S_con = _np.asarray(res.S_consistent, dtype=float) if getattr(res, "S_consistent", None) is not None else _np.full(n_time, _np.nan)
+    coeffs = _np.asarray(res.all_coefficients, dtype=float) if getattr(res, "all_coefficients", None) is not None else _np.full(n_time, _np.nan)
+    sel = _np.isfinite(S_con) if S_con.size == n_time else _np.zeros(n_time, dtype=bool)
+    cfg = getattr(res, "config", None)
+    cal_lo = float(getattr(cfg, "cal_minheight", 100.0)) if cfg else 100.0
+    cal_hi = float(getattr(cfg, "cal_maxheight", 2400.0)) if cfg else 2400.0
+    valid_c = coeffs[_np.isfinite(coeffs)]
+    s_theo = (float(_np.nanmedian(S_con[sel])) / res.cal_median) if (sel.any() and res.cal_median) else 18.8
+
+    fig = plt.figure(figsize=(22, 11), layout="constrained")
+    gs = fig.add_gridspec(2, 3)
+    ax_p = fig.add_subplot(gs[0, 0:2])   # pcolor
+    ax_pr = fig.add_subplot(gs[0, 2])    # profile
+    ax_s = fig.add_subplot(gs[1, 0])     # lidar ratio
+    ax_h = fig.add_subplot(gs[1, 1])     # coefficient histogram
+    ax_t = fig.add_subplot(gs[1, 2])     # stats text
+
+    # --- pcolor of log10(beta) with CBH + selected profiles ---
+    b = beta.copy()
+    b[b <= 0] = _np.nan
+    logb = _np.log10(b)
+    fin = logb[_np.isfinite(logb)]
+    vmin, vmax = (float(_np.percentile(fin, 5)), float(_np.percentile(fin, 95))) if fin.size else (-8.0, -3.0)
+    hm = ax_p.pcolormesh(hrs, rng_km, logb, shading="auto", cmap="viridis", vmin=vmin, vmax=vmax)
+    plt.colorbar(hm, ax=ax_p, pad=0.01).set_label(r"log$_{10}(\beta)$")
+    ax_p.axhspan(cal_lo * 1e-3, cal_hi * 1e-3, color="white", alpha=0.06, zorder=2)
+    # SELECTED profiles for calibration: green vertical bands (runs of selected time columns)
+    if sel.any():
+        idx = _np.where(sel)[0]
+        dt = float(_np.median(_np.diff(hrs))) if n_time > 1 else 0.1
+        for run in _np.split(idx, _np.where(_np.diff(idx) > 1)[0] + 1):
+            x0 = hrs[run[0]]
+            x1 = (hrs[run[-1] + 1] if run[-1] < n_time - 1 else hrs[run[-1]] + dt)
+            ax_p.axvspan(x0, x1, facecolor="#2ca02c", alpha=0.18, zorder=3)
+    if cbh.size == n_time and _np.any(_np.isfinite(cbh)):
+        ok_cbh = cbh > 0
+        ax_p.scatter(hrs[ok_cbh & ~sel], cbh[ok_cbh & ~sel] * 1e-3, s=7, c="white",
+                     edgecolors="k", linewidths=0.2, zorder=5, label="cloud base")
+        ax_p.scatter(hrs[ok_cbh & sel], cbh[ok_cbh & sel] * 1e-3, s=16, c="#2ca02c",
+                     edgecolors="k", linewidths=0.3, zorder=6, label="used for calibration")
+    ax_p.set_ylim(0, min(cal_hi * 1e-3 + 1.0, float(rng_km.max())))
+    ax_p.set_xlabel("Hours since start")
+    ax_p.set_ylabel("Range (km AGL)")
+    ax_p.set_title("Attenuated backscatter — cloud base (dots), profiles used for calibration (green)")
+    ax_p.legend(loc="upper right", fontsize=8, framealpha=0.85)
+
+    # --- representative selected profile ---
+    if sel.any():
+        prof = _np.nanmean(beta[:, sel], axis=1)
+        ax_pr.plot(prof, rng_km, color="#2ca02c", lw=0.9, label=f"mean of {int(sel.sum())} selected")
+        med_cbh = float(_np.nanmedian(cbh[sel])) if _np.any(_np.isfinite(cbh[sel])) else _np.nan
+        if _np.isfinite(med_cbh):
+            ax_pr.axhline(med_cbh * 1e-3, color="#d62728", lw=1.0, ls="--", label="median cloud base")
+    ax_pr.axhspan(cal_lo * 1e-3, cal_hi * 1e-3, color="gold", alpha=0.12, label="integration range")
+    ax_pr.set_ylim(0, min(cal_hi * 1e-3 + 1.0, float(rng_km.max())))
+    ax_pr.set_xscale("log")
+    ax_pr.set_xlabel(r"$\beta$")
+    ax_pr.set_title("Representative profile")
+    ax_pr.legend(fontsize=8)
+    ax_pr.grid(True, alpha=0.25)
+
+    # --- lidar ratio S per profile ---
+    ax_s.scatter(hrs, S_app, s=10, c="0.6", alpha=0.5, label="apparent S")
+    if sel.any():
+        ax_s.scatter(hrs[sel], S_con[sel], s=18, c="#2ca02c", label="consistent S (used)")
+    ax_s.axhline(s_theo, color="#d62728", lw=1.0, ls="--", label=f"theoretical S = {s_theo:.1f} sr")
+    ax_s.set_xlabel("Hours since start")
+    ax_s.set_ylabel("Lidar ratio S (sr)")
+    ax_s.set_title("Apparent vs consistent lidar ratio")
+    ax_s.legend(fontsize=8)
+    ax_s.grid(True, alpha=0.25)
+    # Focus on the consistent (used) S + theoretical; clear-sky apparent S has huge outliers.
+    upper = s_theo * 3.0
+    if sel.any() and _np.any(_np.isfinite(S_con[sel])):
+        upper = max(upper, 1.3 * float(_np.nanmax(S_con[sel])))
+    ax_s.set_ylim(0, upper)
+
+    # --- coefficient histogram ---
+    if valid_c.size:
+        ax_h.hist(valid_c, bins=min(30, max(5, valid_c.size // 2)), color="#2ca02c", alpha=0.7)
+        ax_h.axvline(res.cal_median, color="#d62728", lw=1.4, label=f"median C = {res.cal_median:.3g}")
+        ax_h.axvspan(res.cal_median - res.cal_std, res.cal_median + res.cal_std,
+                     color="#d62728", alpha=0.12, label="±1σ")
+        ax_h.legend(fontsize=8)
+    ax_h.set_xlabel("O'Connor coefficient C (per profile)")
+    ax_h.set_ylabel("count")
+    ax_h.set_title("Calibration coefficient distribution")
+    ax_h.grid(True, axis="y", alpha=0.25)
+
+    # --- stats text ---
+    ax_t.axis("off")
+    lines = [
+        f"C_L (Wiegner)   = {res.lidar_constant:.4g}",
+        f"coefficient C   = {res.cal_median:.4g}",
+        f"std(C)          = {res.cal_std:.3g}",
+        f"rel. unc        = {100 * res.cal_std / res.cal_median:.1f} %" if res.cal_median else "rel. unc = —",
+        f"n profiles used = {res.n_profiles}",
+        f"theoretical S   = {s_theo:.2f} sr",
+        "",
+    ]
+    for name, d in (("instrument filter", getattr(res, "filter_stats", None)),
+                    ("cloud filter", getattr(res, "cloud_stats", None)),
+                    ("consistency", getattr(res, "consistency_stats", None))):
+        if isinstance(d, dict) and d:
+            lines.append(f"{name} rejections:")
+            for k, v in list(d.items())[:6]:
+                lines.append(f"   {k}: {v}")
+    ax_t.text(0.0, 1.0, "\n".join(lines), va="top", ha="left", family="monospace", fontsize=10,
+              transform=ax_t.transAxes)
+    ax_t.set_title("Summary")
+
+    if title:
+        fig.suptitle(title, fontsize=14)
+    _save_and_close(fig, save_path)
+    return fig
+
+
 # =========================================================================
 # 1.  RCS time-series
 # =========================================================================

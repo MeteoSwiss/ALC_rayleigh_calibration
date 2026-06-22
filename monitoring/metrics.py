@@ -15,8 +15,8 @@ import pandas as pd
 from monitoring import config
 
 
-def load_frames(db_path: Path) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Return (calibrations, series, stations, kalman) with parsed datetimes."""
+def load_frames(db_path: Path):
+    """Return (calibrations, series, stations, kalman, diagnostics) with parsed datetimes."""
     with sqlite3.connect(Path(db_path)) as con:
         cal = pd.read_sql("SELECT * FROM calibrations", con)
         series = pd.read_sql("SELECT * FROM series", con)
@@ -25,10 +25,14 @@ def load_frames(db_path: Path) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame
             kal = pd.read_sql("SELECT * FROM kalman", con)
         except Exception:
             kal = pd.DataFrame(columns=["key", "method", "date", "kalman", "kalman_std"])
+        try:
+            diag = pd.read_sql("SELECT * FROM diagnostics", con)
+        except Exception:
+            diag = pd.DataFrame(columns=["key", "method", "date", "src"])
     cal["datetime"] = pd.to_datetime(cal["date"], format="%Y%m%d", errors="coerce")
     if len(kal):
         kal["datetime"] = pd.to_datetime(kal["date"], format="%Y%m%d", errors="coerce")
-    return cal, series, st, kal
+    return cal, series, st, kal, diag
 
 
 def network_summary(cal: pd.DataFrame, series: pd.DataFrame, st: pd.DataFrame) -> dict:
@@ -130,5 +134,8 @@ def watchlist(cal: pd.DataFrame, st: pd.DataFrame) -> pd.DataFrame:
                                    priority=float(100 * (config.LOW_SUCCESS_FRAC - frac))))
 
     if not alerts:
-        return pd.DataFrame(columns=["key", "itype", "method", "issue", "detail", "date", "priority"])
-    return pd.DataFrame(alerts).sort_values(["issue", "priority"], ascending=[True, False]).reset_index(drop=True)
+        return pd.DataFrame(columns=["key", "itype", "method", "country", "issue", "detail", "date", "priority"])
+    country_by_key = dict(zip(st["key"], st["country"])) if "country" in st.columns else {}
+    df = pd.DataFrame(alerts).sort_values(["issue", "priority"], ascending=[True, False]).reset_index(drop=True)
+    df["country"] = df["key"].map(lambda k: str(country_by_key.get(k, "") or ""))
+    return df

@@ -31,6 +31,7 @@
           return 0;
         });
         rows.forEach(function (r) { tbody.appendChild(r); });
+        if (typeof table._repaginate === "function") table._repaginate();  // re-page in new order
       });
     });
   }

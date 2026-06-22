@@ -67,6 +67,29 @@ def _read_kalman_csv(path: Path, key: str) -> pd.DataFrame:
     return df[["key", "method", "date", "kalman", "kalman_std"]]
 
 
+def _scan_diagnostics(fullcal_dir: Path, keys) -> pd.DataFrame:
+    """Find per-calibration diagnostic PNGs the runner emitted under <key>/plots/**/*.png.
+
+    Filenames are '<YYYYMMDD>_<wmo>_<method>_diag_compact.png'; we key each image by
+    (key, method, date) and keep its absolute source path for the renderer to copy in."""
+    rows = []
+    for key in keys:
+        pdir = Path(fullcal_dir) / key / "plots"
+        if not pdir.exists():
+            continue
+        for png in pdir.rglob("*_diag_compact.png"):
+            name = png.name
+            date = name[:8]
+            if not date.isdigit():
+                continue
+            method = "cloud" if "_cloud_diag" in name else ("rayleigh" if "_rayleigh_diag" in name else None)
+            if method is None:
+                continue
+            rows.append(dict(key=key, method=method, date=date, src=str(png)))
+    cols = ["key", "method", "date", "src"]
+    return pd.DataFrame(rows, columns=cols)
+
+
 def _load_manifest(manifest_path: Path) -> pd.DataFrame:
     """Per-instrument metadata keyed by '<wmo>_<identifier>'. Handles the L2 manifest
     ({wmo, identifier, itype, ...}) and the L1 census ({wmo, ident, type, site, ...})."""
@@ -208,11 +231,18 @@ def build_index(
     if l2_dir is not None:
         stations = _enrich_metadata(stations, Path(l2_dir))
 
+    diagnostics = _scan_diagnostics(fullcal_dir, [k for _, k in selected])
+    if len(diagnostics) and start:
+        diagnostics = diagnostics[diagnostics["date"] >= start]
+    if len(diagnostics) and end:
+        diagnostics = diagnostics[diagnostics["date"] <= end]
+
     with sqlite3.connect(db_path) as con:
         cal.drop(columns=["datetime"]).to_sql("calibrations", con, if_exists="replace", index=False)
         series.to_sql("series", con, if_exists="replace", index=False)
         stations.to_sql("stations", con, if_exists="replace", index=False)
         kalman.to_sql("kalman", con, if_exists="replace", index=False)
+        diagnostics.to_sql("diagnostics", con, if_exists="replace", index=False)
         con.execute("CREATE INDEX IF NOT EXISTS ix_cal_key ON calibrations(key, method)")
         con.execute("CREATE INDEX IF NOT EXISTS ix_kal_key ON kalman(key, method)")
         con.commit()

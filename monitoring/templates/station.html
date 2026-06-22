@@ -30,6 +30,24 @@
     <span class="muted">{{ b.meta.success_rate | fmt('{:.0f}') }}% success · {{ b.meta.n_success or 0 }}/{{ b.meta.n_dates or 0 }} ·
     median {{ b.meta.median_cl | fmt('{:.3e}') }} · rel. unc {{ b.meta.median_rel_unc | fmt('{:.0f}') }}%</span></h2>
   <div class="card">{{ b.figs.ts | safe }}</div>
+
+  {% if b.diags %}
+  <section class="diag card" data-ts="fig-ts-{{ b.method }}" tabindex="0">
+    <h3>Diagnostic — <span class="diag-date muted">latest</span>
+      <span class="diag-nav">
+        <button type="button" class="diag-prev" title="Previous calibration (←)">‹ prev</button>
+        <button type="button" class="diag-next" title="Next calibration (→)">next ›</button>
+      </span>
+      <span class="muted diag-hint">— click a green date, use ← →, or click a point on the time series</span>
+    </h3>
+    <div class="diag-body">
+      <div class="diag-cal"></div>
+      <a class="diag-imglink" target="_blank" rel="noopener"><img class="diag-img" alt="calibration diagnostic"></a>
+    </div>
+    <script type="application/json" class="diag-data">{{ b.diags | tojson }}</script>
+  </section>
+  {% endif %}
+
   <div class="grid2">
     <div class="card">{{ b.figs.flags | safe }}</div>
     <div class="card">{{ b.figs.aux | safe }}</div>
