@@ -48,7 +48,8 @@ def run_station(name):
             d["wavelengthModel"] = "molaer"
         chans.append(d)
     cfg = dict(wmo=sc["wmo"], start=st["start"], end=st["end"], referenceChannel=sc["ref"],
-               channels=chans, lambda_target=sc["target"], alpha=1.0, zMin=500, zMax=3000)
+               channels=chans, lambda_target=sc["target"], alpha=1.0, zMin=500, zMax=3000,
+               calibLevel="L2")   # operational reference = the L2 product (eprof_v2 + fixed cloud)
     return IC.process(cfg), cfg
 
 
