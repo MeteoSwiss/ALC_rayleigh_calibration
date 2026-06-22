@@ -88,7 +88,7 @@ def read_earlinet(code, start, end, station_alt, overlap):
     return dict(time=np.array(times), grid=grid, att=np.array(atts), station_alt=station_alt)
 
 
-def compare(code, start, end):
+def compare(code, start, end, return_profiles=False):
     site = SITES[code]
     l2 = IC.read_l2(site["wmo"], site["ident"], start, end)
     if l2 is None:
@@ -105,7 +105,7 @@ def compare(code, start, end):
     # match: for each EARLINET time, median CHM within +/-30 min, interp to EARLINET grid (AGL)
     chm_t = pd.to_datetime(l2["time"])
     z_chm_agl = l2["alt"] - l2["station_alt"]
-    pairs_e, pairs_c = [], []
+    pairs_e, pairs_c, pairs_t = [], [], []
     for te, ae in zip(ea["time"], ea["att"]):
         lo = pd.Timestamp(te) - pd.Timedelta(minutes=30); hi = pd.Timestamp(te) + pd.Timedelta(minutes=30)
         sel = (chm_t >= lo) & (chm_t <= hi)
@@ -114,13 +114,15 @@ def compare(code, start, end):
         with np.errstate(all="ignore"):
             cprof = np.nanmedian(beta[np.asarray(sel)], axis=0)
         ci = np.interp(ea["grid"], z_chm_agl, cprof, left=np.nan, right=np.nan)
-        pairs_e.append(ae); pairs_c.append(ci)
+        pairs_e.append(ae); pairs_c.append(ci); pairs_t.append(te)
     if not pairs_e:
         return dict(error="no temporal matches")
     E = np.array(pairs_e); C = np.array(pairs_c)
     zmask = (ea["grid"] >= 500) & (ea["grid"] <= 5000)
     s = IC._stats(C, E, zmask)
     s["matched"] = len(pairs_e)
+    if return_profiles:
+        s["betaE"] = E; s["betaC"] = C; s["grid"] = ea["grid"]; s["times"] = np.array(pairs_t)
     return s
 
 

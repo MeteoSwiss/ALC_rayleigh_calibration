@@ -47,16 +47,20 @@ IT = {"CHM15k": InstrumentType.CHM15k, "CL31": InstrumentType.CL31, "CL51": Inst
       "CL61": InstrumentType.CL61, "Mini-MPL": InstrumentType.MINI_MPL}
 
 # --- Benchmark channels (mirrors MATLAB make_validation_figures.m) ---------------------------
-def _ch(wmo, ident, itype, calib, label, lat, lon, alt):
-    return dict(wmo=wmo, ident=ident, itype=itype, calib=calib, label=label, lat=lat, lon=lon, alt=alt)
+def _ch(wmo, ident, itype, calib, label, lat, lon, alt, raw=None):
+    # raw: folder of flat native files (e.g. Vaisala CL61 "A:/CL61_PAY"); when set, BOTH the
+    # Rayleigh (RAW reader, binned to the L2 grid) and cloud (liquid_cloud_calibration_from_data
+    # on the day's concatenated profiles) calibrations read these instead of the L2 product.
+    return dict(wmo=wmo, ident=ident, itype=itype, calib=calib, label=label, lat=lat, lon=lon, alt=alt, raw=raw)
 
 PAY = (46.8137, 6.9425, 491.0)
+CL61_PAY_RAW = "A:/CL61_PAY"   # native Vaisala CL61 (the L2 product has no daily files + bad lat/lon)
 BENCHMARK = {
     "payerne": dict(start="20260301", end="20260531", channels=[
         _ch("0-20000-0-06610", "A", "CHM15k", "rayleigh", "CHM15k (Rayleigh)", *PAY),
         _ch("0-20000-0-06610", "B", "CL31", "cloud", "CL31 (cloud)", *PAY),
-        _ch("0-20000-0-06610", "C", "CL61", "cloud", "CL61 (cloud)", *PAY),
-        _ch("0-20000-0-06610", "C", "CL61", "rayleigh", "CL61 (Rayleigh)", *PAY),
+        _ch("0-20000-0-06610", "C", "CL61", "cloud", "CL61 (cloud)", *PAY, raw=CL61_PAY_RAW),
+        _ch("0-20000-0-06610", "C", "CL61", "rayleigh", "CL61 (Rayleigh)", *PAY, raw=CL61_PAY_RAW),
     ]),
     "amsterdam": dict(start="20260301", end="20260531", channels=[
         _ch("0-20000-0-06240", "A", "CHM15k", "rayleigh", "CHM15k A", 52.317, 4.8037, 6.0),
@@ -109,11 +113,18 @@ def _daily_l2_file(ch, d):
 
 
 def raw_rayleigh(ch, start, end):
-    """Per-night lidar constant from L2_monthly (calibrate_rayleigh). Returns (dates, C, Cstd)."""
-    info = InstrumentInfo(site_name=ch["wmo"], wmo_id=ch["wmo"], identifier=ch["ident"],
-                          instrument_type=IT[ch["itype"]], latitude=ch["lat"], longitude=ch["lon"], altitude=ch["alt"])
+    """Per-night lidar constant (calibrate_rayleigh). From L2_monthly, or from native RAW files
+    (binned to the L2 grid) when ch['raw'] is set. Returns (dates, C, Cstd)."""
     o = CalibrationOptions.from_json(REPO / "options.json")
-    o.folder_root = L2_MONTHLY; o.data_level = DataLevel.L2_MONTHLY
+    if ch.get("raw"):
+        rp = Path(ch["raw"])
+        info = InstrumentInfo(site_name=rp.name, wmo_id=rp.name, identifier="",
+                              instrument_type=IT[ch["itype"]], latitude=ch["lat"], longitude=ch["lon"], altitude=ch["alt"])
+        o.folder_root = rp.parent; o.data_level = DataLevel.RAW
+    else:
+        info = InstrumentInfo(site_name=ch["wmo"], wmo_id=ch["wmo"], identifier=ch["ident"],
+                              instrument_type=IT[ch["itype"]], latitude=ch["lat"], longitude=ch["lon"], altitude=ch["alt"])
+        o.folder_root = L2_MONTHLY; o.data_level = DataLevel.L2_MONTHLY
     o.cams_folder = Path(CAMS); o.abs_cs_lookup_table = Path("")
     o.apply_wv_correction = (ch["itype"] in ("CL31", "CL51", "CL61"))
     o.folder_output = Path(tempfile.mkdtemp()); o.plot_main = o.plot_all = False
@@ -128,22 +139,103 @@ def raw_rayleigh(ch, start, end):
     return dates, np.array(C), np.array(Cstd)
 
 
+def _cloud_one(f, ch):
+    """liquid_cloud_calibration on one L2 file; (cal_median, cal_std) or None."""
+    try:
+        res = liquid_cloud_calibration(CloudCalConfig(
+            nc_file=str(f), instrument=ch["itype"], apply_wv_correction=True,
+            cams_folder=CAMS, abs_cs_lookup_table=WV_LUT,
+            station_latitude=ch["lat"], station_longitude=ch["lon"], aerosol_lidar_ratio=50.0))
+    except Exception:
+        return None
+    if res.n_profiles > 0 and np.isfinite(res.cal_median) and res.cal_median > 0:
+        return float(res.cal_median), float(res.cal_std)
+    return None
+
+
+def _raw_cl61_ceilodata(raw_root, date, ch):
+    """Concatenate a day of flat native CL61 files into a cloud CeiloData on the E-PROFILE
+    Mm^-1 sr^-1 scale (so the returned C matches the L2-based cloud channels)."""
+    from calibration.io.data_loader import load_raw_data
+    from calibration.cloud.calibration import CeiloData
+    files = sorted(Path(raw_root).glob(f"*{date.strftime('%Y%m%d')}*.nc"))
+    if not files:
+        return None
+    d = load_raw_data(files, IT[ch["itype"]])
+    if d is None:
+        return None
+    te = np.asarray(d.time, float)            # epoch seconds
+    if te.size == 0:
+        return None
+    rng = np.asarray(d.range_alc, float)
+    beta = np.asarray(d.rcs, float)
+    if beta.shape[0] == te.size:
+        beta = beta.T                          # -> (range, time)
+    beta = beta * 1e6                          # 1/(m sr) -> Mm^-1 sr^-1 (E-PROFILE L2 stored scale)
+    cbh = np.asarray(d.cbh, float) if getattr(d, "cbh", None) is not None else np.full(te.size, np.nan)
+    if cbh.ndim > 1:
+        cbh = cbh[:, 0] if cbh.shape[0] == te.size else cbh[0, :]
+    t64 = np.datetime64("1970-01-01T00:00:00", "ns") + (te * 1e9).astype("timedelta64[ns]")
+    tnum = te / 86400.0 + 719529.0             # MATLAB datenum (datenum(1970,1,1)=719529)
+    return CeiloData(time=t64, time_num=tnum, station_altitude=ch["alt"], station_latitude=ch["lat"],
+                     station_longitude=ch["lon"], range=rng, range_resol=float(rng[1] - rng[0]),
+                     beta=np.ascontiguousarray(beta), cbh=cbh, quality_flag=None,
+                     window_transmission=None, laser_energy=None)
+
+
+def raw_cloud_from_raw(ch, raw_root, start, end):
+    """Per-day cloud coefficient from native CL61 files (liquid_cloud_calibration_from_data),
+    binned to the 30 m grid where the O'Connor method succeeds (the native 4.8 m over-rejects)."""
+    from calibration.cloud.calibration import liquid_cloud_calibration_from_data
+    dates, C, Cstd = [], [], []
+    for d in _daterange(start, end):
+        data = _raw_cl61_ceilodata(raw_root, d, ch)
+        if data is None:
+            continue
+        cfg = CloudCalConfig(nc_file="", instrument=ch["itype"], apply_wv_correction=True,
+                             cams_folder=CAMS, abs_cs_lookup_table=WV_LUT,
+                             station_latitude=ch["lat"], station_longitude=ch["lon"],
+                             aerosol_lidar_ratio=50.0, average_range_m=30.0, average_time_s=300.0)
+        try:
+            res = liquid_cloud_calibration_from_data(data, cfg)
+        except Exception:
+            continue
+        if res.n_profiles > 0 and np.isfinite(res.cal_median) and res.cal_median > 0:
+            dates.append(d); C.append(float(res.cal_median)); Cstd.append(float(res.cal_std))
+    return dates, np.array(C), np.array(Cstd)
+
+
 def raw_cloud(ch, start, end):
-    """Per-day cloud coefficient from L2_daily (liquid_cloud_calibration). Returns (dates, C, Cstd)."""
+    """Per-day cloud coefficient from L2_daily (liquid_cloud_calibration). Returns (dates, C, Cstd).
+
+    Dispatches to the native-file path when ch['raw'] is set (e.g. Payerne CL61); else falls back
+    to the monthly L2 file (one value per month) when a channel has NO daily archive.
+    """
+    if ch.get("raw"):
+        return raw_cloud_from_raw(ch, ch["raw"], start, end)
     dates, C, Cstd = [], [], []
     for d in _daterange(start, end):
         f = _daily_l2_file(ch, d)
         if f is None:
             continue
-        try:
-            res = liquid_cloud_calibration(CloudCalConfig(
-                nc_file=str(f), instrument=ch["itype"], apply_wv_correction=True,
-                cams_folder=CAMS, abs_cs_lookup_table=WV_LUT,
-                station_latitude=ch["lat"], station_longitude=ch["lon"], aerosol_lidar_ratio=50.0))
-        except Exception:
+        r = _cloud_one(f, ch)
+        if r is not None:
+            dates.append(d); C.append(r[0]); Cstd.append(r[1])
+    if dates:
+        return dates, np.array(C), np.array(Cstd)
+    # monthly fallback: one cloud value per L2_monthly file, dated at mid-month
+    seen = set()
+    for d in _daterange(start, end):
+        ym = (d.year, d.month)
+        if ym in seen:
             continue
-        if res.n_profiles > 0 and np.isfinite(res.cal_median) and res.cal_median > 0:
-            dates.append(d); C.append(float(res.cal_median)); Cstd.append(float(res.cal_std))
+        seen.add(ym)
+        mf = L2_MONTHLY / ch["wmo"] / f"{d.year}" / f"L2_{ch['wmo']}_{ch['ident']}{d.year}{d.month:02d}.nc"
+        if not mf.exists():
+            continue
+        r = _cloud_one(mf, ch)
+        if r is not None:
+            dates.append(datetime(d.year, d.month, 15)); C.append(r[0]); Cstd.append(r[1])
     return dates, np.array(C), np.array(Cstd)
 
 

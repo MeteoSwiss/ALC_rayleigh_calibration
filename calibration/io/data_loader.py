@@ -116,6 +116,10 @@ def build_file_paths(
                 files.append(daily)
             elif folder.is_dir():
                 files.extend(sorted(folder.glob("*.nc")))
+            else:
+                # flat layout: many timestamped files sharing <root> with the date in the
+                # filename (e.g. Vaisala CL61 "PAY_CL6101_YYYYMMDD_HHMMSS.nc" / "live_YYYYMMDD_*.nc").
+                files.extend(sorted(root.glob(f"*{stem}*.nc")))
         return files
 
     # Daily layouts (L1 or L2_daily): previous + current day
