@@ -122,3 +122,48 @@ def compare(code, start, end):
     s = IC._stats(C, E, zmask)
     s["matched"] = len(pairs_e)
     return s
+
+
+def load_matlab_earlinet(code):
+    """relbias/r/N from the MATLAB R_earlinet_<code>.mat (different period; reference only)."""
+    import scipy.io as sio
+    f = Path("C:/Users/hervo/OneDrive/Documents/MATLAB/ALC/figs_paper_validation") / f"R_earlinet_{code}.mat"
+    if not f.is_file():
+        return {}
+    try:
+        m = sio.loadmat(str(f), squeeze_me=True, struct_as_record=False)
+        st = m["Re"].stats
+        return dict(relbias=float(getattr(st, "relbias_pct", np.nan)), r=float(getattr(st, "r", np.nan)),
+                    n=int(getattr(st, "n", 0)))
+    except Exception:
+        return {}
+
+
+def run_all(start="20250101", end="20260630"):
+    """Compare every EARLINET site to its colocated CHM15k; return rows for the report."""
+    rows = []
+    for code in ("sir", "lei", "cbw", "ino", "ari"):
+        try:
+            s = compare(code, start, end)
+        except Exception as e:
+            s = {"error": repr(e)}
+        mm = load_matlab_earlinet(code)
+        rows.append((code, s, mm))
+        if s and "error" not in s:
+            print("  %s: PY relbias=%+.1f%% r=%.2f matched=%d | MAT relbias=%+.1f%% r=%.2f n=%d"
+                  % (code, s["relbias_pct"], s["r"], s.get("matched", 0),
+                     mm.get("relbias", float("nan")), mm.get("r", float("nan")), mm.get("n", 0)), flush=True)
+        else:
+            print("  %s: %s" % (code, s), flush=True)
+    return rows
+
+
+if __name__ == "__main__":
+    import sys
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+    import warnings
+    warnings.filterwarnings("ignore")
+    run_all()

@@ -124,10 +124,13 @@ def write_report(rows):
          "screening, gridding and statistics are all the operational **Python** routines (no MATLAB). "
          "Statistics are over 500-3000 m AGL vs the reference channel; the MATLAB columns are the previous "
          "`R_*.mat` results for the same stations.*\n",
-         "> **Rayleigh** channels reproduce the MATLAB to the profile (N) and correlation (r). **Cloud** "
-         "channels use the Python operational coefficient (C = 1/C_L, homogenised, m⁻¹ units → multiplier "
-         "`1e-6/C`); their relative bias differs from the MATLAB cloud archive by the convention + the "
-         "calibration-value difference (window-median Kalman vs the MATLAB full-archive recompute).\n",
+         "> **Rayleigh** channels reproduce the MATLAB to the profile (N) and correlation (r); the relative-"
+         "bias offsets are calibration-value differences (window-median Kalman vs the MATLAB full-archive "
+         "recompute), not pipeline differences. **Cloud** channels apply the O'Connor coefficient as "
+         "`beta_true = (C · 1e6) · attbsc_0` — the 1e6 restores the physical 1/(m·sr) scale the cloud reader "
+         "integrates on (the L2 attbsc_0 is stored in Mm⁻¹sr⁻¹). The result is physically scaled and the "
+         "same sign/order as MATLAB (e.g. CL31 +60% vs +32%); the residual ~1.5-2× is the Python-vs-MATLAB "
+         "cloud-method value difference, with matching r.\n",
          "| station | channel | calib | Python relbias | Python r | Python N | MATLAB relbias | MATLAB r | MATLAB N |",
          "|---|---|---|---|---|---|---|---|---|"]
     for r in rows:

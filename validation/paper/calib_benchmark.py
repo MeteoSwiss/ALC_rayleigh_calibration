@@ -74,6 +74,12 @@ BENCHMARK = {
         _ch("0-250-1001-07151", "A", "CL31", "cloud", "CL31 (cloud)", 48.71, 2.21, 156.0),
         _ch("0-20000-0-07145", "A", "Mini-MPL", "rayleigh", "Mini-MPL (Rayleigh)", 48.71, 2.21, 156.0),
     ]),
+    # EARLINET CHM15k references (for earlinet.py): Leipzig (lei/ari), Cabauw (cbw), Magurele (ino).
+    "earlinet": dict(start="20250101", end="20260630", channels=[
+        _ch("0-20000-0-10471", "0", "CHM15k", "rayleigh", "Leipzig CHM (lei/ari)", 51.35, 12.43, 125.0),
+        _ch("0-20000-0-06348", "A", "CHM15k", "rayleigh", "Cabauw CHM (cbw)", 51.97, 4.93, 1.0),
+        _ch("0-20008-0-INO", "B", "CHM15k", "rayleigh", "Magurele CHM (ino)", 44.35, 26.03, 93.0),
+    ]),
 }
 
 
