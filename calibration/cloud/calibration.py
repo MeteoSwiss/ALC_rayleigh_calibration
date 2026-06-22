@@ -779,6 +779,25 @@ def compute_wv_transmission(data: CeiloData, config: CloudCalConfig) -> NDArray:
     time_cams, cams_z, _cams_T, nw_all = _cams_levels_all_times(
         cams_file, data.station_latitude, data.station_longitude)
 
+    # A monthly CAMS file holds ~248 (3-hourly) steps, but one daily ceilometer file spans
+    # ~1 day. The nearest-time interpolation at the end only ever selects the CAMS steps that
+    # bracket the data, so restrict to that window first (the per-CAMS-step WV integration is
+    # the dominant cost). Using the same float representation as the final interp keeps it
+    # exact regardless of the time units, and the +/-1 step pad preserves nearest-extrapolation.
+    if time_cams.size > 1:
+        cdn = time_cams.astype("float64")
+        edn = data.time_num.astype("float64")
+        t0, t1 = float(edn.min()), float(edn.max())
+        inside = np.where((cdn >= t0) & (cdn <= t1))[0]
+        if inside.size:
+            lo, hi = int(inside[0]), int(inside[-1])
+        else:  # data falls between two CAMS steps -> keep the single nearest step
+            lo = hi = int(np.argmin(np.abs(cdn - t0)))
+        lo = max(lo - 1, 0)
+        hi = min(hi + 1, time_cams.size - 1)
+        sl = slice(lo, hi + 1)
+        time_cams, cams_z, nw_all = time_cams[sl], cams_z[:, sl], nw_all[:, sl]
+
     n_cams = time_cams.size
     n_range = data.range.size
     range_col = data.range.astype("float64")
@@ -812,14 +831,19 @@ def compute_wv_transmission(data: CeiloData, config: CloudCalConfig) -> NDArray:
         wv[np.isnan(wv)] = 0.0
         wv_density_all[:, i] = wv
 
-    # Two-way transmission per CAMS step (vectorised core, identical to wv_t2eff.m)
-    trans2_cams = np.full((n_range, n_cams), np.nan)
-    for i in range(n_cams):
-        ext = abs_cs * (wv_density_all[:, i][None, :] / 1e4)  # (n_wl, n_range) [m^-1]
-        sum_ext = np.zeros_like(ext)
-        sum_ext[band, :] = _cumtrapz_axis1(ext[band, :], range_col)
-        trans = np.exp(-sum_ext)
-        trans2_cams[:, i] = (trans ** 2 * gauss[:, None]).sum(axis=0) / sum_gauss
+    # Two-way transmission for ALL CAMS steps at once (matrix form of wv_t2eff.m's per-step
+    # loop). Build the in-band extinction (n_band, n_range, n_cams), cumulative-trapezoid the
+    # optical depth along range, then Gaussian-average exp(-2*tau). Out-of-band wavelengths
+    # carry zero optical depth (transmission 1) and enter only via the Gaussian normalization,
+    # i.e. as the constant gauss[~band].sum() term -- exactly as the loop's sum over all wl.
+    ab = abs_cs[band, :]                                          # (n_band, n_range)
+    ext = ab[:, :, None] * (wv_density_all[None, :, :] / 1e4)     # (n_band, n_range, n_cams) [m^-1]
+    dx = np.diff(range_col)
+    incr = 0.5 * (ext[:, 1:, :] + ext[:, :-1, :]) * dx[None, :, None]
+    tau = np.concatenate([np.zeros((ext.shape[0], 1, n_cams)),
+                          np.cumsum(incr, axis=1)], axis=1)        # (n_band, n_range, n_cams)
+    weighted = np.exp(-2.0 * tau) * gauss[band][:, None, None]     # trans^2 * gauss, in band
+    trans2_cams = (weighted.sum(axis=0) + float(gauss[~band].sum())) / sum_gauss  # (n_range, n_cams)
 
     # Interpolate trans2 from CAMS time grid to ceilometer time grid (nearest).
     n_profiles = data.beta.shape[1]
