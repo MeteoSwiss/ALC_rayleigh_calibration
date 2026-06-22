@@ -824,6 +824,36 @@ def calibrate_rayleigh(
             message=f"Uncertainty exceeds value: {uncertainty:.2e} > {cl_median:.2e}",
         )
 
+    # ── QC: aerosol layer below the molecular window (scattering-ratio gate) ──
+    # In clean air every candidate molecular-window fit slope (a C_L proxy) is nearly equal across
+    # the 2-6 km search range (molecular two-way transmittance varies <1 %). When aerosol sits in or
+    # just below the chosen window, that window's slope is inflated relative to the cleanest
+    # (least-attenuated) window. We reject when the chosen window's slope exceeds a robust "cleanest"
+    # reference (10th percentile of the clean-window slopes) by more than the threshold. Validated on
+    # L1 Mar-May 2026: clean nights p95=1.4; aerosol cases (e.g. 0-20000-0-10838 2026-03-03) >2.8.
+    if getattr(options, "aerosol_qc_enabled", True) and fit_result.search_diagnostics is not None:
+        d = fit_result.search_diagnostics
+        slp = np.asarray(d.slopes, dtype=float)
+        r2g = np.asarray(d.r_squared, dtype=float)
+        clean = np.isfinite(slp) & (slp > 0) & (r2g >= 0.5)
+        if int(np.sum(clean)) >= 3 and np.isfinite(fit_result.center_range_m):
+            centers = np.asarray(d.range_bin_m, dtype=float)
+            halves = np.asarray(d.half_length_m, dtype=float)
+            ci = int(np.argmin(np.abs(centers - fit_result.center_range_m)))
+            hj = int(np.argmin(np.abs(halves - fit_result.half_length_m)))
+            chosen_slope = slp[ci, hj]
+            c_ref = float(np.nanpercentile(np.where(clean, slp, np.nan), 10))
+            scat = chosen_slope / c_ref if (np.isfinite(chosen_slope) and c_ref > 0) else np.nan
+            thr = float(getattr(options, "aerosol_scattering_threshold", 2.0))
+            if np.isfinite(scat) and scat > thr:
+                logger.warning(f"Aerosol below molecular window: scattering ratio {scat:.1f} > {thr}")
+                return CalibrationResult(
+                    lidar_constant=-1,
+                    flag=-9,
+                    uncertainty=0,
+                    message=f"Aerosol contamination below window: scattering ratio {scat:.1f}",
+                )
+
     # ── Plot: compact 4x4 Rayleigh diagnostics dashboard ──
     if options.plot_main:
         pdir = _plot_dir(options, info, date_str)

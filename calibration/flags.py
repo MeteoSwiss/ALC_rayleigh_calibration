@@ -14,7 +14,7 @@ the specific reason for a given row is carried in its free-text ``message``.
 Code classification
 -------------------
 GENERAL (either method can emit): 1, 0.5, 0, -1, -4, -5, -6, -99.
-RAYLEIGH-SPECIFIC molecular-fit diagnostics: -2, -3, -7, -8 (the cloud method never emits these).
+RAYLEIGH-SPECIFIC molecular-fit diagnostics: -2, -3, -7, -8, -9 (the cloud method never emits these).
 """
 from __future__ import annotations
 
@@ -35,6 +35,7 @@ FLAG_MEANINGS = {
     -6: "Uncertainty exceeds value",                 # both
     -7: "Negative fit slope",                        # Rayleigh-specific
     -8: "Fit issue: |b| > a",                        # Rayleigh-specific
+    -9: "Aerosol below molecular window",            # Rayleigh-specific
     -99: "Exception during calibration",             # both
 }
 

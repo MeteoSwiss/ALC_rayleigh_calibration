@@ -31,6 +31,7 @@ FLAG_MEANINGS = {
     -6: "Uncertainty exceeds value",
     -7: "Negative fit slope",
     -8: "Fit issue: |b| > a",
+    -9: "Aerosol below molecular window",
     -99: "Exception during calibration",
 }
 
@@ -50,6 +51,7 @@ FLAG_COLORS = {
     -6: "#d6604d",
     -7: "#d73027",
     -8: "#a50026",
+    -9: "#e07b39",
     -99: "#000000",
 }
 
@@ -204,6 +206,22 @@ FLAG_DOCS = [
      "summary": "Ill-conditioned molecular fit (|b| > a).",
      "detail": "A consistency check on the molecular-fit coefficients failed — the offset term dominates the slope term, flagging an ill-conditioned fit rather than a clean molecular signal.",
      "recognize": "Rayleigh-only molecular-fit diagnostic."},
+    {"value": -9, "methods": "Rayleigh",
+     "summary": "Aerosol layer below the molecular window (scattering-ratio gate).",
+     "detail": "A dedicated aerosol-contamination QC. Each candidate molecular window's fit slope is "
+               "a lidar-constant proxy; in clean air these are nearly equal across the 2–6 km search "
+               "range (molecular two-way transmittance varies < 1 %). When an aerosol layer sits in "
+               "or just below the chosen window, that window's slope is inflated relative to the "
+               "cleanest (least-attenuated) window. The night is rejected when the chosen window's "
+               "slope exceeds a robust cleanest reference (10th percentile of the clean-window "
+               "slopes) by more than the threshold (default 2.0). Validated on L1 Mar–May 2026: "
+               "clean nights cluster at ~1.1–1.4 (p95 = 1.4) with a clear gap to the aerosol tail "
+               "above ~2.8 (e.g. STORNAWAY-type residual free-tropospheric aerosol; 0-20000-0-10838 "
+               "on 2026-03-03 scores ~2.8). It catches contamination that the slope-vs-window "
+               "cross-check (−3) lets through.",
+     "recognize": "Message reads 'Aerosol contamination below window: scattering ratio X'. In the "
+                  "Rayleigh diagnostic the range-corrected-signal panel shows an enhanced layer "
+                  "below the chosen molecular window."},
     {"value": -99, "methods": "Both",
      "summary": "Exception during calibration.",
      "detail": "The calibration code raised an unexpected error for that day — a driver / IO / edge-case bug rather than a physical rejection. The Message column carries the exception type; these are worth investigating as code issues.",
