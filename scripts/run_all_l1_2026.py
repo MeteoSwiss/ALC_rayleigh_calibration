@@ -57,15 +57,21 @@ import csv
 import json
 import logging
 import math
+import subprocess
 import sys
 import warnings
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import numpy as np
 
 REPO = Path(__file__).resolve().parent.parent
+
+# Each stream runs in its OWN subprocess with a hard timeout, so one hang-prone cloud day
+# (a known issue -- see validation/_cloud_probe.py) cannot freeze the whole run. A normal
+# stream finishes in well under a minute; this only fires on a true hang. Override via env.
+STREAM_TIMEOUT = int(os.environ.get("STREAM_TIMEOUT", "900"))  # seconds
 sys.path.insert(0, str(REPO))
 
 from calibration import (  # noqa: E402
@@ -305,27 +311,56 @@ def main():
                     help="keep the N best-covered streams per type (0 = all)")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--workers", type=int, default=6)
+    ap.add_argument("--stream", default=None,
+                    help="internal: process ONE stream by '<wmo>_<ident>' key and exit")
     args = ap.parse_args()
 
     start = datetime.strptime(args.start, "%Y%m%d")
     end = datetime.strptime(args.end, "%Y%m%d")
-    types = [t.strip() for t in args.types.split(",")]
     census = json.loads(CENSUS.read_text(encoding="utf-8"))
-    streams = select(census, types, args.per_type, args.limit, start, end)
 
+    # --- single-stream worker mode: spawned as an isolated, killable subprocess ----------
+    if args.stream:
+        warnings.filterwarnings("ignore")
+        logging.getLogger().setLevel(logging.CRITICAL)
+        s = next((x for x in census if _key(x) == args.stream), None)
+        if s is None:
+            print(f"stream {args.stream} not in census", flush=True)
+            return
+        _process_stream((s, start, end))
+        return
+
+    types = [t.strip() for t in args.types.split(",")]
+    streams = select(census, types, args.per_type, args.limit, start, end)
     OUT.mkdir(parents=True, exist_ok=True)
     done = {p.parent.name for p in OUT.glob("*/*_cal.csv")}
     todo = [s for s in streams if _key(s) not in done]
     print(f"window {args.start}..{args.end} | {len(streams)} streams selected; "
-          f"{len(done)} done; {len(todo)} to do; {args.workers} workers", flush=True)
+          f"{len(done)} done; {len(todo)} to do; {args.workers} workers "
+          f"(per-stream timeout {STREAM_TIMEOUT}s)", flush=True)
 
-    with ProcessPoolExecutor(max_workers=args.workers) as ex:
-        futs = {ex.submit(_process_stream, (s, start, end)): s for s in todo}
+    def _run_stream(s):
+        """Run ONE stream in a separate process; kill it if it hangs past the timeout."""
+        key = _key(s)
+        cmd = [sys.executable, str(Path(__file__).resolve()), "--stream", key,
+               "--start", args.start, "--end", args.end]
+        try:
+            subprocess.run(cmd, timeout=STREAM_TIMEOUT, check=False,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except subprocess.TimeoutExpired:
+            return key, "TIMEOUT (killed)"
+        return key, ("ok" if (OUT / key / f"{key}_cal.csv").exists() else "no-output")
+
+    # The thread pool only SUPERVISES the per-stream subprocesses (the heavy numpy/netCDF
+    # work runs in the children). A hung child is killed at the timeout and the run goes on
+    # -- unlike a ProcessPoolExecutor worker, which hangs the whole pool indefinitely.
+    with ThreadPoolExecutor(max_workers=args.workers) as ex:
+        futs = {ex.submit(_run_stream, s): s for s in todo}
         for k, fut in enumerate(as_completed(futs), 1):
             s = futs[fut]
             try:
-                key, typ, n, n_ok = fut.result()
-                print(f"[{k}/{len(todo)}] {key} ({typ}): {n_ok}/{n} ok", flush=True)
+                key, status = fut.result()
+                print(f"[{k}/{len(todo)}] {key} ({s['type']}): {status}", flush=True)
             except Exception as exc:  # noqa: BLE001
                 print(f"[{k}/{len(todo)}] FAILED {_key(s)}: {type(exc).__name__}: {exc}", flush=True)
 
