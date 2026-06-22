@@ -37,9 +37,12 @@ REPO = Path(__file__).resolve().parents[2]
 OUT = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/figs_paper_validation/paper_python/calib")
 OUT.mkdir(parents=True, exist_ok=True)
 L2_MONTHLY = Path("A:/E-PROFILE_L2_monthly")
+L1_ROOT = Path("D:/E-PROFILE_L1_2026")     # native L1 archive (2015-2026), <wmo>/YYYY/MM/L1_<wmo>_<id><date>.nc
 CAMS = "D:/CAMS"
 WV_LUT = str(REPO / "calibration" / "data" / "abs_cross_wv_910nm.nc")
 KALMAN_PY = "C:/Users/hervo/OneDrive/Documents/Python/improve_alc_calib/run_kalman_from_matlab.py"
+RAYLEIGH_METHOD = "eprof_v2"                 # operational molecular-window method (C8 defaults)
+CLOUD_AVG_RANGE_M = 30.0                     # bin cloud input to the L2 grid (native L1 over-rejects finer)
 # Daily-L2 archives by year (for the per-day cloud calibration).
 L2_DAILY = {2026: Path("D:/E-PROFILE_L2_2026"), 2025: Path("D:/E-PROFILE_L2_2025")}
 L2_DAILY_FALLBACK = Path("D:/E-PROFILE_L2_2021-2025")
@@ -102,11 +105,13 @@ def _daterange(start, end):
         d += timedelta(days=1)
 
 
-def _daily_l2_file(ch, d):
-    """Locate the daily L2 file for a cloud channel on date d across the D: archives."""
+def _daily_file(ch, d, level="L2"):
+    """Locate the daily L1 or L2 file for a cloud channel on date d."""
     ds = d.strftime("%Y%m%d")
-    cands = [L2_DAILY.get(d.year), L2_DAILY_FALLBACK]
-    for root in cands:
+    if level == "L1":
+        f = L1_ROOT / ch["wmo"] / f"{d.year}" / f"{d.month:02d}" / f"L1_{ch['wmo']}_{ch['ident']}{ds}.nc"
+        return f if f.exists() else None
+    for root in (L2_DAILY.get(d.year), L2_DAILY_FALLBACK):
         if root is None:
             continue
         f = root / ch["wmo"] / f"{d.year}" / f"{d.month:02d}" / f"L2_{ch['wmo']}_{ch['ident']}{ds}.nc"
@@ -115,10 +120,12 @@ def _daily_l2_file(ch, d):
     return None
 
 
-def raw_rayleigh(ch, start, end):
-    """Per-night lidar constant (calibrate_rayleigh). From L2_monthly, or from native RAW files
-    (binned to the L2 grid) when ch['raw'] is set. Returns (dates, C, Cstd)."""
+def raw_rayleigh(ch, start, end, level="L2"):
+    """Per-night lidar constant (calibrate_rayleigh, eprof_v2). Source: native RAW files when
+    ch['raw'] is set, else L1 (D:/E-PROFILE_L1_2026, binned to the L2 grid) or L2_monthly.
+    Returns (dates, C, Cstd)."""
     o = CalibrationOptions.from_json(REPO / "options.json")
+    o.molecular_method = RAYLEIGH_METHOD
     if ch.get("raw"):
         rp = Path(ch["raw"])
         info = InstrumentInfo(site_name=rp.name, wmo_id=rp.name, identifier="",
@@ -127,7 +134,10 @@ def raw_rayleigh(ch, start, end):
     else:
         info = InstrumentInfo(site_name=ch["wmo"], wmo_id=ch["wmo"], identifier=ch["ident"],
                               instrument_type=IT[ch["itype"]], latitude=ch["lat"], longitude=ch["lon"], altitude=ch["alt"])
-        o.folder_root = L2_MONTHLY; o.data_level = DataLevel.L2_MONTHLY
+        if level == "L1":
+            o.folder_root = L1_ROOT; o.data_level = DataLevel.L1       # l1_bin_to_l2_grid -> 30 m x 300 s
+        else:
+            o.folder_root = L2_MONTHLY; o.data_level = DataLevel.L2_MONTHLY
     o.cams_folder = Path(CAMS); o.abs_cs_lookup_table = Path("")
     o.apply_wv_correction = (ch["itype"] in ("CL31", "CL51", "CL61"))
     o.folder_output = Path(tempfile.mkdtemp()); o.plot_main = o.plot_all = False
@@ -143,11 +153,11 @@ def raw_rayleigh(ch, start, end):
 
 
 def _cloud_one(f, ch):
-    """liquid_cloud_calibration on one L2 file; (cal_median, cal_std) or None."""
+    """liquid_cloud_calibration on one L1/L2 file (binned to the L2 grid); (cal_median, cal_std) or None."""
     try:
         res = liquid_cloud_calibration(CloudCalConfig(
             nc_file=str(f), instrument=ch["itype"], apply_wv_correction=True,
-            cams_folder=CAMS, abs_cs_lookup_table=WV_LUT,
+            cams_folder=CAMS, abs_cs_lookup_table=WV_LUT, average_range_m=CLOUD_AVG_RANGE_M,
             station_latitude=ch["lat"], station_longitude=ch["lon"], aerosol_lidar_ratio=50.0))
     except Exception:
         return None
@@ -208,25 +218,27 @@ def raw_cloud_from_raw(ch, raw_root, start, end):
     return dates, np.array(C), np.array(Cstd)
 
 
-def raw_cloud(ch, start, end):
-    """Per-day cloud coefficient from L2_daily (liquid_cloud_calibration). Returns (dates, C, Cstd).
+def raw_cloud(ch, start, end, level="L2"):
+    """Per-day cloud coefficient from L1 or L2 daily files (liquid_cloud_calibration). (dates, C, Cstd).
 
     Dispatches to the native-file path when ch['raw'] is set (e.g. Payerne CL61); else falls back
     to the monthly L2 file (one value per month) when a channel has NO daily archive.
+    NOTE: the L1 cloud coefficient is on the raw rcs_0 scale (V*m^2, factor 1), the L2 one on the
+    attenuated-backscatter scale (Mm^-1 sr^-1) - the two are reconciled as a lidar constant downstream.
     """
     if ch.get("raw"):
         return raw_cloud_from_raw(ch, ch["raw"], start, end)
     dates, C, Cstd = [], [], []
     for d in _daterange(start, end):
-        f = _daily_l2_file(ch, d)
+        f = _daily_file(ch, d, level)
         if f is None:
             continue
         r = _cloud_one(f, ch)
         if r is not None:
             dates.append(d); C.append(r[0]); Cstd.append(r[1])
-    if dates:
+    if dates or level == "L1":
         return dates, np.array(C), np.array(Cstd)
-    # monthly fallback: one cloud value per L2_monthly file, dated at mid-month
+    # monthly fallback (L2 only): one cloud value per L2_monthly file, dated at mid-month
     seen = set()
     for d in _daterange(start, end):
         ym = (d.year, d.month)
@@ -276,15 +288,18 @@ def kalman(dates, C, Cstd, normalise):
     return out
 
 
-def run_channel(ch, start, end):
-    k = key_of(ch); outp = OUT / f"{k}.csv"
+def run_channel(ch, start, end, level="L2"):
+    k = key_of(ch); outp = OUT / f"{k}_{level}.csv"
+    # native-raw channels (Payerne CL61) ignore the level (always the same raw source) -> compute once (L2 tag)
+    if ch.get("raw") and level == "L1":
+        print(f"  {k} [L1]: native-raw channel, see {k}_L2.csv"); return
     if outp.exists() and os.environ.get("FORCE_RECAL", "") != "1":
-        print(f"  {k}: exists, skip"); return
+        print(f"  {k} [{level}]: exists, skip"); return
     if ch["calib"] == "rayleigh":
-        dates, C, Cstd = raw_rayleigh(ch, start, end); normalise = True
+        dates, C, Cstd = raw_rayleigh(ch, start, end, level); normalise = True
     else:
-        dates, C, Cstd = raw_cloud(ch, start, end); normalise = False
-    print(f"  {k} ({ch['label']}): {len(C)} raw {'nights' if ch['calib']=='rayleigh' else 'days'}"
+        dates, C, Cstd = raw_cloud(ch, start, end, level); normalise = False
+    print(f"  {k} [{level}] ({ch['label']}): {len(C)} raw {'nights' if ch['calib']=='rayleigh' else 'days'}"
           f"{' median C=%.3e' % np.median(C) if len(C) else ''}", flush=True)
     res = kalman(dates, C, Cstd, normalise)
     if res is None:
@@ -298,14 +313,17 @@ def run_channel(ch, start, end):
 
 def main():
     warnings.filterwarnings("ignore")
-    stations = sys.argv[1:] or list(BENCHMARK)
-    for st in stations:
-        if st not in BENCHMARK:
-            print(f"unknown station {st}"); continue
-        cfg = BENCHMARK[st]
-        print(f"== {st} ({cfg['start']}-{cfg['end']}) ==", flush=True)
-        for ch in cfg["channels"]:
-            run_channel(ch, cfg["start"], cfg["end"])
+    args = sys.argv[1:]
+    levels = [a for a in args if a in ("L1", "L2")] or ["L2", "L1"]
+    stations = [a for a in args if a not in ("L1", "L2")] or list(BENCHMARK)
+    for level in levels:
+        for st in stations:
+            if st not in BENCHMARK:
+                print(f"unknown station {st}"); continue
+            cfg = BENCHMARK[st]
+            print(f"== {st} [{level}] ({cfg['start']}-{cfg['end']}) ==", flush=True)
+            for ch in cfg["channels"]:
+                run_channel(ch, cfg["start"], cfg["end"], level)
     print("CALIB_BENCHMARK_DONE", flush=True)
 
 

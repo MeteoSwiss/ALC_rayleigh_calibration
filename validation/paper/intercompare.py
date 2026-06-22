@@ -137,9 +137,15 @@ def _str(nc, name):
 
 
 # --------------------------------------------------------------------------- calibration
-def load_calib_series(key):
-    f = CALIB / f"{key}.csv"
-    if not f.exists():
+def load_calib_series(key, level=None):
+    """Read the Kalman calibration series for a channel. level in {'L1','L2',None}: prefer
+    <key>_<level>.csv, fall back to <key>.csv (the un-suffixed/legacy series)."""
+    f = None
+    for cand in ([CALIB / f"{key}_{level}.csv"] if level else []) + [CALIB / f"{key}.csv"]:
+        if cand.exists():
+            f = cand
+            break
+    if f is None:
         return None
     rows = list(csv.DictReader(open(f, encoding="utf-8")))
     dd = np.array([np.datetime64(r["time"][:10]) for r in rows])
@@ -312,10 +318,10 @@ def process(cfg):
         if l2 is None:
             chans.append(None); continue
         beta = l2["beta"].copy()
-        # calibration
-        cal = load_calib_series(ch["key"])
+        # calibration (from the L1- or L2-derived Kalman series, per cfg['calibLevel'])
+        cal = load_calib_series(ch["key"], cfg.get("calibLevel"))
         if ch["calib"] != "none" and cal is None:
-            print(f"    [skip] {ch['label']}: no calibration series ({ch['key']}.csv)")
+            print(f"    [skip] {ch['label']}: no calibration series ({ch['key']} / {cfg.get('calibLevel')})")
             chans.append(None); continue
         if cal is not None and ch["calib"] != "none":
             ck = interp_calib(cal[0], cal[1], l2["time"])
