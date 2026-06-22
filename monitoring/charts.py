@@ -14,8 +14,9 @@ from monitoring import config, kalman
 _LAYOUT = dict(template="plotly_white", margin=dict(l=64, r=20, t=44, b=40),
                font=dict(size=12), height=340)
 
-# What the "calibration value" is, per method (for axis/hover labels).
-_VALUE_NAME = {"rayleigh": "C_L", "cloud": "coefficient C"}
+# Both methods report the lidar constant C_L (Wiegner); the cloud value is the O'Connor
+# C_L = applied_constant / C, on the same scale as Rayleigh -- the operationally useful number.
+_VALUE_NAME = {"rayleigh": "C_L", "cloud": "C_L"}
 
 
 def fig_to_div(fig: go.Figure, div_id: str) -> str:
@@ -43,13 +44,25 @@ def network_map(keystats: pd.DataFrame) -> go.Figure:
                           title="Network — no calibrations in range")
         return fig
     n_dates = np.asarray(d["n_dates"].fillna(1), dtype=float)
+    sizes = np.clip(np.sqrt(n_dates) / 2.0, 5, 18)
+    country = (d["country"].fillna("") if "country" in d.columns
+               else pd.Series([""] * len(d), index=d.index)).astype(str)
+    name = (d["name"].fillna("") if "name" in d.columns
+            else pd.Series([""] * len(d), index=d.index)).astype(str)
+    # customdata = [country, type, base_size, key, name] per point: filter.js restyles
+    # marker.size from [2] (0 = hidden) AND navigates to stations/<key>.html ([3]) on click.
+    # A typed list (not np.column_stack, which would stringify the float size).
+    customdata = [[c, t, float(sz), k, nm] for c, t, sz, k, nm in
+                  zip(country.values, d["itype"].astype(str).values, sizes,
+                      d["key"].astype(str).values, name.values)]
     fig = go.Figure(go.Scattergeo(
         lat=d["lat"], lon=d["lon"],
-        text=[f"{k}<br>{t} · {m} · {sr:.0f}% success · {nd} cal"
-              for k, t, m, sr, nd in zip(d["key"], d["itype"], d["methods"],
-                                         d["success_rate"].fillna(0), d["n_dates"].fillna(0))],
-        hoverinfo="text",
-        marker=dict(size=np.clip(np.sqrt(n_dates) / 2.0, 5, 18),
+        # Hover: station name (bold) + WIGOS id (key) + details. (click opens the station page)
+        text=[f"<b>{nm or k}</b><br>{k}<br>{t} · {ct} · {m}<br>{sr:.0f}% success · {nd} cal"
+              for k, nm, t, ct, m, sr, nd in zip(d["key"], name, d["itype"], country, d["methods"],
+                                                 d["success_rate"].fillna(0), d["n_dates"].fillna(0))],
+        hoverinfo="text", customdata=customdata,
+        marker=dict(size=sizes,
                     color=np.asarray(d["success_rate"].fillna(0), dtype=float),
                     colorscale="RdYlGn", cmin=0, cmax=80,
                     colorbar=dict(title="success %"), line=dict(width=0.4, color="#555")),
@@ -83,21 +96,21 @@ def success_by_type_method(by_tm: pd.DataFrame) -> go.Figure:
 
 
 def flag_distribution_bar(flags: pd.DataFrame) -> go.Figure:
-    """Horizontal bar of calibration counts per flag meaning (good at top)."""
+    """Horizontal bar of calibration counts per (method, outcome) — good at top."""
     d = flags.iloc[::-1]
+    height = max(380, 22 * len(d) + 80)
     fig = go.Figure(go.Bar(x=d["count"], y=d["label"], orientation="h",
                            marker_color=d["color"], text=d["count"], textposition="auto"))
-    fig.update_layout(**{**_LAYOUT, "height": 380, "margin": dict(l=230, r=20, t=44, b=40)},
-                      title="Outcome distribution (all series)", xaxis_title="calibrations")
+    fig.update_layout(**{**_LAYOUT, "height": height, "margin": dict(l=250, r=20, t=44, b=40)},
+                      title="Outcome distribution by method", xaxis_title="calibrations")
     return fig
 
 
 def value_by_type_method_box(series: pd.DataFrame) -> go.Figure:
-    """Box of per-series median value, grouped by type, colored by method (log axis).
+    """Box of per-series median lidar constant C_L, grouped by type, colored by method (log).
 
-    Magnitudes differ hugely (Rayleigh C_L ~1e11, cloud coefficient ~1 for CL61 / ~1e-8 for
-    CL31/CL51), so a log axis is essential and the value is method-specific, not comparable
-    across methods — this chart is for spotting per-type outliers, not cross-method ratios.
+    C_L follows the per-instrument scale (CHM15k ~3e11, CL31/CL51 ~1e8, CL61 ~1, Mini-MPL ~5e5),
+    so a log axis is essential; for CL61 the Rayleigh and cloud boxes should overlap (same C_L).
     """
     fig = go.Figure()
     for method in config.METHOD_ORDER:
@@ -109,8 +122,8 @@ def value_by_type_method_box(series: pd.DataFrame) -> go.Figure:
                                      marker_color=config.METHOD_COLORS.get(method, "#888"),
                                      boxpoints="all", jitter=0.4, pointpos=0,
                                      offsetgroup=method, showlegend=False))
-    fig.update_layout(**_LAYOUT, title="Per-series median value by type (log; method-colored)",
-                      yaxis_title="calibration value", yaxis_type="log", boxmode="group")
+    fig.update_layout(**_LAYOUT, title="Per-series median C_L by type (log; method-colored)",
+                      yaxis_title="C_L", yaxis_type="log", boxmode="group")
     fig.update_yaxes(exponentformat="e")
     return fig
 
@@ -171,7 +184,7 @@ def monthly_flag_bars(g_m: pd.DataFrame, method: str) -> go.Figure:
     fig = go.Figure()
     for f in sorted(d["flag"].dropna().unique(), key=lambda f: -float(f)):
         counts = d[d["flag"] == f].groupby("month").size()
-        fig.add_trace(go.Bar(x=counts.index, y=counts.values, name=config.flag_label(f),
+        fig.add_trace(go.Bar(x=counts.index, y=counts.values, name=config.flag_label(f, method),
                              marker_color=config.flag_color(f)))
     fig.update_layout(**{**_LAYOUT, "height": 320}, barmode="stack",
                       title=f"{config.method_label(method)} — monthly outcomes",
@@ -201,27 +214,25 @@ def aux_timeseries(g_m: pd.DataFrame, method: str) -> go.Figure:
     return fig
 
 
-def normalized_overlay(by_method: dict) -> go.Figure:
-    """Overlay value/median for each method (CL61) to compare temporal trends across methods.
+def cl_overlay(by_method: dict) -> go.Figure:
+    """Overlay the lidar constant C_L of each method (CL61) on one axis -- a direct cross-check.
 
-    Absolute magnitudes differ by method, so each series is divided by its own median; the
-    cross-check is whether the two methods DRIFT together, not whether their ratio is 1.
+    Both methods estimate the SAME C_L (Wiegner), so the Rayleigh and cloud points should
+    agree; no normalization, the absolute C_L is the useful comparison.
     """
     fig = go.Figure()
     for method, g_m in by_method.items():
         ok = g_m[g_m["success"] == 1].sort_values("datetime")
-        if len(ok) < 3:
+        if not len(ok):
             continue
-        med = float(np.nanmedian(ok["cal_value"]))
-        if not np.isfinite(med) or med == 0:
-            continue
-        fig.add_trace(go.Scatter(x=ok["datetime"], y=ok["cal_value"] / med, mode="markers",
+        fig.add_trace(go.Scatter(x=ok["datetime"], y=ok["cal_value"], mode="markers",
                                  name=config.method_label(method),
                                  marker=dict(size=5, color=config.METHOD_COLORS.get(method, "#888"),
-                                             opacity=0.75)))
-    fig.add_hline(y=1.0, line=dict(color="#999", width=1, dash="dot"))
-    fig.update_layout(**_LAYOUT, title="Rayleigh vs cloud — normalized to each method's median",
-                      yaxis_title="value / median", legend=dict(orientation="h", y=1.14))
+                                             opacity=0.8),
+                                 hovertemplate="%{x|%Y-%m-%d}<br>C_L=%{y:.3e}<extra></extra>"))
+    fig.update_layout(**_LAYOUT, title="Rayleigh vs cloud — lidar constant C_L",
+                      yaxis_title="C_L", legend=dict(orientation="h", y=1.14))
+    fig.update_yaxes(exponentformat="e")
     return fig
 
 

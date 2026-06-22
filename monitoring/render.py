@@ -43,7 +43,7 @@ def _write_assets(out_dir: Path) -> str | None:
     assets = out_dir / "assets"
     assets.mkdir(parents=True, exist_ok=True)
     (assets / "plotly.min.js").write_text(get_plotlyjs(), encoding="utf-8")
-    for name in ("style.css", "table-sort.js", "paginate.js"):
+    for name in ("style.css", "table-sort.js", "paginate.js", "filter.js"):
         src = _STATIC / name
         if src.exists():
             shutil.copyfile(src, assets / name)
@@ -58,19 +58,23 @@ def _write_assets(out_dir: Path) -> str | None:
 
 
 def _keystats(series: pd.DataFrame, st: pd.DataFrame) -> pd.DataFrame:
-    """Per-key rollup (across methods) for the network map."""
+    """Per-key rollup (across methods) for the network map. Success rate excludes no-data /
+    unsuitable-conditions days (uses n_suitable), matching the per-series definition."""
     agg = (series.groupby("key")
            .agg(n_dates=("n_dates", "sum"), n_success=("n_success", "sum"),
+                n_suitable=("n_suitable", "sum"),
                 methods=("method", lambda s: " + ".join(config.method_label(m) for m in sorted(set(s)))))
            .reset_index())
-    agg["success_rate"] = 100.0 * agg["n_success"] / agg["n_dates"].replace(0, np.nan)
-    return agg.merge(st[["key", "itype", "lat", "lon"]], on="key", how="left")
+    agg["success_rate"] = 100.0 * agg["n_success"] / agg["n_suitable"].replace(0, np.nan)
+    cols = [c for c in ("key", "itype", "lat", "lon", "country", "name") if c in st.columns]
+    return agg.merge(st[cols], on="key", how="left")
 
 
-def _series_table_rows(cal: pd.DataFrame, series: pd.DataFrame) -> list[dict]:
-    """One row per (station, method) with a value sparkline + method badge."""
+def _series_table_rows(cal: pd.DataFrame, series: pd.DataFrame, st: pd.DataFrame) -> list[dict]:
+    """One row per (station, method) with a value sparkline + method badge + country (for filtering)."""
     last_by = {(k, m): g[g["success"] == 1].sort_values("datetime")["cal_value"].tail(30).tolist()
                for (k, m), g in cal.groupby(["key", "method"], sort=False)}
+    country_by = dict(zip(st["key"], st["country"])) if "country" in st.columns else {}
     rows = []
     for _, s in series.iterrows():
         method = s["method"]
@@ -78,6 +82,7 @@ def _series_table_rows(cal: pd.DataFrame, series: pd.DataFrame) -> list[dict]:
                                      color=config.METHOD_COLORS.get(method, "#1f77b4"))
         rows.append(dict(
             key=s["key"], itype=s.get("itype"), method=method, method_label=config.method_label(method),
+            country=str(country_by.get(s["key"], "") or ""),
             success_rate=s.get("success_rate"), n_dates=s.get("n_dates"), n_success=s.get("n_success"),
             median_cl=s.get("median_cl"), median_rel_unc=s.get("median_rel_unc"),
             last_date=s.get("last_date"), last_flag=s.get("last_flag"), spark=spark,
@@ -121,9 +126,15 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None) -> 
         "flag_dist": charts.fig_to_div(charts.flag_distribution_bar(flags), "fig-flags"),
         "cl_type": charts.fig_to_div(charts.value_by_type_method_box(series), "fig-cltype"),
     }
+    countries = sorted({str(c) for c in st.get("country", pd.Series(dtype=str)).dropna()
+                        if str(c).strip()})
+    types = [t for t in config.TYPE_ORDER if t in set(st["itype"])] + \
+            sorted(set(st["itype"]) - set(config.TYPE_ORDER) - {"Unknown"}) + \
+            (["Unknown"] if "Unknown" in set(st["itype"]) else [])
     summary_html = env.get_template("summary.html").render(
         base="", logo=logo, summary=summary, figs=summary_figs,
-        watch=watch.to_dict("records"), rows=_series_table_rows(cal, series),
+        watch=watch.to_dict("records"), rows=_series_table_rows(cal, series, st),
+        countries=countries, types=types,
     )
     (out_dir / "index.html").write_text(summary_html, encoding="utf-8")
 
@@ -140,7 +151,7 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None) -> 
         overlay = None
         if len(methods) >= 2:
             by_method = {m: cal[(cal["key"] == key) & (cal["method"] == m)] for m in methods}
-            overlay = charts.fig_to_div(charts.normalized_overlay(by_method), "fig-overlay")
+            overlay = charts.fig_to_div(charts.cl_overlay(by_method), "fig-overlay")
         html = station_tmpl.render(base="../", logo=logo, key=key, meta=meta,
                                    blocks=blocks, overlay=overlay)
         (out_dir / "stations" / f"{key}.html").write_text(html, encoding="utf-8")

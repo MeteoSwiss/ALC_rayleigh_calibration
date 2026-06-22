@@ -36,13 +36,13 @@
   </div>
   <h3 class="muted">Recent {{ b.label }} calibrations (last {{ b.recent | length }})</h3>
   <table class="stationtable">
-    <thead><tr><th>Date</th><th>Flag</th><th>Value</th><th>Uncertainty</th><th>Extra</th><th>Message</th></tr></thead>
+    <thead><tr><th>Date</th><th>Flag</th><th>C_L</th><th>Uncertainty</th><th>Extra</th><th>Message</th></tr></thead>
     <tbody>
     {% for r in b.recent %}
       <tr>
         <td>{{ r.date }}</td>
         <td><span class="dot" style="background:{{ flag_color(r.flag) }}"></span>
-            {{ r.flag }} <span class="muted">{{ flag_label(r.flag) }}</span></td>
+            {{ r.flag }} <span class="muted">{{ flag_label(r.flag, b.method) }}</span></td>
         <td>{{ r.cal_value | fmt('{:.3e}') if r.success else "—" }}</td>
         <td>{{ r.uncertainty | fmt('{:.2e}') if r.success else "—" }}</td>
         <td>{% if b.method == 'cloud' %}{{ r.n_profiles | fmt('{:.0f}') }} prof{% elif r.bottom_height == r.bottom_height %}{{ r.bottom_height | fmt('{:.0f}') }}–{{ r.top_height | fmt('{:.0f}') }} m{% else %}—{% endif %}</td>

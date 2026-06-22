@@ -83,8 +83,16 @@ MAP_LAT_RANGE = (33.0, 72.0)
 MAP_LON_RANGE = (-25.0, 45.0)
 
 
-def flag_label(flag) -> str:
-    """Human-readable label for a flag value, tolerant of float/NaN/unknown."""
+# Method-specific wording for flags whose generic meaning is ambiguous, so the dashboard
+# distinguishes cloud "No data" / "No liquid cloud" from Rayleigh "Not a clear night".
+METHOD_FLAG_OVERRIDES = {
+    "cloud":    {0: "No data", -1: "No liquid cloud"},
+    "rayleigh": {-1: "Not a clear night"},
+}
+
+
+def flag_label(flag, method=None) -> str:
+    """Human-readable label for a flag, optionally method-aware (cloud vs Rayleigh wording)."""
     try:
         f = float(flag)
     except (TypeError, ValueError):
@@ -93,6 +101,9 @@ def flag_label(flag) -> str:
         return "No calibration"
     # 0.5 is the only non-integer flag; everything else keys as an int.
     key = f if f == 0.5 else int(f)
+    ov = METHOD_FLAG_OVERRIDES.get(str(method), {})
+    if key in ov:
+        return ov[key]
     return FLAG_MEANINGS.get(key, f"Unknown ({flag})")
 
 

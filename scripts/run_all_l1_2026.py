@@ -79,7 +79,9 @@ from calibration import (  # noqa: E402
     InstrumentInfo, DataLevel,
 )
 from calibration.config import InstrumentType  # noqa: E402
-from calibration.cloud import liquid_cloud_calibration, CloudCalConfig  # noqa: E402
+from calibration.cloud import CloudCalConfig  # noqa: E402
+from calibration.cloud.calibration import (  # noqa: E402
+    read_ceilometer_data, liquid_cloud_calibration_from_data, set_defaults)
 from calibration.flags import cloud_flag, flag_label  # noqa: E402
 from calibration.io.output import write_calibration_result  # noqa: E402
 from monitoring.kalman import kalman_best_estimate  # noqa: E402  (self-contained leaf)
@@ -193,27 +195,43 @@ def _do_cloud(s, start, end):
             continue
         ds = d.strftime("%Y%m%d")
         try:
-            cfg = CloudCalConfig(
+            cfg = set_defaults(CloudCalConfig(
                 nc_file=str(fp), instrument=s["type"], apply_wv_correction=True,
                 apply_transmission_correction=True, aerosol_lidar_ratio=50.0,
                 cams_folder=str(CAMS), abs_cs_lookup_table=str(WV_LUT),
                 station_latitude=s["lat"], station_longitude=s["lon"],
                 average_time_s=300.0, average_range_m=10.0,
-            )
-            res = liquid_cloud_calibration(cfg)
+            ))
+            # Read FIRST so we can tell NO DATA (file present but no usable signal -> flag 0)
+            # apart from NO CLOUD (data fine, but clear sky / no liquid cloud -> flag -1).
+            data, status = read_ceilometer_data(cfg.nc_file, cfg)
+            beta = getattr(data, "beta", None) if data is not None else None
+            if status != 0 or beta is None or not np.any(np.isfinite(np.asarray(beta, dtype=float))):
+                rows.append(dict(date=ds, method="cloud", flag=0, cal_value=-1, uncertainty=0,
+                                 n_profiles=0, bottom_height=None, top_height=None,
+                                 message="No data (no usable signal)"))
+                continue
+            res = liquid_cloud_calibration_from_data(data, cfg)
             n = int(getattr(res, "n_profiles", 0))
             coef = float(res.cal_median)
             std = float(res.cal_std)
-            flag = cloud_flag(n, coef, std)
-            ok = _is_success(flag)
+            flag = cloud_flag(n, coef, std)  # n==0 with data present -> -1 (no liquid cloud)
+            # Headline value is the lidar constant C_L = applied_constant / C (Wiegner) -- the
+            # operationally useful quantity, on the SAME scale as Rayleigh -- NOT the O'Connor
+            # coefficient C. C_L's relative uncertainty equals the coefficient's (C_L = const / C).
+            cl = float(res.lidar_constant)
+            ok = _is_success(flag) and math.isfinite(cl) and cl > 0
+            cl_unc = (cl * std / coef) if (ok and math.isfinite(coef) and coef != 0) else 0.0
+            msg = (f"OK ({n} profiles)" if ok
+                   else ("No liquid cloud in view" if flag == -1
+                         else f"{flag_label(flag)} ({n} profiles)"))
             rows.append(dict(date=ds, method="cloud", flag=flag,
-                             cal_value=(coef if ok else -1),
-                             uncertainty=(std if ok else 0), n_profiles=n,
-                             bottom_height=None, top_height=None,
-                             message=(f"OK ({n} profiles)" if ok else f"{flag_label(flag)} ({n} profiles)")))
+                             cal_value=(cl if ok else -1),
+                             uncertainty=(cl_unc if ok else 0), n_profiles=n,
+                             bottom_height=None, top_height=None, message=msg))
             if ok:
                 # Same standard NetCDF as Rayleigh, tagged method=1 (cloud, per-day window).
-                rr = CalibrationResult(lidar_constant=coef, flag=flag, uncertainty=std,
+                rr = CalibrationResult(lidar_constant=cl, flag=flag, uncertainty=cl_unc,
                                        calibration_bottom_height=None, calibration_top_height=None,
                                        message="liquid-cloud (O'Connor) calibration")
                 write_calibration_result(

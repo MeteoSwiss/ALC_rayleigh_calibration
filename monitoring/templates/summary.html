@@ -1,6 +1,16 @@
 {% extends "base.html" %}
 {% block title %}Calibration monitor — summary{% endblock %}
-{% block headerextra %}<span class="asof">{{ summary.date_min or "—" }} → {{ summary.as_of or "—" }}</span>{% endblock %}
+{% block headerextra %}
+  <select id="f-country" class="navfilter" title="Filter by country">
+    <option value="">All countries</option>
+    {% for c in countries %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+  </select>
+  <select id="f-type" class="navfilter" title="Filter by instrument type">
+    <option value="">All types</option>
+    {% for t in types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+  </select>
+  <span class="asof">{{ summary.date_min or "—" }} → {{ summary.as_of or "—" }}</span>
+{% endblock %}
 
 {% block content %}
 <h1>Network summary</h1>
@@ -46,7 +56,8 @@
 </section>
 
 <section>
-  <h2>Series <span class="muted">(one row per station × method — click a header to sort)</span></h2>
+  <h2>Series <span class="muted">(one row per station × method — click a header to sort)</span>
+    <span id="filter-count" class="muted"></span></h2>
   <table class="sortable stationtable" id="stations">
     <thead>
       <tr>
@@ -55,7 +66,7 @@
         <th data-type="str">Method</th>
         <th data-type="num">Success %</th>
         <th data-type="num">Cal'ns</th>
-        <th data-type="num">Median value</th>
+        <th data-type="num">Median C_L</th>
         <th data-type="num">Rel. unc %</th>
         <th data-type="str">Last date</th>
         <th data-type="num">Last flag</th>
@@ -64,7 +75,7 @@
     </thead>
     <tbody>
     {% for r in rows %}
-      <tr>
+      <tr data-country="{{ r.country }}" data-type="{{ r.itype }}">
         <td><a href="stations/{{ r.key }}.html">{{ r.key }}</a></td>
         <td>{{ r.itype }}</td>
         <td><span class="mtag mtag-{{ r.method }}">{{ r.method_label }}</span></td>
@@ -75,7 +86,7 @@
         <td>{{ r.last_date }}</td>
         {% set lf = r.last_flag if (r.last_flag is not none and r.last_flag == r.last_flag) else none %}
         <td data-val="{{ lf if lf is not none else -99 }}">
-          <span class="dot" style="background:{{ flag_color(r.last_flag) }}" title="{{ flag_label(r.last_flag) }}"></span>
+          <span class="dot" style="background:{{ flag_color(r.last_flag) }}" title="{{ flag_label(r.last_flag, r.method) }}"></span>
           {{ lf if lf is not none else "—" }}
         </td>
         <td>{{ r.spark | safe }}</td>

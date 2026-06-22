@@ -128,10 +128,14 @@ def _series_aggregates(cal: pd.DataFrame) -> pd.DataFrame:
         g = g.sort_values("datetime")
         ok = g[g["success"] == 1]
         last = g.iloc[-1]
+        # Success rate counts only ATTEMPTABLE days: exclude no-data (flag 0) and unsuitable
+        # conditions (flag -1 = cloudy night for Rayleigh / clear sky for cloud). So it measures
+        # "when calibration was possible, how often it succeeded", not raw weather-limited yield.
+        n_suitable = int((~g["flag"].isin([0, -1])).sum())
         records.append(dict(
             key=key, method=method,
-            n_dates=int(len(g)), n_success=int(len(ok)),
-            success_rate=float(100.0 * len(ok) / len(g)) if len(g) else float("nan"),
+            n_dates=int(len(g)), n_success=int(len(ok)), n_suitable=n_suitable,
+            success_rate=float(100.0 * len(ok) / n_suitable) if n_suitable else float("nan"),
             median_cl=float(ok["cal_value"].median()) if len(ok) else float("nan"),
             median_rel_unc=float(ok["rel_uncertainty"].median()) if len(ok) else float("nan"),
             first_date=str(g.iloc[0]["date"]), last_date=str(last["date"]),
@@ -140,7 +144,7 @@ def _series_aggregates(cal: pd.DataFrame) -> pd.DataFrame:
             last_cl=float(ok.iloc[-1]["cal_value"]) if len(ok) else float("nan"),
         ))
     return pd.DataFrame(records, columns=[
-        "key", "method", "n_dates", "n_success", "success_rate", "median_cl",
+        "key", "method", "n_dates", "n_success", "n_suitable", "success_rate", "median_cl",
         "median_rel_unc", "first_date", "last_date", "last_flag", "last_success_date", "last_cl"])
 
 

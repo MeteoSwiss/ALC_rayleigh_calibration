@@ -35,14 +35,17 @@ def network_summary(cal: pd.DataFrame, series: pd.DataFrame, st: pd.DataFrame) -
     """Headline KPIs + per-(type, method) breakdown for the summary page."""
     n_ok = int(cal["success"].sum())
     n_total = int(len(cal))
+    # Suitable = attemptable days (exclude no-data flag 0 and unsuitable-conditions flag -1).
+    n_suit = int((~cal["flag"].isin([0, -1])).sum())
     as_of = str(cal["date"].max()) if n_total else None
 
     by_tm = (
         series.groupby(["itype", "method"])
-        .agg(n_series=("key", "count"), n_dates=("n_dates", "sum"), n_success=("n_success", "sum"))
+        .agg(n_series=("key", "count"), n_dates=("n_dates", "sum"),
+             n_success=("n_success", "sum"), n_suitable=("n_suitable", "sum"))
         .reset_index()
     )
-    by_tm["success_rate"] = 100.0 * by_tm["n_success"] / by_tm["n_dates"].replace(0, np.nan)
+    by_tm["success_rate"] = 100.0 * by_tm["n_success"] / by_tm["n_suitable"].replace(0, np.nan)
     by_tm = by_tm.sort_values(["itype", "method"])
 
     return dict(
@@ -51,7 +54,7 @@ def network_summary(cal: pd.DataFrame, series: pd.DataFrame, st: pd.DataFrame) -
         n_series=int(len(series)),
         n_calibrations=n_total,
         n_success=n_ok,
-        success_rate=(100.0 * n_ok / n_total) if n_total else float("nan"),
+        success_rate=(100.0 * n_ok / n_suit) if n_suit else float("nan"),
         date_min=str(cal["date"].min()) if n_total else None,
         date_max=as_of,
         by_type_method=by_tm,
@@ -59,13 +62,15 @@ def network_summary(cal: pd.DataFrame, series: pd.DataFrame, st: pd.DataFrame) -
 
 
 def flag_distribution(cal: pd.DataFrame) -> pd.DataFrame:
-    """Counts per flag value across all series, labelled and ordered best-to-worst."""
-    counts = cal["flag"].value_counts(dropna=False).reset_index()
-    counts.columns = ["flag", "count"]
-    counts["label"] = counts["flag"].map(config.flag_label)
+    """Counts per (method, flag), labelled method-aware (so cloud 'No liquid cloud' / 'No data'
+    are distinct from Rayleigh 'Not a clear night'), ordered best-to-worst."""
+    counts = (cal.groupby(["method", "flag"], dropna=False).size()
+              .reset_index(name="count"))
+    counts["label"] = [f"{config.method_label(m)} · {config.flag_label(f, m)}"
+                       for m, f in zip(counts["method"], counts["flag"])]
     counts["color"] = counts["flag"].map(config.flag_color)
     counts["order"] = counts["flag"].map(lambda f: -float(f) if pd.notna(f) else 999)
-    return counts.sort_values("order").drop(columns="order").reset_index(drop=True)
+    return counts.sort_values(["order", "method"]).drop(columns="order").reset_index(drop=True)
 
 
 def _robust_sigma(x: np.ndarray) -> float:

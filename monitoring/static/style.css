@@ -17,6 +17,8 @@ body {
 .logo img, .logo svg { display: block; }
 .topbar .spacer { flex: 1; }
 .asof, .back { color: #d6e6f2; text-decoration: none; font-size: 13px; }
+.navfilter { font: inherit; font-size: 12px; padding: 3px 7px; margin-left: 6px; max-width: 200px;
+  background: #fff; color: var(--ink); border: 1px solid #2a5a82; border-radius: 6px; cursor: pointer; }
 .back:hover { text-decoration: underline; }
 .container { max-width: 1280px; margin: 0 auto; padding: 18px; }
 h1 { font-size: 22px; margin: 8px 0 4px; }
