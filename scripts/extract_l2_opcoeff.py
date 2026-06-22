@@ -71,7 +71,7 @@ def main():
             continue
         if not args.all_keys and wig_dir.name not in wigos_wanted:
             continue
-        for fp in wig_dir.glob("2026/*/L2_*.nc"):
+        for fp in wig_dir.glob("20*/*/L2_*.nc"):  # any year subdir (2025, 2026, ...)
             m = _FNAME.search(fp.name)
             if m and args.start <= m.group(2) <= args.end:
                 files.append(str(fp))
