@@ -253,9 +253,10 @@ def _do_cloud(s, start, end):
                     wavelength_nm=info.instrument_type.wavelength_nm,
                     housekeeping=_HK_NAN, method=1,
                 )
-            # Diagnostic image for EVERY day that has data (success or rejected) -- the station page
-            # lets you browse all of them (success green, rest grey).
-            if PLOT_ENABLED:
+            # Diagnostic image for successes AND informative rejections (a cloud was present but a
+            # filter rejected it: flags -20..-26). Genuine clear sky (-1) / no data (0) get none --
+            # there is nothing to diagnose, and over a multi-year run that would be a huge image flood.
+            if PLOT_ENABLED and (ok or flag <= -20):
                 pdir = OUT / key / "plots" / info.wmo_id / ds[:4]
                 pdir.mkdir(parents=True, exist_ok=True)
                 try:
