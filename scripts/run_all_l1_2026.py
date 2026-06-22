@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-"""Unified L1 calibration runner — Rayleigh AND liquid-cloud, one stream at a time.
+"""Unified L1 calibration runner — Rayleigh AND liquid-cloud, one instrument stream at a time.
+
+Terminology
+-----------
+- **stream** (the unit this runner loops over) = one physical INSTRUMENT, identified by its
+  (WMO, identifier) pair; a single WMO site can host several (A/B/C...). It is independent of
+  technique: a CL61 stream runs BOTH calibrations, a CL31 stream runs cloud only. [FR: « flux
+  instrument » — un instrument unique (WMO, identifiant).]
+- **series** (how the dashboard groups results) = one calibration METHOD on one instrument =
+  (stream, method). A CL61 stream -> 2 series (Rayleigh + cloud); a CL31 stream -> 1 series.
+  [FR: « série (instrument x méthode) » — une calibration d'un instrument par une technique.]
 
 For the E-PROFILE L1 2026 archive (D:/E-PROFILE_L1_2026), this runs:
   * Rayleigh calibration  for CL61 / CHM15k / Mini-MPL   (per night, daily L1 files)
