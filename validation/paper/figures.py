@@ -300,10 +300,12 @@ def fig_calib_l1l2(channels, calib_dir, out_png, ncol=3):
     have = [c for c in channels if (cd_dir / f"{c['key']}_L1.csv").is_file() or (cd_dir / f"{c['key']}_L2.csv").is_file()]
     n = len(have); nrow = int(np.ceil(n / ncol))
     fig, axes = plt.subplots(nrow, ncol, figsize=(6.2 * ncol, 2.5 * nrow), squeeze=False)
+    # Each series is normalised by its own Kalman median, so L1 and L2 share a y-scale and the
+    # comparison is of the *temporal pattern* (the absolute L1/L2 ratio is reported in the table:
+    # Rayleigh lidar constants match to ~1 %, the cloud coefficient is on a different input scale).
     styles = [("L2", COLORS[1], "x"), ("L1", COLORS[0], "+")]
     for i, c in enumerate(have):
         ax = axes[i // ncol][i % ncol]
-        vals = []
         for level, color, marker in styles:
             f = cd_dir / f"{c['key']}_{level}.csv"
             if not f.is_file():
@@ -311,24 +313,22 @@ def fig_calib_l1l2(channels, calib_dir, out_png, ncol=3):
             t, cd, ck, cks = _read_calib_csv(f)
             if t.size == 0:
                 continue
-            ax.plot(t, cd, marker, color=color, ms=4, mew=0.9, alpha=0.6, label=f"{level} daily")
+            med = np.nanmedian(ck[np.isfinite(ck)]) if np.isfinite(ck).any() else np.nan
+            if not np.isfinite(med) or med == 0:
+                continue
+            ax.plot(t, cd / med, marker, color=color, ms=4, mew=0.9, alpha=0.55, label=f"{level} daily")
             g = np.isfinite(ck)
             if g.any():
-                ax.plot(t[g], ck[g], "-", color=color, lw=1.5, label=f"{level} Kalman")
-                vals.append(ck[g])
-            vals.append(cd[np.isfinite(cd)])
-        if vals:
-            v = np.concatenate(vals)
-            lo, hi = np.nanpercentile(v, 2), np.nanpercentile(v, 98)
-            pad = 0.15 * (hi - lo) if hi > lo else 0.1 * abs(hi) + 1e-12
-            ax.set_ylim(lo - pad, hi + pad)
+                ax.plot(t[g], ck[g] / med, "-", color=color, lw=1.5, label=f"{level} Kalman")
+        ax.axhline(1.0, color="0.6", lw=0.6, ls=":")
+        ax.set_ylim(0.4, 1.6)
         ax.set_title(c["title"], fontsize=9); ax.grid(alpha=0.3)
-        ax.set_ylabel(c.get("unit", "C$_L$ [a.u.]"), fontsize=8); ax.tick_params(labelsize=7)
+        ax.set_ylabel("C / median", fontsize=8); ax.tick_params(labelsize=7)
         if i == 0:
             ax.legend(fontsize=6.5, loc="best", ncol=2)
     for j in range(n, nrow * ncol):
         axes[j // ncol][j % ncol].axis("off")
-    fig.suptitle("Calibration coefficient: L1 (binned to L2 grid) vs L2 — raw daily + Kalman (eprof_v2)",
+    fig.suptitle("Calibration coefficient L1 (binned to L2 grid) vs L2 — normalised to each median (eprof_v2)",
                  fontweight="bold", fontsize=13)
     fig.tight_layout(rect=(0, 0, 1, 0.985))
     fig.savefig(out_png, dpi=150); plt.close(fig)

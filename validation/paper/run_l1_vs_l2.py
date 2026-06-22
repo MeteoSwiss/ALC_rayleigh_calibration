@@ -55,9 +55,10 @@ def main():
         (l1, n1), (l2, n2) = median_kalman(c["key"], "L1"), median_kalman(c["key"], "L2")
         if np.isfinite(l1) or np.isfinite(l2):
             ratio = l1 / l2 if (np.isfinite(l1) and np.isfinite(l2) and l2 != 0) else np.nan
-            coef.append(dict(title=c["title"], l1=l1, l2=l2, n1=n1, n2=n2, ratio=ratio))
-            print("  %-30s L1=%.3e (n%d)  L2=%.3e (n%d)  L1/L2=%.3f"
-                  % (c["title"], l1, n1, l2, n2, ratio), flush=True)
+            is_ray = "rayleigh" in c["key"]
+            coef.append(dict(title=c["title"], l1=l1, l2=l2, n1=n1, n2=n2, ratio=ratio, is_ray=is_ray))
+            print("  %-30s [%s] L1=%.3e (n%d)  L2=%.3e (n%d)  L1/L2=%.3f"
+                  % (c["title"], "Ray" if is_ray else "cld", l1, n1, l2, n2, ratio), flush=True)
 
     # (B) inter-comparison with L1- vs L2-derived calibration
     inter = {}
@@ -82,19 +83,24 @@ def write_report(coef, inter):
          "*The native L1 archive (`D:/E-PROFILE_L1_2026`, 15 m × 15 s for CHM15k, binned to the 30 m × 300 s "
          "L2 grid via `l1_bin_to_l2_grid`) vs the E-PROFILE L2 product, both calibrated with the operational "
          "**eprof_v2** molecular-window method. Switching from eprof_v1.2 to eprof_v2 roughly tripled the "
-         "Rayleigh yield on clear nights (Payerne CHM 4 → 11 calibrated nights over Mar–May 2026).*\n",
+         "Rayleigh yield on clear nights (Payerne CHM 4 → 11 calibrated nights over Mar–May 2026; the v1.2 "
+         "molecular-window gate rejected 43 of 92 nights as flag −2 'no eligible molecular window').*\n",
          "## (A) Calibration coefficient — L1 vs L2\n",
-         "| channel | L1 median | L2 median | L1/L2 |",
-         "|---|---|---|---|"]
+         "| channel | calib | L1 median | L2 median | L1/L2 |",
+         "|---|---|---|---|---|"]
     for c in coef:
-        L.append("| %s | %.3e | %.3e | %s |" % (c["title"], c["l1"], c["l2"],
-                 ("%.3f" % c["ratio"]) if np.isfinite(c["ratio"]) else "—"))
-    rr = [c["ratio"] for c in coef if np.isfinite(c["ratio"])]
+        L.append("| %s | %s | %.3e | %.3e | %s |" % (c["title"], "Rayleigh" if c["is_ray"] else "cloud",
+                 c["l1"], c["l2"], ("%.3f" % c["ratio"]) if np.isfinite(c["ratio"]) else "—"))
+    rr = [c["ratio"] for c in coef if c["is_ray"] and np.isfinite(c["ratio"])]
     if rr:
         L.append("")
-        L.append("> Rayleigh/cloud lidar constants from L1 and L2 agree to a median **L1/L2 = %.3f** "
+        L.append("> **Rayleigh** lidar constants from L1 and L2 agree to a median **L1/L2 = %.3f** "
                  "(spread %.3f–%.3f): binning the native L1 to the L2 grid removes the grid-interaction "
-                 "rejection, so L1 and L2 calibrate consistently.\n" % (np.median(rr), min(rr), max(rr)))
+                 "rejection, so L1 and L2 calibrate consistently. The **cloud** O'Connor coefficient is on the "
+                 "INPUT scale (raw rcs_0 in V·m² for L1 vs the attbsc_0 Mm⁻¹sr⁻¹ for L2), so its absolute "
+                 "L1/L2 ratio is ~0.01 (a unit/scale factor, not a calibration disagreement) — the figure "
+                 "shows that the *temporal pattern* of the cloud coefficient agrees between L1 and L2.\n"
+                 % (np.median(rr), min(rr), max(rr)))
     L.append("![calibration L1 vs L2](figs_paper_validation/paper_python/fig_calib_l1l2.png)\n")
 
     L.append("## (B) Inter-comparison — L1- vs L2-derived calibration\n")

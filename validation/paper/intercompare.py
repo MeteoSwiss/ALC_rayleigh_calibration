@@ -318,10 +318,15 @@ def process(cfg):
         if l2 is None:
             chans.append(None); continue
         beta = l2["beta"].copy()
-        # calibration (from the L1- or L2-derived Kalman series, per cfg['calibLevel'])
-        cal = load_calib_series(ch["key"], cfg.get("calibLevel"))
+        # calibration (from the L1- or L2-derived Kalman series, per cfg['calibLevel']).
+        # Only RAYLEIGH swaps L1<->L2: its lidar constant is on the same scale for both sources
+        # (binned L1 == L2 to ~1%). The cloud O'Connor coefficient is on the INPUT scale (raw
+        # rcs_0 V*m^2 for L1 vs the attbsc_0 Mm^-1 sr^-1 for L2), so it is NOT transferable onto
+        # the L2 beta - cloud always uses the L2 coefficient here.
+        clevel = cfg.get("calibLevel") if ch["calib"] == "rayleigh" else "L2"
+        cal = load_calib_series(ch["key"], clevel)
         if ch["calib"] != "none" and cal is None:
-            print(f"    [skip] {ch['label']}: no calibration series ({ch['key']} / {cfg.get('calibLevel')})")
+            print(f"    [skip] {ch['label']}: no calibration series ({ch['key']} / {clevel})")
             chans.append(None); continue
         if cal is not None and ch["calib"] != "none":
             ck = interp_calib(cal[0], cal[1], l2["time"])
