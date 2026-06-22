@@ -60,7 +60,10 @@ BENCHMARK = {
         _ch("0-20000-0-06610", "A", "CHM15k", "rayleigh", "CHM15k (Rayleigh)", *PAY),
         _ch("0-20000-0-06610", "B", "CL31", "cloud", "CL31 (cloud)", *PAY),
         _ch("0-20000-0-06610", "C", "CL61", "cloud", "CL61 (cloud)", *PAY, raw=CL61_PAY_RAW),
-        _ch("0-20000-0-06610", "C", "CL61", "rayleigh", "CL61 (Rayleigh)", *PAY, raw=CL61_PAY_RAW),
+        # Cloud is calibrated from the native raw (no daily L2 + bad L2 lat/lon); the Rayleigh
+        # molecular fit fails on the native CL61 signal (no eligible molecular window) but succeeds
+        # on the E-PROFILE L2 product, so the Rayleigh coefficient keeps the L2_monthly source.
+        _ch("0-20000-0-06610", "C", "CL61", "rayleigh", "CL61 (Rayleigh)", *PAY),
     ]),
     "amsterdam": dict(start="20260301", end="20260531", channels=[
         _ch("0-20000-0-06240", "A", "CHM15k", "rayleigh", "CHM15k A", 52.317, 4.8037, 6.0),

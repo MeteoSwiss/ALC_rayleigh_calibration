@@ -152,6 +152,17 @@ def write_report(rows, erows):
     L.append("")
     for name in STATIONS:
         L.append(f"![{name} validation](figs_paper_validation/paper_python/fig_{name}.png)\n")
+    # Mini-MPL wavelength note
+    L.append("## Mini-MPL 532 nm -> 1064 nm wavelength conversion (Palaiseau)\n")
+    L.append("The Palaiseau Mini-MPL operates at **532 nm** and is compared to the **1064 nm** CHM15k "
+             "reference, so its β_att is converted 532->1064 with the **molaer** model "
+             "(`intercompare.wavelength_correct`). The two scatterers have different wavelength dependence, "
+             "so a single Ångström exponent on the whole signal would be wrong: molecular (Rayleigh) "
+             "β_mol ∝ λ⁻⁴ drops by (532/1064)⁴ = **1/16**; aerosol (Mie) β_aer ∝ λ⁻ᵅ (α≈1) drops by "
+             "(532/1064)¹ = **1/2**. The model extracts β_aer(532) = β_total − β_mol(532), scales it by ½, "
+             "and recombines with the 1064 nm molecular. A naïve single-exponent conversion would scale the "
+             "molecular by λ⁻¹ instead of λ⁻⁴ (8× too large in clean air). Result: Mini-MPL **−54.6%, r 0.79** "
+             "vs the CHM; the residual reflects the fixed α=1 and the 532 nm Rayleigh calibration.\n")
     # EARLINET
     L.append("## EARLINET — ceilometer (CHM15k) vs EARLINET research-lidar reference\n")
     L.append("| site | Python relbias | Python r | matched | MATLAB relbias | MATLAB r |")
