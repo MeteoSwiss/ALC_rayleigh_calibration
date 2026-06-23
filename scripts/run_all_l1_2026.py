@@ -304,9 +304,25 @@ def _kalman_rows(rows):
     return out
 
 
+def _preserve_other_methods(csv_path, methods):
+    """Return rows from an existing per-stream CSV whose method was NOT recomputed this run, so a
+    partial run (e.g. --methods cloud) keeps the other method's rows instead of dropping them."""
+    if not csv_path.exists():
+        return []
+    keep = []
+    try:
+        with open(csv_path, newline="", encoding="utf-8") as f:
+            for r in csv.DictReader(f):
+                if r.get("method") not in methods:
+                    keep.append({k: r.get(k, "") for k in CSV_FIELDS})
+    except (OSError, csv.Error):
+        return []
+    return keep
+
+
 # --- One instrument stream --------------------------------------------------
 def _process_stream(payload):
-    s, start, end = payload
+    s, start, end, methods = payload
     warnings.filterwarnings("ignore")
     logging.getLogger().setLevel(logging.CRITICAL)
     key = _key(s)
@@ -314,10 +330,12 @@ def _process_stream(payload):
     sdir.mkdir(parents=True, exist_ok=True)
 
     rows = []
-    if s["type"] in RAYLEIGH_TYPES:
+    if "rayleigh" in methods and s["type"] in RAYLEIGH_TYPES:
         rows += _do_rayleigh(s, start, end)
-    if s["type"] in CLOUD_TYPES:
+    if "cloud" in methods and s["type"] in CLOUD_TYPES:
         rows += _do_cloud(s, start, end)
+    # preserve rows for any method we did NOT recompute (keeps Rayleigh during a cloud-only rerun)
+    rows += _preserve_other_methods(sdir / f"{key}_cal.csv", methods)
     rows.sort(key=lambda r: (r["method"], r["date"]))
 
     _write_csv_atomic(sdir / f"{key}_cal.csv", CSV_FIELDS, rows)
@@ -357,10 +375,20 @@ def main():
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--stream", default=None,
                     help="internal: process ONE stream by '<wmo>_<ident>' key and exit")
+    ap.add_argument("--methods", default="rayleigh,cloud",
+                    help="comma list of methods to (re)compute: rayleigh, cloud. Rows for a method NOT "
+                         "listed are preserved from the existing per-stream CSV, so e.g. "
+                         "'--methods cloud --force' updates only the cloud rows and keeps Rayleigh.")
+    ap.add_argument("--force", action="store_true",
+                    help="re-process streams even if a *_cal.csv already exists (needed for in-place "
+                         "reruns such as a cloud-only update that keeps the previous Rayleigh output)")
     args = ap.parse_args()
 
     start = datetime.strptime(args.start, "%Y%m%d")
     end = datetime.strptime(args.end, "%Y%m%d")
+    methods = {m.strip().lower() for m in args.methods.split(",") if m.strip()}
+    if not methods or not methods <= {"rayleigh", "cloud"}:
+        ap.error("--methods must be a comma list drawn from: rayleigh, cloud")
     census = json.loads(CENSUS.read_text(encoding="utf-8"))
 
     # --- single-stream worker mode: spawned as an isolated, killable subprocess ----------
@@ -371,23 +399,27 @@ def main():
         if s is None:
             print(f"stream {args.stream} not in census", flush=True)
             return
-        _process_stream((s, start, end))
+        _process_stream((s, start, end, methods))
         return
 
     types = [t.strip() for t in args.types.split(",")]
     streams = select(census, types, args.per_type, args.limit, start, end)
+    # drop streams that have no work for the requested methods (e.g. CHM15k/Mini-MPL under --methods cloud)
+    relevant = (RAYLEIGH_TYPES if "rayleigh" in methods else set()) | (CLOUD_TYPES if "cloud" in methods else set())
+    streams = [s for s in streams if s["type"] in relevant]
     OUT.mkdir(parents=True, exist_ok=True)
     done = {p.parent.name for p in OUT.glob("*/*_cal.csv")}
-    todo = [s for s in streams if _key(s) not in done]
-    print(f"window {args.start}..{args.end} | {len(streams)} streams selected; "
-          f"{len(done)} done; {len(todo)} to do; {args.workers} workers "
+    todo = streams if args.force else [s for s in streams if _key(s) not in done]
+    print(f"window {args.start}..{args.end} | methods={','.join(sorted(methods))} | "
+          f"{len(streams)} streams selected; {len(done)} with output; {len(todo)} to do"
+          f"{' (forced)' if args.force else ''}; {args.workers} workers "
           f"(per-stream timeout {STREAM_TIMEOUT}s)", flush=True)
 
     def _run_stream(s):
         """Run ONE stream in a separate process; kill it if it hangs past the timeout."""
         key = _key(s)
         cmd = [sys.executable, str(Path(__file__).resolve()), "--stream", key,
-               "--start", args.start, "--end", args.end]
+               "--start", args.start, "--end", args.end, "--methods", args.methods]
         try:
             subprocess.run(cmd, timeout=STREAM_TIMEOUT, check=False,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
