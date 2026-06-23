@@ -94,6 +94,40 @@ streams, ~30 sampled days each (Jan–May 2026), CAMS-cached.
 producing *any* valid calibration to **9 of 11** — the headline is broad-based, not driven by a few
 streams.
 
+## 5b. Why σ_SD roughly doubles (6–7 % → 10–11 %), and is it acceptable?
+
+The increase is the **yield↔precision trade**: the strict baseline only passed the cleanest nights.
+Isolating each knob (CL31 σ_SD) shows the dominant cause is the **temporal-consistency requirement**:
+
+| baseline | P1 native | P2 `n_consec` 5→3 | P3 K7 gates | P5 combo |
+|---:|---:|---:|---:|---:|
+| 7.4 | 9.5 | **11.2** | 12.8 | 11.1 |
+
+- **`n_consecutive` 5→3 alone** does most of it (7.4 → 11.2). Requiring only 3 consecutive consistent
+  in-cloud profiles instead of 5 admits nights with **briefer / less-stable cloud passages**, whose
+  `∫β dz` is less well-determined.
+- The other K7 easings add a little: `ratio_filter` 0.05→0.15 lets in more sub-cloud aerosol;
+  `attenuation_factor` 20→10 accepts clouds that are not *fully* opaque, where the O'Connor constraint
+  `B = 1/(2S)` holds less exactly. Native cadence adds ~2 pp (noisier per-profile + more marginal nights).
+
+**Is it acceptable?** The C_L time series say yes for CL31/CL51 and mostly-yes for CL61:
+
+![CL31 — baseline vs P5 C_L time series](cl_timeseries_CL31.png)
+![CL51 — baseline vs P5 C_L time series](cl_timeseries_CL51.png)
+
+For **CL31/CL51**, P5 **densifies the calibration 4–9×** (e.g. n=3→27/night-sample) **around the same
+central C_L** — the baseline and P5 medians coincide, so the extra nights add scatter but **no bias**.
+A ~10 % night-to-night σ on a quantity the operational Kalman best-estimate already smooths is well
+within tolerance.
+
+![CL61 — P5 C_L time series (baseline is empty: 0 valid)](cl_timeseries_CL61.png)
+
+For **CL61**, baseline is **empty** (0 valid), so P5 is the only series. Most stations are usable and
+tight (e.g. 0-20000-0-06418 σ≈12 %, 0-20000-0-11538 a clean ~1.2 plateau), but a **few are noisy**
+(n≤5 with 1–2 outliers → σ 40–400 %). So CL61's median σ≈10 % is real for the well-sampled streams,
+but a handful of streams will need either the Kalman smoothing or a slightly tighter CL61-specific
+gate. Net: P5 makes CL61 *calibratable at all*; precision is good where there is enough data.
+
 ## 6. Way forward
 
 1. **Implement the CL61 applied-constant fallback** in the cloud core: when
