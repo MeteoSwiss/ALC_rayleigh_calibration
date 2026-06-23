@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Calibration monitor{% endblock %}</title>
+  <link rel="stylesheet" href="{{ base }}assets/style.css">
+  <!-- Shared Plotly bundle (loaded once, before the figure <div> scripts run). -->
+  <script src="{{ base }}assets/plotly.min.js" charset="utf-8"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="logo" href="{{ base }}index.html" title="EUMETNET E-PROFILE">
+      {% if logo %}
+        <img src="{{ base }}assets/{{ logo }}" alt="EUMETNET" height="24">
+      {% else %}
+        {# Placeholder wordmark — drop monitoring/static/eumetnet_logo.png to replace. #}
+        <svg width="116" height="24" viewBox="0 0 116 24" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="EUMETNET">
+          <rect width="24" height="24" rx="5" fill="#ffffff"/>
+          <text x="12" y="17" text-anchor="middle" fill="#0b3d61" font-family="Arial, sans-serif" font-size="15" font-weight="700">E</text>
+          <text x="30" y="17" fill="#ffffff" font-family="Arial, sans-serif" font-size="12.5" font-weight="700" letter-spacing="1.2">EUMETNET</text>
+        </svg>
+      {% endif %}
+    </a>
+    <a class="brand" href="{{ base }}index.html">E-PROFILE · Calibration monitoring</a>
+    <div class="navsearch" data-base="{{ base }}">
+      <input id="station-search" type="text" autocomplete="off" spellcheck="false"
+             placeholder="Search station — name or WIGOS ID…">
+      <div id="search-results" class="search-results" hidden></div>
+    </div>
+    <span class="spacer"></span>
+    <a class="navlink" href="{{ base }}flags.html">Flag reference</a>
+    {% block headerextra %}{% endblock %}
+  </header>
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="foot">
+    Static dashboard · generated from <code>fullcal_all</code> · {{ base }}assets/calib_index.sqlite
+  </footer>
+  <script src="{{ base }}assets/table-sort.js"></script>
+  <script src="{{ base }}assets/paginate.js"></script>
+  {% if search_json %}<script type="application/json" id="search-index">{{ search_json | safe }}</script>{% endif %}
+  <script src="{{ base }}assets/filter.js"></script>
+  <script src="{{ base }}assets/qcflag.js"></script>
+  <script src="{{ base }}assets/diag.js"></script>
+  <script src="{{ base }}assets/histlink.js"></script>
+  <script src="{{ base }}assets/search.js"></script>
+</body>
+</html>

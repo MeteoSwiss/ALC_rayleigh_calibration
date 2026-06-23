@@ -1,0 +1,175 @@
+:root {
+  --bg: #f7f8fa; --card: #ffffff; --ink: #1c2330; --muted: #6b7280;
+  --line: #e3e6ea; --brand: #0b3d61; --accent: #1f77b4;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 14px/1.45 -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+}
+.topbar {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--brand); color: #fff; padding: 10px 18px;
+  position: sticky; top: 0; z-index: 50;
+}
+.brand { color: #fff; text-decoration: none; font-weight: 600; }
+.logo { display: inline-flex; align-items: center; line-height: 0; margin-right: 4px; }
+.logo img, .logo svg { display: block; }
+.topbar .spacer { flex: 1; }
+.asof, .back { color: #d6e6f2; text-decoration: none; font-size: 13px; }
+.navfilter { font: inherit; font-size: 12px; padding: 3px 7px; margin-left: 6px; max-width: 200px;
+  background: #fff; color: var(--ink); border: 1px solid #2a5a82; border-radius: 6px; cursor: pointer; }
+
+/* Nav-bar station search */
+.navsearch { position: relative; margin-left: 8px; }
+.navsearch input { font: inherit; font-size: 13px; width: 300px; max-width: 40vw; padding: 5px 10px;
+  border-radius: 7px; border: 1px solid #2a5a82; background: rgba(255,255,255,.14); color: #fff; }
+.navsearch input::placeholder { color: rgba(255,255,255,.72); }
+.navsearch input:focus { outline: none; background: #fff; color: var(--ink); border-color: var(--accent); }
+.search-results { position: absolute; top: calc(100% + 4px); left: 0; z-index: 1000; width: 380px; max-width: 80vw;
+  max-height: 64vh; overflow-y: auto; background: var(--card); border: 1px solid var(--line);
+  border-radius: 8px; box-shadow: 0 8px 26px rgba(0,0,0,.22); }
+.sr { display: grid; grid-template-columns: 1fr auto; gap: 1px 10px; padding: 7px 11px; cursor: pointer;
+  border-bottom: 1px solid var(--line); }
+.sr:last-child { border-bottom: 0; }
+.sr:hover, .sr.sel { background: #eef4fb; }
+.sr-name { font-weight: 600; color: var(--ink); font-size: 13px; }
+.sr-key { font-size: 11px; color: var(--muted); font-family: ui-monospace, "Cascadia Code", monospace; text-align: right; align-self: center; }
+.sr-meta { grid-column: 1 / -1; font-size: 11px; color: var(--muted); }
+.navlink { color: #d6e6f2; text-decoration: none; font-size: 13px; margin-left: 6px; white-space: nowrap; }
+.navlink:hover { color: #fff; text-decoration: underline; }
+
+/* Flag reference page */
+.flagintro { max-width: 900px; }
+.flagdocs { display: flex; flex-direction: column; gap: 8px; }
+.flagdoc { border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; background: var(--card); scroll-margin-top: 64px; }
+.flagdoc:target { box-shadow: 0 0 0 2px var(--accent); }
+.flagdoc h2 { display: flex; align-items: center; gap: 10px; font-size: 16px; margin: 0 0 6px; }
+.flagval { font-family: ui-monospace, "Cascadia Code", monospace; font-weight: 700; min-width: 2.4em; }
+.flagname { font-weight: 600; }
+.flagmethods { margin-left: auto; font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 1px 9px; }
+.flagsummary { font-weight: 600; margin: 2px 0; }
+.flagrecog { color: var(--muted); font-size: 13px; }
+.flagex { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
+.flagex figure { margin: 0; max-width: 560px; }
+.flagex img { max-width: 100%; border: 1px solid var(--line); border-radius: 6px; }
+.flagex figcaption { font-size: 11px; color: var(--muted); margin-top: 3px; }
+.diaglink { color: var(--accent); text-decoration: none; font-weight: 600; }
+.diaglink:hover { text-decoration: underline; }
+.flaglink { color: var(--ink); text-decoration: none; border-bottom: 1px dotted var(--muted); }
+.flaglink:hover { color: var(--accent); border-bottom-color: var(--accent); }
+.back:hover { text-decoration: underline; }
+.container { max-width: 1280px; margin: 0 auto; padding: 18px; }
+h1 { font-size: 22px; margin: 8px 0 4px; }
+h2 { font-size: 17px; margin: 22px 0 10px; }
+.subtitle { margin: 0 0 12px; font-size: 15px; color: #33405a; font-weight: 500; }
+.muted { color: var(--muted); font-weight: 400; font-size: 13px; }
+.badge { background: var(--accent); color: #fff; font-size: 12px; padding: 2px 8px;
+  border-radius: 10px; vertical-align: middle; }
+.foot { color: var(--muted); font-size: 12px; padding: 18px; text-align: center; }
+.foot code { font-size: 11px; }
+
+/* KPI cards */
+.kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 8px 0 4px; }
+.kpi { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+.kpi-val { font-size: 22px; font-weight: 700; }
+.kpi-lbl { color: var(--muted); font-size: 12px; margin-top: 2px; }
+
+/* Figure cards */
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  padding: 8px; margin: 12px 0; }
+@media (max-width: 900px) { .grid2, .kpis { grid-template-columns: 1fr; } }
+
+/* Metadata bar */
+.metabar { display: flex; flex-wrap: wrap; gap: 8px 18px; background: var(--card);
+  border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin-bottom: 6px; }
+.metabar b { color: var(--muted); font-weight: 600; margin-right: 4px; }
+
+/* Tables */
+table { border-collapse: collapse; width: 100%; background: var(--card);
+  border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+th, td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--line); }
+th { background: #eef1f4; font-size: 12px; text-transform: uppercase; letter-spacing: .02em;
+  color: #44505f; }
+tbody tr:hover { background: #f3f8fc; }
+td a { color: var(--accent); text-decoration: none; }
+td a:hover { text-decoration: underline; }
+.msg { color: var(--muted); font-size: 12px; max-width: 360px; }
+.stationtable td, .stationtable th { font-variant-numeric: tabular-nums; }
+.sortable th { cursor: pointer; user-select: none; }
+.sortable th.sort-asc::after { content: " ▲"; color: var(--accent); }
+.sortable th.sort-desc::after { content: " ▼"; color: var(--accent); }
+
+/* Status dots, sparkline, watchlist */
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  margin-right: 4px; vertical-align: middle; }
+.spark { vertical-align: middle; }
+.watchtable td { font-size: 13px; }
+.issue { font-size: 12px; padding: 1px 7px; border-radius: 9px; color: #fff; }
+.issue-Valuedrift { background: #b45309; }
+.issue-Failurestreak { background: #b91c1c; }
+.issue-Lowrecentsuccess { background: #6d28d9; }
+
+/* Method tags (pills) */
+.mtag { font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 10px;
+  color: #fff; vertical-align: middle; margin-left: 4px; }
+.mtag-rayleigh { background: #1f77b4; }
+.mtag-cloud { background: #2ca02c; }
+
+/* Per-method section on a station page */
+.methodblock { border-top: 2px solid var(--line); margin-top: 22px; padding-top: 6px; }
+.methodblock h2 { display: flex; align-items: baseline; gap: 10px; }
+.methodblock h3 { font-size: 13px; margin: 16px 0 8px; font-weight: 600; }
+
+/* Pagination controls */
+.pager { display: flex; align-items: center; gap: 12px; margin: 10px 0 4px; }
+.pager button { font: inherit; font-size: 13px; padding: 4px 12px; cursor: pointer;
+  background: var(--card); border: 1px solid var(--line); border-radius: 7px; color: var(--ink); }
+.pager button:hover:not(:disabled) { background: #eef4fb; border-color: var(--accent); }
+.pager button:disabled { opacity: .45; cursor: default; }
+.pager-label { color: var(--muted); font-size: 12px; }
+
+/* Diagnostic viewer (station page) */
+.diag h3 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 14px; margin: 4px 2px 12px; }
+.diag-nav { display: inline-flex; gap: 4px; }
+.diag-nav button { font: inherit; font-size: 12px; padding: 2px 10px; cursor: pointer;
+  background: var(--card); border: 1px solid var(--line); border-radius: 6px; color: var(--ink); }
+.diag-nav button:hover { background: #eef4fb; border-color: var(--accent); }
+.diag-hint { font-size: 11px; }
+.diag-date { font-weight: 600; color: var(--ink); }
+
+/* QC flag button (red) + its floating export widget — client-side localStorage QC flagging */
+.diag-nav button.diag-flag { color: #fff; background: #d62728; border-color: #d62728; font-weight: 600; }
+.diag-nav button.diag-flag:hover { background: #b81f1f; border-color: #b81f1f; }
+.diag-nav button.diag-flag.flagged { background: #7a1414; border-color: #7a1414;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.5); }
+#qcflag-widget { position: fixed; right: 14px; bottom: 14px; z-index: 60; display: flex; gap: 8px;
+  align-items: center; background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  padding: 7px 11px; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.14); font-size: 13px; }
+#qcflag-widget .qcw-n { color: #d62728; font-weight: 700; }
+#qcflag-widget button { font: inherit; font-size: 12px; padding: 3px 9px; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); }
+#qcflag-widget button:hover { border-color: var(--accent); }
+#qcflag-widget .qcw-clr:hover { border-color: #d62728; color: #d62728; }
+.diag-body { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.diag-cal { display: flex; flex-direction: column; gap: 10px; flex: 0 0 auto; }
+.diag-imglink { flex: 1 1 640px; min-width: 320px; line-height: 0; }
+.diag-img { max-width: 100%; border: 1px solid var(--line); border-radius: 6px; }
+.cal-month { font-size: 10px; }
+.cal-title { text-align: center; font-weight: 600; color: var(--muted); margin-bottom: 3px; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 17px); gap: 2px; }
+.cal-wd { text-align: center; color: #b6bdc6; font-size: 9px; }
+.cal-day { width: 17px; height: 17px; line-height: 17px; text-align: center; border-radius: 3px;
+  font-size: 9px; color: #c2c8cf; background: #f1f3f5; }
+.cal-day.empty { background: transparent; }
+.cal-day.avail { cursor: pointer; font-weight: 600; }
+.cal-day.avail.good { background: #2ca02c; color: #fff; }
+.cal-day.avail.good:hover { background: #1f7a1f; }
+.cal-day.avail.rejected { background: #d9dde1; color: #566; }
+.cal-day.avail.rejected:hover { background: #c4c9ce; }
+.cal-day.none { color: #ccd2d8; }
+.cal-day.sel { outline: 2px solid #d62728; }
+.cal-key { display: inline-block; width: 11px; height: 11px; border-radius: 3px; vertical-align: -1px; margin: 0 1px; }
+.cal-key.cal-ok { background: #2ca02c; }
+.cal-key.cal-bad { background: #d9dde1; border: 1px solid #b9bfc5; }

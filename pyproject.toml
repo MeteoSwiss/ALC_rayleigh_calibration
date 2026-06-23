@@ -1,12 +1,12 @@
-[tool.poetry]
-name = "rayleigh-calibration"
+[project]
+name = "eprofile-calibration"
 version = "2.0.0"
-description = "Rayleigh calibration tools for automated lidars and ceilometers"
-authors = ["E-PROFILE <contact@e-profile.eu>"]
-license = "MIT"
+description = "Rayleigh and liquid-cloud calibration for automated lidars and ceilometers (E-PROFILE)"
 readme = "README.md"
-packages = [{include = "rayleigh_calibration"}]
-keywords = ["lidar", "ceilometer", "calibration", "rayleigh", "atmospheric", "remote sensing"]
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "E-PROFILE", email = "contact@e-profile.eu" }]
+keywords = ["lidar", "ceilometer", "calibration", "rayleigh", "cloud", "atmospheric", "remote sensing"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
@@ -19,29 +19,45 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Atmospheric Science",
 ]
+dependencies = [
+    "numpy>=1.20",
+    "scipy>=1.7",
+    "netCDF4>=1.5",
+    "xarray>=2022.3",   # CAMS model-level reading (water-vapor correction / CAMS molecular profile)
+]
 
-[tool.poetry.dependencies]
-python = "^3.9"
-numpy = "^1.20"
-scipy = "^1.7"
-netCDF4 = "^1.5"
+[project.optional-dependencies]
+plotting = ["matplotlib>=3.4"]
+# Static monitoring dashboard (scripts/build_dashboard.py -> monitoring/). Pure-Python,
+# pip-only deps; no server or database process is needed to view the generated site.
+dashboard = ["plotly>=5.20", "jinja2>=3.0", "pandas>=1.3"]
+# CAMS auto-download from the ADS. cfgrib pulls the eccodes wheel (binary library
+# bundled, incl. Windows), so the GRIB->netCDF conversion runs in pure Python — no conda.
+download = ["cdsapi>=0.7.0", "cfgrib>=0.9.10"]
+dev = ["pytest>=7.0", "pytest-cov>=4.0", "mypy>=1.0", "ruff>=0.1"]
 
-[tool.poetry.group.plotting.dependencies]
-matplotlib = "^3.4"
+[project.scripts]
+eprofile-calibration = "calibration.main:main"
 
-[tool.poetry.group.dev.dependencies]
-pytest = "^7.0"
-pytest-cov = "^4.0"
-mypy = "^1.0"
-ruff = "^0.1"
+[project.urls]
+Homepage = "https://e-profile.eu"
 
-[tool.poetry.scripts]
-rayleigh-calibration = "rayleigh_calibration.main:main"
-
+# ---------------------------------------------------------------------------
+# Build backend (uv-compatible). Install with:  uv pip install -e ".[plotting]"
+# ---------------------------------------------------------------------------
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
+[tool.hatch.build.targets.wheel]
+packages = ["calibration"]
+
+[tool.hatch.build.targets.sdist]
+include = ["calibration", "tests", "README.md"]
+
+# ---------------------------------------------------------------------------
+# Tooling
+# ---------------------------------------------------------------------------
 [tool.ruff]
 target-version = "py39"
 line-length = 100
@@ -61,7 +77,7 @@ ignore = [
 ]
 
 [tool.ruff.isort]
-known-first-party = ["rayleigh_calibration"]
+known-first-party = ["calibration"]
 
 [tool.mypy]
 python_version = "3.9"
@@ -79,4 +95,5 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-v --cov=rayleigh_calibration --cov-report=term-missing"
+# Coverage is opt-in (run `pytest --cov=calibration`) so the suite runs without pytest-cov.
+addopts = "-v"

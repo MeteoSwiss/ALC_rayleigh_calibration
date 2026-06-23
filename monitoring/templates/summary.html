@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Calibration monitor — summary{% endblock %}
+{% block headerextra %}
+  <select id="f-country" class="navfilter" title="Filter by country">
+    <option value="">All countries</option>
+    {% for c in countries %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+  </select>
+  <select id="f-type" class="navfilter" title="Filter by instrument type">
+    <option value="">All types</option>
+    {% for t in types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+  </select>
+  <span class="asof">{{ summary.date_min or "—" }} → {{ summary.as_of or "—" }}</span>
+{% endblock %}
+
+{% block content %}
+<h1>Network summary</h1>
+
+<section class="kpis">
+  <div class="kpi"><div class="kpi-val">{{ summary.n_stations }}</div><div class="kpi-lbl">instruments</div></div>
+  <div class="kpi"><div class="kpi-val">{{ summary.n_series }}</div><div class="kpi-lbl">method series</div></div>
+  <div class="kpi"><div class="kpi-val">{{ summary.n_calibrations }}</div><div class="kpi-lbl">calibrations</div></div>
+  <div class="kpi"><div class="kpi-val">{{ summary.success_rate | fmt('{:.1f}') }}%</div><div class="kpi-lbl">overall success</div></div>
+</section>
+
+<section class="grid2">
+  <div class="card">{{ figs.map_theo | safe }}</div>
+  <div class="card">{{ figs.map_op | safe }}</div>
+</section>
+
+<section class="grid2">
+  <div class="card">{{ figs.map | safe }}</div>
+  <div class="card">{{ figs.success_type | safe }}</div>
+</section>
+
+<section class="grid2">
+  <div class="card">{{ figs.flag_dist_rayleigh | safe }}</div>
+  <div class="card">{{ figs.flag_dist_cloud | safe }}</div>
+</section>
+
+<section class="grid2">
+  <div class="card">{{ figs.cl_type_abs | safe }}</div>
+  <div class="card">{{ figs.cl_type_pct | safe }}</div>
+</section>
+
+{% if cl_iqr %}
+<h2 class="sec-h">Median C&#8203;<sub>L</sub> per station — ranked, by instrument type
+  <span class="muted">(error bar = inter-quartile range)</span></h2>
+{% for t, div in cl_iqr %}
+<section><div class="card">{{ div | safe }}</div></section>
+{% endfor %}
+{% endif %}
+
+{% if watch %}
+<section class="watch">
+  <h2>Watchlist <span class="muted">({{ watch | length }})</span></h2>
+  <table class="watchtable paginated filterable" data-page-size="15">
+    <thead><tr><th>Station</th><th>Type</th><th>Method</th><th>Issue</th><th>Detail</th><th>Last date</th></tr></thead>
+    <tbody>
+    {% for w in watch %}
+      <tr data-country="{{ w.country }}" data-type="{{ w.itype }}">
+        <td><a href="stations/{{ w.key }}.html">{{ w.key }}</a></td>
+        <td>{{ w.itype }}</td>
+        <td>{{ method_label(w.method) }}</td>
+        <td><span class="issue issue-{{ w.issue | replace(' ', '') }}">{{ w.issue }}</span></td>
+        <td>{{ w.detail }}</td>
+        <td>{{ w.date }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% else %}
+<section class="watch"><h2>Watchlist</h2><p class="muted">No series currently flagged.</p></section>
+{% endif %}
+
+<section>
+  <h2>Series <span class="muted">(one row per station × method — click a header to sort)</span>
+    <span id="filter-count" class="muted"></span></h2>
+  <table class="sortable stationtable paginated filterable" id="stations" data-page-size="15">
+    <thead>
+      <tr>
+        <th data-type="str">Station</th>
+        <th data-type="str">Type</th>
+        <th data-type="str">Method</th>
+        <th data-type="num">Success %</th>
+        <th data-type="num">Cal'ns</th>
+        <th data-type="num">Median C_L</th>
+        <th data-type="num">Rel. unc %</th>
+        <th data-type="str">Last date</th>
+        <th data-type="num">Last flag</th>
+        <th>Value trend</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in rows %}
+      <tr data-country="{{ r.country }}" data-type="{{ r.itype }}">
+        <td><a href="stations/{{ r.key }}.html">{{ r.key }}</a></td>
+        <td>{{ r.itype }}</td>
+        <td><span class="mtag mtag-{{ r.method }}">{{ r.method_label }}</span></td>
+        <td data-val="{{ r.success_rate if r.success_rate is not none else -1 }}">{{ r.success_rate | fmt('{:.0f}') }}</td>
+        <td data-val="{{ r.n_dates or 0 }}">{{ r.n_dates or 0 }}</td>
+        <td data-val="{{ r.median_cl if r.median_cl is not none else 0 }}">{{ r.median_cl | fmt('{:.3e}') }}</td>
+        <td data-val="{{ r.median_rel_unc if r.median_rel_unc is not none else -1 }}">{{ r.median_rel_unc | fmt('{:.0f}') }}</td>
+        <td>{{ r.last_date }}</td>
+        {% set lf = r.last_flag if (r.last_flag is not none and r.last_flag == r.last_flag) else none %}
+        <td data-val="{{ lf if lf is not none else -99 }}">
+          <span class="dot" style="background:{{ flag_color(r.last_flag) }}" title="{{ flag_label(r.last_flag, r.method) }}"></span>
+          {{ lf if lf is not none else "—" }}
+        </td>
+        <td>{{ r.spark | safe }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

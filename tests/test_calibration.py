@@ -1,18 +1,18 @@
 """
-Basic tests for the rayleigh_calibration package.
+Basic tests for the calibration package.
 """
 
 import pytest
 import numpy as np
 from pathlib import Path
 
-from rayleigh_calibration.config import (
+from calibration.config import (
     InstrumentType,
     InstrumentInfo,
     CalibrationOptions,
     CalibrationResult,
 )
-from rayleigh_calibration.atmosphere import (
+from calibration.rayleigh.atmosphere import (
     calculate_refractive_index,
     calculate_rayleigh_phase_function,
     calculate_molecular_properties,
@@ -101,7 +101,9 @@ class TestCalibrationResult:
         assert result.flag_meaning == "Successful"
         
         result = CalibrationResult(lidar_constant=-1, flag=-1, uncertainty=0)
-        assert result.flag_meaning == "Not a clear night"
+        # Homogenized cloud/Rayleigh label (calibration.flags); the Rayleigh-specific
+        # reason ("not a clear night") is carried in the result message, not the label.
+        assert result.flag_meaning == "Unsuitable conditions"
 
 
 class TestAtmosphere:
