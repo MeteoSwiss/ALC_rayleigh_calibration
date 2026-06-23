@@ -1,15 +1,44 @@
 // Client-side QC flagging for the static dashboard (no server). Clicking the red "flag" button in a
 // diagnostic viewer records {key, wmo, identifier, itype, method, date} for the currently shown
-// calibration into the browser's localStorage. A floating widget shows the running count and exports
-// the whole list as CSV, to later refine the QC on those dates. diag.js calls window.QCFlags.toggle().
+// calibration. The list is kept in localStorage (primary) AND mirrored to a site-wide cookie, so it
+// survives navigation between pages even in browsers/contexts where localStorage is not shared (e.g.
+// some file:// setups). A floating widget shows the running count and exports the whole list as CSV.
+// diag.js calls window.QCFlags.toggle().
 (function () {
   var KEY = "alc_qc_flags";
 
+  function readCookie() {
+    var m = document.cookie.match(/(?:^|;\s*)alc_qc_flags=([^;]*)/);
+    if (!m) { return null; }
+    try { return JSON.parse(decodeURIComponent(m[1])); } catch (e) { return null; }
+  }
+  function writeCookie(a) {
+    try {
+      var v = encodeURIComponent(JSON.stringify(a));
+      // cookies are capped near 4 KB; only mirror when it fits, else drop it (localStorage stays
+      // authoritative and the widget still exports everything).
+      if (a.length && v.length < 3800) {
+        document.cookie = KEY + "=" + v + "; path=/; max-age=31536000; SameSite=Lax";
+      } else {
+        document.cookie = KEY + "=; path=/; max-age=0; SameSite=Lax";
+      }
+    } catch (e) { /* cookies disabled */ }
+  }
   function load() {
-    try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) { return []; }
+    var ls = null;
+    try { ls = JSON.parse(localStorage.getItem(KEY)); } catch (e) { ls = null; }
+    if (ls && ls.length) { return ls; }
+    // localStorage empty/unavailable on this page -> restore from the cookie mirror.
+    var ck = readCookie();
+    if (ck && ck.length) {
+      try { localStorage.setItem(KEY, JSON.stringify(ck)); } catch (e) { /* ignore */ }
+      return ck;
+    }
+    return ls || [];
   }
   function store(a) {
     try { localStorage.setItem(KEY, JSON.stringify(a)); } catch (e) { /* quota / private mode */ }
+    writeCookie(a);
     render();
   }
   function rid(r) { return r.key + "|" + r.method + "|" + r.date; }   // identity = station + method + day
