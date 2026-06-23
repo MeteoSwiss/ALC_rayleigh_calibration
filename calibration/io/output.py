@@ -273,3 +273,49 @@ def write_calibration_result(
 
     ncid.close()
     return filepath
+
+
+def strip_calibration_method(
+    output_dir: Path,
+    info: InstrumentInfo,
+    method: int,
+    t_start: Optional[float] = None,
+    t_end: Optional[float] = None,
+) -> int:
+    """Remove rows tagged with ``method`` from this stream's yearly calibration file(s), rewriting each
+    file without them. Used before an in-place re-run of a single method so that days which no longer
+    yield a calibration do not keep a stale row (``write_calibration_result`` only overwrites on
+    success, so a now-rejected day would otherwise retain its old value).
+
+    The removal is restricted to rows whose ``time`` lies in ``[t_start, t_end]`` (days since epoch)
+    when given, so re-running one date window never drops calibrations from other windows in the same
+    yearly file. Returns the number of rows removed.
+
+    All variables are indexed by the unlimited ``time`` dimension, so the surviving rows are copied
+    back generically.
+    """
+    pattern = f"ALC_calibration_{info.wmo_id}_{info.identifier}*.nc"
+    removed = 0
+    for filepath in sorted(output_dir.glob(f"*/{pattern}")):
+        with Dataset(filepath, 'r') as nc:
+            nc.set_auto_mask(False)                      # keep raw fill values, copy them verbatim
+            methods = np.asarray(nc.variables['calibration_method'][:])
+            times = np.asarray(nc.variables['time'][:])
+            remove = methods == method
+            if t_start is not None:
+                remove &= times >= t_start
+            if t_end is not None:
+                remove &= times <= t_end
+            if not remove.any():
+                continue
+            keep = ~remove
+            n_remove = int(remove.sum())
+            kept = {v: np.asarray(nc.variables[v][:])[keep] for v in nc.variables}
+        # rewrite the file with only the surviving rows (same structure, from info)
+        ncid = _create_calibration_file(filepath, info)
+        for v, arr in kept.items():
+            if arr.size:
+                ncid.variables[v][0:arr.size] = arr
+        ncid.close()
+        removed += n_remove
+    return removed

@@ -83,7 +83,7 @@ from calibration.cloud import CloudCalConfig  # noqa: E402
 from calibration.cloud.calibration import (  # noqa: E402
     read_ceilometer_data, liquid_cloud_calibration_from_data, set_defaults)
 from calibration.flags import cloud_flag, flag_label, dominant_cloud_reject_flag  # noqa: E402
-from calibration.io.output import write_calibration_result  # noqa: E402
+from calibration.io.output import write_calibration_result, strip_calibration_method  # noqa: E402
 from calibration.plotting import plot_cloud_diagnostics_compact  # noqa: E402
 from monitoring.kalman import kalman_best_estimate  # noqa: E402  (self-contained leaf)
 
@@ -196,6 +196,14 @@ def _do_rayleigh(s, start, end):
 def _do_cloud(s, start, end):
     info = _info(s)
     key = _key(s)
+    # Drop any cloud (method=1) rows already in the NetCDF for THIS date window, so a re-run leaves no
+    # stale row on days that no longer calibrate (the writer only overwrites on success). Scoped to the
+    # window so other periods in the same yearly file are untouched; Rayleigh (method=0) is untouched.
+    try:
+        strip_calibration_method(OUT / key, info, method=1,
+                                 t_start=_epoch_days(start), t_end=_epoch_days(end) + 1.0)
+    except Exception:  # noqa: BLE001 - a cleanup failure must not abort the calibration
+        pass
     rows = []
     for d in _days(start, end):
         fp = _l1_file(s["wmo"], s["ident"], d)
