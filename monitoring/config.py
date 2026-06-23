@@ -42,8 +42,9 @@ FLAG_MEANINGS = {
     -99: "Exception during calibration",
 }
 
-#: Cloud rejection flags (a cloud was present but a filter rejected it) -- treated as "unsuitable"
-#: like -1 for success-rate purposes (excluded from the denominator).
+#: Cloud rejection flags (a cloud was present but a filter rejected it). These COUNT as failures in
+#: the success-rate denominator (only no-data 0 and no-opportunity -1 are excluded); kept here for the
+#: per-reason outcome breakdown.
 CLOUD_REJECT_FLAGS = (-20, -21, -22, -23, -24, -25, -26)
 
 # A calibration "succeeded" on a night if its flag is one of these.
