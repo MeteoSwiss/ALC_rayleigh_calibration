@@ -5,14 +5,19 @@ on the build_dashboard.py command line when running against a different archive.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
-# --- Default I/O locations (override via the CLI) ---------------------------
-_PROJECT = Path("C:/DATA/Projects/202606_E-PROFILE_calibration")
-DEFAULT_FULLCAL_DIR = _PROJECT / "fullcal_all"          # <key>/<key>_cl.csv per instrument
-DEFAULT_MANIFEST = _PROJECT / "stations_l2_manifest.json"  # lat/lon/type/n_months per station
-DEFAULT_L2_DIR = Path("A:/E-PROFILE_L2_monthly")        # source of station name/country/institution
-DEFAULT_OUT_DIR = _PROJECT / "dashboard"                # generated static site
+# --- Default I/O locations (env-overridable; also accept a --flag on build_dashboard.py) ------------
+# Set the ALC_* vars in ops/config.sh on the server; the fallbacks are the local Windows dev paths and
+# now match what the runner writes (fullcal_l1_2026 / dashboard_l1_2026) and the in-repo census, so a
+# bare `python scripts/build_dashboard.py` resolves to the right places.
+_REPO = Path(__file__).resolve().parent.parent
+_PROJECT = Path(os.environ.get("ALC_PROJECT_DIR", "C:/DATA/Projects/202606_E-PROFILE_calibration"))
+DEFAULT_FULLCAL_DIR = Path(os.environ.get("ALC_FULLCAL_DIR", str(_PROJECT / "fullcal_l1_2026")))   # <key>/<key>_cal.csv
+DEFAULT_MANIFEST = Path(os.environ.get("ALC_MANIFEST", str(_REPO / "validation" / "scope_l1_2026_census.json")))  # lat/lon/type
+DEFAULT_L2_DIR = Path(os.environ.get("ALC_L2_DIR", "A:/E-PROFILE_L2_monthly"))   # station name/country/institution
+DEFAULT_OUT_DIR = Path(os.environ.get("ALC_DASHBOARD_DIR", str(_PROJECT / "dashboard_l1_2026")))   # generated static site
 DB_NAME = "calib_index.sqlite"
 
 # --- Flag meanings ----------------------------------------------------------

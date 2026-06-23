@@ -93,10 +93,12 @@ from monitoring.kalman import kalman_best_estimate  # noqa: E402  (self-containe
 PLOT_ENABLED = os.environ.get("PLOTS", "0") == "1"
 
 # --- Paths / configuration --------------------------------------------------
-L1_ROOT = Path("D:/E-PROFILE_L1_2026")
-CENSUS = REPO / "validation" / "scope_l1_2026_census.json"
-OUT = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/fullcal_l1_2026")
-CAMS = Path("D:/CAMS")
+# Paths are env-overridable (set them in ops/config.sh on the server); the defaults are the local
+# Windows dev locations, so nothing changes unless the ALC_* vars are exported.
+L1_ROOT = Path(os.environ.get("ALC_L1_ROOT", "D:/E-PROFILE_L1_2026"))
+CENSUS = Path(os.environ.get("ALC_CENSUS", str(REPO / "validation" / "scope_l1_2026_census.json")))
+OUT = Path(os.environ.get("ALC_FULLCAL_DIR", "C:/DATA/Projects/202606_E-PROFILE_calibration/fullcal_l1_2026"))
+CAMS = Path(os.environ.get("ALC_CAMS_DIR", "D:/CAMS"))
 WV_LUT = REPO / "calibration" / "data" / "abs_cross_wv_910nm.nc"   # bundled 910 nm WV LUT
 EPOCH = datetime(1970, 1, 1)
 
