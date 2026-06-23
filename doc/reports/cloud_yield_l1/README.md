@@ -14,17 +14,35 @@ lidar constant C_L** (not merely a finite O'Connor coefficient).
    instrument default `const = 1.0` for CL61 (as already defined in `INSTRUMENT_CAL_DEFAULT`) turns
    its coefficients into usable C_L. **This is the entire reason CL61 reads 0 valid — it is not a yield
    problem.**
-2. **Stop pre-averaging and relax the gates (P5 "combo").** Run the cloud calibration at **native
-   cadence** (no 300 s pre-average) with the **aggressive K7 gate set** (`n_consecutive=3`,
-   `consistency_range=25`, `ratio_filter=0.15`, `attenuation_factor=10`, `cbh/cal_maxheight=3500`).
-   With the CL61 fallback, this lifts the median dashboard-valid yield from **16 → 80 % (CL31)**,
-   **8 → 69 % (CL51)** and **0 → 38 % (CL61)**, at a still-acceptable night-to-night precision
-   σ_SD ≈ 10–11 % (vs 6–7 % at baseline — the usual yield/precision trade).
+2. **ADOPTED: go finer on cadence (300 s → 30 s), keep the literature gates.** The aggressive
+   native+K7 option (P5) was **rejected as too noisy** (σ blows up and some CL61 streams show wild
+   outliers). The adopted change keeps the literature defaults (`n_consecutive=5`,
+   `consistency_range=10`, `ratio_filter=0.05`, `attenuation_factor=20`, cbh/cal 2400) and only drops
+   the pre-average to **30 s / 10 m**. At 30 s the day carries ~10× more in-cloud profiles, so the
+   strict *5-consecutive* gate is met far more often **without relaxing it**. With the CL61 fallback,
+   median dashboard-valid yield goes **16 → 53 % (CL31)**, **11 → 45 % (CL51)**, **0 → 13 % (CL61)**
+   at **σ_SD essentially unchanged** (CL31 7.4→9.5, CL51 7.5→7.8, CL61 10.2). **Both changes are
+   implemented** (`calibration/cloud/calibration.py` fallback; runner `average_time_s=30`).
 
 The single highest-leverage change is the **CL61 fallback**; the single highest-yield change for
 CL31/CL51 is **dropping the pre-average + easing the gates**. Together (P5) they are complementary.
 
-![Dashboard-valid yield — 5 propositions vs baseline](cloud_yield_figure.png)
+### Adopted version — measured performance (31 streams, L1)
+
+| type (n) | baseline 300 s | **NEW 30 s + fallback** | 30 s, no fallback | 300 s + fallback |
+|---|---|---|---|---|
+| **CL31** (10) | 16 % (σ 7.4) | **53 % (σ 9.5)** | 53 % | 16 % |
+| **CL51** (10) | 11 % (σ 7.5) | **45 % (σ 7.8)** | 45 % | 11 % |
+| **CL61** (11) | 0 % | **13 % (σ 10.2)** | 0 % | 0 % |
+
+The two right columns isolate the two changes: **30 s alone** delivers the CL31/CL51 jump but leaves
+CL61 at 0 % (C_L still NaN); **the fallback at 300 s** also leaves CL61 at 0 % (almost no CL61 cloud
+survives the strict gates at 300 s). **Both are needed for CL61.** Per-station: CL31 **10/10**,
+CL51 **9/10**, CL61 **8/11** streams now produce valid calibrations (from 0). σ is far below the
+rejected P5 (CL31 9.5 vs 11, CL51 7.8 vs 9.6), and the CL61 series are clean (~1.0–1.2 plateaus, no
+outliers) — see the time-series in §5b.
+
+![Adopted vs baseline + isolation columns](cloud_yield_figure.png)
 
 ## 1. Current dashboard averaging
 
@@ -128,21 +146,24 @@ tight (e.g. 0-20000-0-06418 σ≈12 %, 0-20000-0-11538 a clean ~1.2 plateau), bu
 but a handful of streams will need either the Kalman smoothing or a slightly tighter CL61-specific
 gate. Net: P5 makes CL61 *calibratable at all*; precision is good where there is enough data.
 
-## 6. Way forward
+## 6. Way forward — DECIDED & implemented
 
-1. **Implement the CL61 applied-constant fallback** in the cloud core: when
-   `data.calibration_constant_applied is None`, use `INSTRUMENT_CAL_DEFAULT[type]` (1.0 for CL61) so
-   `lidar_constant` is finite. Small, contained, and the prerequisite for *any* CL61 cloud yield.
-   *(Note the CL61 C_L is then a normalised correction ~1, not a raw-counts constant — consistent with
-   how the dashboard already treats the CL61 theoretical value as 1.0.)*
-2. **Switch the operational L1 cloud calibration to native cadence + K7 gates** (P5). Expected network
-   effect: CL31 ~16 → 80 %, CL51 ~8 → 69 %, CL61 0 → ~38 % valid.
-3. **If precision is preferred over raw yield**, a milder gate set (`n_consecutive=3` only, K1) keeps
-   σ_SD ~7–8 % but yields far less (CL31 25 %, CL51 22 %) and **still needs the fallback for CL61** —
-   so the fallback is non-negotiable regardless of the gate choice.
+The aggressive native+K7 option (P5) was **rejected as too noisy** (σ ~11 %, CL61 outliers). The
+**precision-preserving** option was adopted and is now in the code:
 
-Bottom line: **the CL61 fix is a one-line fallback; the yield win is dropping the pre-average and
-easing the gates.** Adopt P5 for maximum valid calibrations.
+1. **CL61 applied-constant fallback** (`const = INSTRUMENT_CAL_DEFAULT[type]`, 1.0 for CL61) —
+   `calibration/cloud/calibration.py`. The CL61 C_L is then a normalised correction ~1, consistent
+   with the CL61 theoretical value of 1.0. Prerequisite for *any* CL61 cloud yield.
+2. **Cloud averaging 300 s → 30 s / 10 m, literature gates unchanged** (`n_consecutive=5` etc.) —
+   runner `average_time_s=30`. Finer cadence supplies ~10× more in-cloud profiles so the strict gate
+   is met more often, *without* relaxing it.
+
+Measured effect: **CL31 16 → 53 %, CL51 11 → 45 %, CL61 0 → 13 %** dashboard-valid, **σ_SD barely
+changed** (≈ 8–10 %). **Timing is unchanged** — read + water-vapour dominate the per-day cost, so a
+full 2025→2026 rerun at 30 s costs the same ~11 h as the 300 s run did.
+
+Bottom line: **the CL61 fix is the fallback; the clean yield win is the 30 s cadence at the literature
+gates.** No gate relaxation.
 
 ## Reproduce
 

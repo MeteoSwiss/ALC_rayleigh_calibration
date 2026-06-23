@@ -2,87 +2,63 @@
   "CL31": {
     "n_streams": 10,
     "props": {
-      "baseline": {
+      "baseline_300s": {
         "valid_pct": 15.625,
         "sigma_sd": 7.415482766701208
       },
-      "P1_avg": {
+      "new_30s_K0_fb": {
         "valid_pct": 53.125,
         "sigma_sd": 9.493205009060105
       },
-      "P2_consec": {
-        "valid_pct": 25.0,
-        "sigma_sd": 11.166447200898173
+      "ctx_30s_nofb": {
+        "valid_pct": 53.125,
+        "sigma_sd": 9.493205009060105
       },
-      "P3_gates": {
-        "valid_pct": 60.9375,
-        "sigma_sd": 12.757640838983107
-      },
-      "P4_cl61": {
+      "ctx_300s_fb": {
         "valid_pct": 15.625,
         "sigma_sd": 7.415482766701208
-      },
-      "P5_combo": {
-        "valid_pct": 79.6875,
-        "sigma_sd": 11.050745714868382
       }
     }
   },
   "CL51": {
     "n_streams": 10,
     "props": {
-      "baseline": {
-        "valid_pct": 7.8125,
-        "sigma_sd": 6.277941291873595
+      "baseline_300s": {
+        "valid_pct": 10.9375,
+        "sigma_sd": 7.4845762162059
       },
-      "P1_avg": {
-        "valid_pct": 51.5625,
-        "sigma_sd": 6.946279455082095
+      "new_30s_K0_fb": {
+        "valid_pct": 45.3125,
+        "sigma_sd": 7.758821236653967
       },
-      "P2_consec": {
-        "valid_pct": 21.875,
-        "sigma_sd": 7.637566297232565
+      "ctx_30s_nofb": {
+        "valid_pct": 45.3125,
+        "sigma_sd": 7.758821236653967
       },
-      "P3_gates": {
-        "valid_pct": 59.375,
-        "sigma_sd": 11.025738626953366
-      },
-      "P4_cl61": {
-        "valid_pct": 7.8125,
-        "sigma_sd": 6.277941291873595
-      },
-      "P5_combo": {
-        "valid_pct": 68.75,
-        "sigma_sd": 9.583856496569924
+      "ctx_300s_fb": {
+        "valid_pct": 10.9375,
+        "sigma_sd": 7.4845762162059
       }
     }
   },
   "CL61": {
     "n_streams": 11,
     "props": {
-      "baseline": {
+      "baseline_300s": {
         "valid_pct": 0.0,
         "sigma_sd": NaN
       },
-      "P1_avg": {
+      "new_30s_K0_fb": {
+        "valid_pct": 13.333333333333334,
+        "sigma_sd": 10.215294113613243
+      },
+      "ctx_30s_nofb": {
         "valid_pct": 0.0,
         "sigma_sd": NaN
       },
-      "P2_consec": {
-        "valid_pct": 0.0,
-        "sigma_sd": NaN
-      },
-      "P3_gates": {
-        "valid_pct": 0.0,
-        "sigma_sd": NaN
-      },
-      "P4_cl61": {
+      "ctx_300s_fb": {
         "valid_pct": 0.0,
         "sigma_sd": 89.84691502192005
-      },
-      "P5_combo": {
-        "valid_pct": 37.5,
-        "sigma_sd": 9.708675064171333
       }
     }
   }

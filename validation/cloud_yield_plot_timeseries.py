@@ -50,23 +50,23 @@ def plot_type(t, labels, ncol=4):
         ax.axis("on")
         days = json.loads((CYD / f"cy_{lab}.json").read_text())
         xb, yb = series(days, "base_300s", "K0", CONST_BASE[t])
-        xp, yp = series(days, "native", "K7", CONST[t])
+        xp, yp = series(days, "fine_30s", "K0", CONST[t])   # new version: 30s + K0 + CL61 fallback
         if len(yb):
-            ax.plot(xb, yb, "o-", ms=4, lw=0.8, color="#7f7f7f", label=f"baseline (n={len(yb)}, σ{sigma_sd(yb):.0f})")
+            ax.plot(xb, yb, "o-", ms=4, lw=0.8, color="#7f7f7f", label=f"baseline 300s (n={len(yb)}, σ{sigma_sd(yb):.0f})")
             ax.axhline(np.median(yb), color="#7f7f7f", ls=":", lw=0.8)
         if len(yp):
-            ax.plot(xp, yp, "s-", ms=4, lw=0.8, color="#d62728", alpha=0.8,
-                    label=f"P5 combo (n={len(yp)}, σ{sigma_sd(yp):.0f})")
+            ax.plot(xp, yp, "s-", ms=4, lw=0.8, color="#1f77b4", alpha=0.8,
+                    label=f"new 30s+fb (n={len(yp)}, σ{sigma_sd(yp):.0f})")
             md = np.median(yp)
-            ax.axhline(md, color="#d62728", ls="--", lw=0.8)
-            ax.axhspan(md * (1 - sigma_sd(yp) / 100), md * (1 + sigma_sd(yp) / 100), color="#d62728", alpha=0.07)
+            ax.axhline(md, color="#1f77b4", ls="--", lw=0.8)
+            ax.axhspan(md * (1 - sigma_sd(yp) / 100), md * (1 + sigma_sd(yp) / 100), color="#1f77b4", alpha=0.08)
         ax.set_title(f"{lab}", fontsize=9)
         ax.legend(fontsize=7, loc="best")
         ax.tick_params(labelsize=7)
         ax.grid(True, alpha=0.2)
         for lb in ax.get_xticklabels():
             lb.set_rotation(30); lb.set_ha("right")
-    fig.suptitle(f"{t} — C_L time series: baseline (300 s / K0) vs P5 (native / K7 + CL61 fallback). "
+    fig.suptitle(f"{t} — C_L time series: baseline (300 s / K0) vs NEW (30 s / K0 + CL61 fallback). "
                  f"Dashed = median, shaded = ±σ_SD.", fontsize=13)
     fig.tight_layout()
     out = REPORT / f"cl_timeseries_{t}.png"
