@@ -42,6 +42,14 @@
   <div class="card">{{ figs.cl_type_pct | safe }}</div>
 </section>
 
+{% if cl_iqr %}
+<h2 class="sec-h">Median C&#8203;<sub>L</sub> per station — ranked, by instrument type
+  <span class="muted">(error bar = inter-quartile range)</span></h2>
+{% for t, div in cl_iqr %}
+<section><div class="card">{{ div | safe }}</div></section>
+{% endfor %}
+{% endif %}
+
 {% if watch %}
 <section class="watch">
   <h2>Watchlist <span class="muted">({{ watch | length }})</span></h2>

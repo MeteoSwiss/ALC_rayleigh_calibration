@@ -196,10 +196,14 @@ def _copy_diagnostics(diag: pd.DataFrame, cal: pd.DataFrame, out_dir: Path) -> d
             continue
         key, method, date = str(r["key"]), str(r["method"]), str(r["date"])
         dst_dir = out_dir / "diag" / key
-        dst_dir.mkdir(parents=True, exist_ok=True)
         fname = f"{method}_{date}.png"
+        dst = dst_dir / fname
         try:
-            shutil.copyfile(src, dst_dir / fname)
+            # Incremental copy: skip PNGs already present at the same size. Re-copying the whole
+            # diagnostic set (~75k files) every build is very slow, especially on OneDrive.
+            if not (dst.exists() and dst.stat().st_size == src.stat().st_size):
+                dst_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(src, dst)
         except OSError:
             continue
         by.setdefault((key, method), []).append(
@@ -265,6 +269,19 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
         "cl_type_abs": charts.fig_to_div(charts.value_by_type_method_box(series), "fig-cltype"),
         "cl_type_pct": charts.fig_to_div(charts.value_pct_theoretical_box(series), "fig-cltype-pct"),
     }
+    # Per-station median C_L with IQR (Q1..Q3 of that station's successful daily values), one ranked
+    # plot per instrument type. Pools both methods per station -- C_L is the same physical quantity.
+    key_itype = dict(zip(st["key"], st["itype"]))
+    okc = cal[(cal["success"] == 1) & (cal["cal_value"] > 0)].copy()
+    okc["itype"] = okc["key"].map(key_itype)
+    okc = okc.dropna(subset=["itype"])
+    gb = okc.groupby(["itype", "key"])["cal_value"]
+    sta_iqr = pd.DataFrame({"med": gb.median(), "q1": gb.quantile(0.25),
+                            "q3": gb.quantile(0.75), "n": gb.size()}).reset_index()
+    cl_iqr_figs = [(t, charts.fig_to_div(charts.cl_median_iqr_by_station(sta_iqr[sta_iqr["itype"] == t], t),
+                                         f"fig-cliqr-{t}"))
+                   for t in config.TYPE_ORDER if (sta_iqr["itype"] == t).any()]
+
     # Search index for the nav-bar station search (name + WIGOS id + key, all matchable).
     search_records = []
     for _, r in st.iterrows():
@@ -284,7 +301,7 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
             sorted(set(st["itype"]) - set(config.TYPE_ORDER) - {"Unknown"}) + \
             (["Unknown"] if "Unknown" in set(st["itype"]) else [])
     summary_html = env.get_template("summary.html").render(
-        base="", logo=logo, summary=summary, figs=summary_figs,
+        base="", logo=logo, summary=summary, figs=summary_figs, cl_iqr=cl_iqr_figs,
         watch=watch.to_dict("records"), rows=_series_table_rows(cal, series, st),
         countries=countries, types=types, search_json=search_json,
     )

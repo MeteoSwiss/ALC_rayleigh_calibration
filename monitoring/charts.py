@@ -201,6 +201,44 @@ def value_pct_theoretical_box(series: pd.DataFrame) -> go.Figure:
     return fig
 
 
+def cl_median_iqr_by_station(d: pd.DataFrame, itype: str) -> go.Figure:
+    """Stations of ONE instrument type ranked low->high by their MEDIAN lidar constant C_L, with the
+    interquartile range (Q1..Q3 of that station's successful daily C_L) drawn as an asymmetric error
+    bar. Red dashed = the theoretical C_L for the type; blue dashed = the type's network median of the
+    per-station medians. ``d`` has one row per station: columns key, med, q1, q3, n.
+    """
+    d = d[d["med"] > 0].sort_values("med").reset_index(drop=True)
+    if d.empty:
+        fig = go.Figure()
+        fig.update_layout(**_LAYOUT, title=f"{itype} — no calibrations")
+        return fig
+    rank = np.arange(len(d))
+    color = config.TYPE_COLORS.get(itype, "#1f77b4")
+    fig = go.Figure(go.Bar(
+        x=rank, y=d["med"], name=itype, marker_color=color, width=1.0,
+        error_y=dict(type="data", symmetric=False,
+                     array=(d["q3"] - d["med"]).clip(lower=0),
+                     arrayminus=(d["med"] - d["q1"]).clip(lower=0),
+                     thickness=0.7, width=0, color="rgba(50,50,50,0.55)"),
+        customdata=list(zip(d["key"], d["n"], d["q1"], d["q3"])),
+        hovertemplate=("%{customdata[0]}<br>median C_L = %{y:.3g}"
+                       "<br>IQR = [%{customdata[2]:.3g}, %{customdata[3]:.3g}]  (n=%{customdata[1]})"
+                       "<extra>" + itype + "</extra>")))
+    theo = config.theoretical_cl(itype)
+    if theo and theo > 0:
+        fig.add_hline(y=theo, line=dict(color="#d62728", width=1.5, dash="dash"),
+                      annotation_text=f"theoretical ({theo:.3g})", annotation_position="top left")
+    net = float(d["med"].median())
+    fig.add_hline(y=net, line=dict(color="#1f77b4", width=1.5, dash="dash"),
+                  annotation_text=f"network median ({net:.3g})", annotation_position="bottom right")
+    fig.update_layout(**_LAYOUT, showlegend=False,
+                      title=f"{itype} — stations ranked by median C_L (n={len(d)} stations, error bar = IQR)",
+                      xaxis_title="station (ranked by median C_L)", yaxis_title="C_L")
+    fig.update_layout(height=400)
+    fig.update_yaxes(exponentformat="e", rangemode="tozero")
+    return fig
+
+
 # --- Station-page figures (one set per method) ------------------------------
 
 def series_timeseries(g_m: pd.DataFrame, kal_m: pd.DataFrame, method: str,
