@@ -238,7 +238,7 @@ def _method_block(key, method, cal, kal, series, diags=None, op_all=None):
 
 
 def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
-               flagex_dir=None, opcoeff_csv=None) -> dict:
+               flagex_dir=None, opcoeff_csv=None, only_keys=None) -> dict:
     out_dir = Path(out_dir)
     (out_dir / "stations").mkdir(parents=True, exist_ok=True)
     logo = _write_assets(out_dir)
@@ -318,6 +318,11 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
 
     # --- Per-station pages (one per key; all of that key's methods) ----------
     keys = list(st["key"])
+    if only_keys is not None:
+        # incremental rebuild: re-render only the changed stations (the summary above always rebuilds);
+        # unchanged station pages keep their existing HTML on disk
+        only = set(only_keys)
+        keys = [k for k in keys if k in only]
     if limit_pages:
         keys = keys[:limit_pages]
     station_tmpl = env.get_template("station.html")

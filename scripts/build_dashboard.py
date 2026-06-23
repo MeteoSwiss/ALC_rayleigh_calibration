@@ -33,6 +33,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from monitoring import config, index, render  # noqa: E402
 
 
+def _changed_keys(fullcal_dir: Path, out_dir: Path):
+    """Stations whose per-stream CSV changed since the last build (marker out_dir/.last_build).
+    Returns None when there is no marker yet -> the caller does a full render (first build)."""
+    marker = out_dir / ".last_build"
+    if not marker.exists():
+        return None
+    cutoff = marker.stat().st_mtime
+    changed = set()
+    for csv in list(fullcal_dir.glob("*/*_cal.csv")) + list(fullcal_dir.glob("*/*_cl.csv")):
+        try:
+            if csv.stat().st_mtime > cutoff:
+                changed.add(csv.parent.name)   # the key == the per-stream sub-folder name
+        except OSError:
+            continue
+    return changed
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--fullcal", type=Path, default=config.DEFAULT_FULLCAL_DIR,
@@ -57,6 +74,9 @@ def main() -> None:
     ap.add_argument("--opcoeff", type=Path, default=None,
                     help="CSV (key,date,op_coeff) of operational L2 calibration constants "
                          "(from scripts/extract_l2_opcoeff.py) for the ratio maps + time-series line")
+    ap.add_argument("--changed-only", action="store_true",
+                    help="incremental: re-render only station pages whose <key>_cal.csv changed since "
+                         "the last build (the summary always rebuilds). Fast path for daily updates.")
     args = ap.parse_args()
 
     types = [t.strip() for t in args.types.split(",")] if args.types else None
@@ -70,9 +90,19 @@ def main() -> None:
           f"{stats['n_calibrations']} calibrations, {stats['date_min']}..{stats['as_of']}  "
           f"({time.perf_counter() - t0:.1f}s)", flush=True)
 
+    only_keys = None
+    if args.changed_only:
+        only_keys = _changed_keys(args.fullcal, args.out)
+        if only_keys is None:
+            print("  changed-only: no prior build marker -> full render", flush=True)
+        else:
+            print(f"  changed-only: {len(only_keys)} station(s) changed since last build", flush=True)
+
     print("Rendering site ...", flush=True)
     site = render.build_site(db_path, args.out, limit_pages=args.limit_pages, flagex_dir=args.flagex,
-                             opcoeff_csv=args.opcoeff)
+                             opcoeff_csv=args.opcoeff, only_keys=only_keys)
+    # stamp the build time so the next --changed-only run knows what to re-render
+    (args.out / ".last_build").write_text(time.strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
     print(f"  {site['n_pages']} station pages -> {site['out_dir']}  "
           f"({time.perf_counter() - t0:.1f}s total)", flush=True)
 
