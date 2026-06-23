@@ -29,18 +29,27 @@ CL31/CL51 is **dropping the pre-average + easing the gates**. Together (P5) they
 
 ### Adopted version — measured performance (31 streams, L1)
 
-| type (n) | baseline 300 s | **NEW 30 s + fallback** | 30 s, no fallback | 300 s + fallback |
-|---|---|---|---|---|
-| **CL31** (10) | 16 % (σ 7.4) | **53 % (σ 9.5)** | 53 % | 16 % |
-| **CL51** (10) | 11 % (σ 7.5) | **45 % (σ 7.8)** | 45 % | 11 % |
-| **CL61** (11) | 0 % | **13 % (σ 10.2)** | 0 % | 0 % |
+Three changes (all implemented): **30 s/10 m cadence**, **CL61 C_L fallback**, **window-transmission
+correction at 50 %** (correct β by `1/T²` instead of rejecting < 90 %; literature gates otherwise
+unchanged).
 
-The two right columns isolate the two changes: **30 s alone** delivers the CL31/CL51 jump but leaves
-CL61 at 0 % (C_L still NaN); **the fallback at 300 s** also leaves CL61 at 0 % (almost no CL61 cloud
-survives the strict gates at 300 s). **Both are needed for CL61.** Per-station: CL31 **10/10**,
-CL51 **9/10**, CL61 **8/11** streams now produce valid calibrations (from 0). σ is far below the
-rejected P5 (CL31 9.5 vs 11, CL51 7.8 vs 9.6), and the CL61 series are clean (~1.0–1.2 plateaus, no
-outliers) — see the time-series in §5b.
+| type (n) | baseline 300 s | 30 s + fallback | **+ window correction (FINAL)** | streams > 0 |
+|---|---|---|---|---|
+| **CL31** (10) | 16 % (σ 7.4) | 53 % | **53 % (σ 9.8)** | 10/10 |
+| **CL51** (10) | 11 % (σ 7.5) | 45 % | **47 % (σ 7.8)** | 9/10 → **10/10** |
+| **CL61** (11) | 0 % | 13 % | **22 % (σ 12.2)** | 8/11 → **10/11** |
+
+**Both 30 s and the fallback are needed for CL61** (30 s alone leaves C_L NaN → 0 %; the fallback at
+300 s finds almost no cloud → 0 %). **The window correction then recovers the degraded-window sites**
+that returned nothing: CL51 06447_A (window 65 %) **0 → 66 %**, CL61 06418_B **0 → 19 %**, CL61
+0-380-5-1 **0 → 16 %** — lifting CL61's median 13 → 22 % and bringing CL51 to 10/10 and CL61 to 10/11
+streams. Clean-window CL31 is unchanged. σ stays far below the rejected P5 (CL31 9.8 vs 11), and the
+CL61 series are clean plateaus (§5b).
+
+**Speed:** profiling showed the cost was the water-vapour step (re-loading the absorption LUT every
+call) + the per-profile Python loops. Caching the LUT and vectorising `calculate_lidar_ratio` /
+`apply_instrument_filters` cut the calibration from ~237 → ~157 ms/day (~34 %), **bit-identical** to
+the old result with the correction off.
 
 ![Adopted vs baseline + isolation columns](cloud_yield_figure.png)
 
@@ -157,13 +166,16 @@ The aggressive native+K7 option (P5) was **rejected as too noisy** (σ ~11 %, CL
 2. **Cloud averaging 300 s → 30 s / 10 m, literature gates unchanged** (`n_consecutive=5` etc.) —
    runner `average_time_s=30`. Finer cadence supplies ~10× more in-cloud profiles so the strict gate
    is met more often, *without* relaxing it.
+3. **Window-transmission correction at 50 %** — correct β by `1/T²` instead of rejecting < 90 %
+   (`apply_window_correction`, `window_correction_threshold=50`). Recovers degraded-window sites.
 
-Measured effect: **CL31 16 → 53 %, CL51 11 → 45 %, CL61 0 → 13 %** dashboard-valid, **σ_SD barely
-changed** (≈ 8–10 %). **Timing is unchanged** — read + water-vapour dominate the per-day cost, so a
-full 2025→2026 rerun at 30 s costs the same ~11 h as the 300 s run did.
+Measured effect: **CL31 16 → 53 %, CL51 11 → 47 % (10/10 streams), CL61 0 → 22 % (10/11 streams)**
+dashboard-valid, σ_SD ≈ 8–12 %. The cloud calibration is also **~34 % faster** (LUT cache + vectorised
+loops, bit-identical). **Per-day timing is otherwise unchanged** (read dominates), so a full 2025→2026
+rerun still costs ~11 h.
 
-Bottom line: **the CL61 fix is the fallback; the clean yield win is the 30 s cadence at the literature
-gates.** No gate relaxation.
+Bottom line: **CL61 fix = fallback; yield win = 30 s cadence + window correction; all at the literature
+gates** (no relaxation), plus a ~34 % faster cloud step.
 
 ## 7. Why some streams still return 0 valid (it is genuine, not a bug)
 
@@ -184,13 +196,16 @@ attenuates β two-way, which would inflate the O'Connor coefficient by ~`1/T²` 
 literature `window_threshold = 90 %` gate **correctly excludes them** — calibrating through a dirty
 window would give a biased C_L. The 4th stream is genuinely cloud-free with too little data.
 
-**Broader point.** `window_rejected` is the dominant network-wide yield limiter — even *good* streams
-lose many days to it (e.g. CYPN at median 89 % barely passes, 03808_C loses 20/24 days), which is why
-cloud yield plateaus rather than approaching 100 %. **Options:** (a) accept it — these are maintenance
-(window-cleaning) cases and the gate is correct; (b) a future enhancement could *correct* β by the
-known window transmission (divide by `T²`) instead of rejecting, recovering degraded-window sites at
-the cost of a small extra correction uncertainty. Not changed here (out of scope, and it departs from
-the literature method).
+**Broader point.** `window_rejected` was the dominant network-wide yield limiter — even *good* streams
+lost many days to it (CYPN at median 89 % barely passed, 03808_C lost 20/24 days), which is why cloud
+yield plateaued.
+
+**Resolution (implemented).** Rather than reject, the calibration now **corrects** β by the known
+two-way window transmission (`β /= (T/100)²`) and rejects only below a 50 % correction threshold
+(`apply_window_correction`, `window_correction_threshold`). This recovers the degraded-window sites
+(06447_A 0 → 66 %, 06418_B 0 → 19 %, 0-380-5-1 0 → 16 %) and lifts CL61's median yield 13 → 22 % and
+CL51 to 10/10 streams, while leaving the few genuinely cloud-free sites (14015_B) at 0. The correction
+carries a small extra uncertainty (CL61 σ 10 → 12 %), acceptable for the gain.
 
 ## Reproduce
 
