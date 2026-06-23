@@ -1667,8 +1667,13 @@ def liquid_cloud_calibration_from_data(data: CeiloData, config: CloudCalConfig) 
     res.calibration_factor = (1.0 / cal_median) if (np.isfinite(cal_median) and cal_median != 0.0) else float("nan")
     res.calibration_coefficient = cal_median
     # Absolute Wiegner lidar constant C_L = calibration_constant_applied / C, comparable to the
-    # Rayleigh product. NaN when the input file carried no applied constant (e.g. raw L1).
+    # Rayleigh product. Raw-beta L1 (notably CL61) carries NO applied constant, so C_L would be NaN
+    # and the dashboard would drop an otherwise-good calibration. Fall back to the instrument default
+    # (INSTRUMENT_CAL_DEFAULT; 1.0 for CL61) so a headline C_L is still reported -- a normalised
+    # correction relative to the L1 beta, consistent with the CL61 theoretical value of 1.0.
     cc_applied = getattr(data, "calibration_constant_applied", None)
+    if cc_applied is None or not np.isfinite(cc_applied):
+        cc_applied = INSTRUMENT_CAL_DEFAULT.get(str(getattr(config, "instrument", "")), float("nan"))
     if cc_applied is not None and np.isfinite(cc_applied):
         res.calibration_constant_applied = float(cc_applied)
         if np.isfinite(cal_median) and cal_median != 0.0:

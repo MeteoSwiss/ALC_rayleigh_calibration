@@ -208,7 +208,7 @@ def _do_cloud(s, start, end):
                 apply_transmission_correction=True, aerosol_lidar_ratio=50.0,
                 cams_folder=str(CAMS), abs_cs_lookup_table=str(WV_LUT),
                 station_latitude=s["lat"], station_longitude=s["lon"],
-                average_time_s=300.0, average_range_m=10.0,
+                average_time_s=30.0, average_range_m=10.0,   # finer cadence -> more valid cloud cals
             ))
             # Read FIRST so we can tell NO DATA (file present but no usable signal -> flag 0)
             # apart from NO CLOUD (data fine, but clear sky / no liquid cloud -> flag -1).

@@ -33,14 +33,13 @@ TYPES = ["CL31", "CL51", "CL61"]
 CONST = {"CL31": 1e8, "CL51": 1e8, "CL61": np.nan}            # baseline C_L constant per type
 CONST_FB = {"CL31": 1e8, "CL51": 1e8, "CL61": 1.0}            # with the CL61 fallback
 
-# proposition -> (variant, config, const-table)
+# proposition -> (variant, config, const-table). CHOSEN production version = new_30s_K0_fb:
+# 30 s/10 m averaging + literature-default gates (K0) + CL61 applied-constant fallback.
 PROPS = {
-    "baseline":  ("base_300s", "K0", CONST),
-    "P1_avg":    ("native",    "K0", CONST),
-    "P2_consec": ("base_300s", "K1", CONST),
-    "P3_gates":  ("base_300s", "K7", CONST),
-    "P4_cl61":   ("base_300s", "K0", CONST_FB),
-    "P5_combo":  ("native",    "K7", CONST_FB),
+    "baseline_300s":  ("base_300s", "K0", CONST),     # current dashboard (CL61 -> 0)
+    "new_30s_K0_fb":  ("fine_30s",  "K0", CONST_FB),  # << CHOSEN new version
+    "ctx_30s_nofb":   ("fine_30s",  "K0", CONST),     # 30 s without the CL61 fallback (isolates the fallback)
+    "ctx_300s_fb":    ("base_300s", "K0", CONST_FB),  # 300 s + fallback (isolates the averaging)
 }
 
 

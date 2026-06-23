@@ -38,9 +38,9 @@ from validation.run_cloud_sweep import base_config, CONFIGS, MANIFEST, ROOTS
 OUT = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/figs_paper_validation/cloud_yield")
 OUT.mkdir(parents=True, exist_ok=True)
 
-# Averaging variants (time_s, range_m). None = no averaging on that axis (native cadence/grid).
-VARIANTS = {"base_300s": (300.0, 10.0), "native": (None, None)}
-# Gate configs to compare (subset of run_cloud_sweep.CONFIGS): baseline, n_consec=3, aggressive.
+# Averaging variants (time_s, range_m). The chosen production change is 30 s / 10 m vs the old 300 s.
+VARIANTS = {"base_300s": (300.0, 10.0), "fine_30s": (30.0, 10.0)}
+# Keep the LITERATURE-default gates (K0); K1/K7 retained only for context.
 CFG = {"K0": CONFIGS["K0_baseline"], "K1": CONFIGS["K1_consec3"], "K7": CONFIGS["K7_aggressive"]}
 
 START, END = datetime(2026, 1, 1), datetime(2026, 5, 31)
