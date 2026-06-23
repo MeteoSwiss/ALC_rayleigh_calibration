@@ -321,16 +321,20 @@ def _kalman_rows(rows):
     return out
 
 
-def _preserve_other_methods(csv_path, methods):
-    """Return rows from an existing per-stream CSV whose method was NOT recomputed this run, so a
-    partial run (e.g. --methods cloud) keeps the other method's rows instead of dropping them."""
+def _preserve_existing_rows(csv_path, methods, start, end):
+    """Rows from an existing per-stream CSV to KEEP unchanged: those of a method we did NOT recompute,
+    OR of a recomputed method but with a date OUTSIDE the processed [start, end] window. This lets a
+    daily / partial run replace only the dates it actually processed and ACCUMULATE history, instead
+    of overwriting the whole file with just the processed window (which would wipe prior days)."""
     if not csv_path.exists():
         return []
+    s, e = start.strftime("%Y%m%d"), end.strftime("%Y%m%d")   # YYYYMMDD sorts chronologically
     keep = []
     try:
         with open(csv_path, newline="", encoding="utf-8") as f:
             for r in csv.DictReader(f):
-                if r.get("method") not in methods:
+                method, date = r.get("method"), str(r.get("date", ""))
+                if (method not in methods) or not (s <= date <= e):
                     keep.append({k: r.get(k, "") for k in CSV_FIELDS})
     except (OSError, csv.Error):
         return []
@@ -351,8 +355,9 @@ def _process_stream(payload):
         rows += _do_rayleigh(s, start, end)
     if "cloud" in methods and s["type"] in CLOUD_TYPES:
         rows += _do_cloud(s, start, end)
-    # preserve rows for any method we did NOT recompute (keeps Rayleigh during a cloud-only rerun)
-    rows += _preserve_other_methods(sdir / f"{key}_cal.csv", methods)
+    # keep prior rows outside the processed window (and other methods), so daily/partial runs
+    # accumulate history instead of overwriting the file with just the processed dates
+    rows += _preserve_existing_rows(sdir / f"{key}_cal.csv", methods, start, end)
     rows.sort(key=lambda r: (r["method"], r["date"]))
 
     _write_csv_atomic(sdir / f"{key}_cal.csv", CSV_FIELDS, rows)
