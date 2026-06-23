@@ -357,6 +357,11 @@ def _process_stream(payload):
         rows += _do_rayleigh(s, start, end)
     if "cloud" in methods and s["type"] in CLOUD_TYPES:
         rows += _do_cloud(s, start, end)
+    # This stream produced nothing for the processed window (no L1 data these dates): leave its files
+    # untouched (don't even rewrite an identical CSV), so a daily run only "touches" ACTIVE streams and
+    # the dashboard's --changed-only re-renders just those.
+    if not rows:
+        return key, s["type"], 0, 0
     # keep prior rows outside the processed window (and other methods), so daily/partial runs
     # accumulate history instead of overwriting the file with just the processed dates
     rows += _preserve_existing_rows(sdir / f"{key}_cal.csv", methods, start, end)
@@ -371,11 +376,14 @@ def _process_stream(payload):
 
 
 # --- Stream selection -------------------------------------------------------
-def select(census, types, per_type, limit, start, end):
+def select(census, types, per_type, limit, start, end, ignore_coverage=False):
     s0, s1 = start.strftime("%Y%m%d"), end.strftime("%Y%m%d")
+    # The census first/last coverage is a static snapshot; for a daily run (date past the snapshot) it
+    # would wrongly drop streams. ignore_coverage selects every census stream of the type and lets the
+    # per-stream L1-file check decide whether there is data for the day.
     streams = [s for s in census
                if s.get("type") in types
-               and s.get("first", "") <= s1 and s.get("last", "") >= s0]
+               and (ignore_coverage or (s.get("first", "") <= s1 and s.get("last", "") >= s0))]
     if per_type:
         sub = []
         for t in types:
@@ -406,6 +414,9 @@ def main():
     ap.add_argument("--force", action="store_true",
                     help="re-process streams even if a *_cal.csv already exists (needed for in-place "
                          "reruns such as a cloud-only update that keeps the previous Rayleigh output)")
+    ap.add_argument("--ignore-coverage", action="store_true",
+                    help="select every census stream of the type, ignoring its first/last coverage "
+                         "snapshot (use for daily runs whose date is past the snapshot)")
     args = ap.parse_args()
 
     start = datetime.strptime(args.start, "%Y%m%d")
@@ -427,7 +438,8 @@ def main():
         return
 
     types = [t.strip() for t in args.types.split(",")]
-    streams = select(census, types, args.per_type, args.limit, start, end)
+    streams = select(census, types, args.per_type, args.limit, start, end,
+                     ignore_coverage=args.ignore_coverage)
     # drop streams that have no work for the requested methods (e.g. CHM15k/Mini-MPL under --methods cloud)
     relevant = (RAYLEIGH_TYPES if "rayleigh" in methods else set()) | (CLOUD_TYPES if "cloud" in methods else set())
     streams = [s for s in streams if s["type"] in relevant]

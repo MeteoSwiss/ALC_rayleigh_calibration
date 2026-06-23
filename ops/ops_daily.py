@@ -99,7 +99,7 @@ def fetch_cams(ds: str, retries: int = 3) -> bool:
 
 def calibrate(ds: str) -> bool:
     cmd = [PY, str(REPO / "scripts" / "run_all_l1_2026.py"),
-           "--start", ds, "--end", ds, "--per-type", "0",
+           "--start", ds, "--end", ds, "--per-type", "0", "--ignore-coverage",
            "--workers", WORKERS, "--methods", "rayleigh,cloud", "--force"]
     log(f"  calibrate {ds}: {' '.join(cmd[1:])}")
     return subprocess.run(cmd, cwd=str(REPO)).returncode == 0
