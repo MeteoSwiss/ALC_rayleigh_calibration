@@ -223,6 +223,7 @@ def cl_median_iqr_by_station(d: pd.DataFrame, itype: str) -> go.Figure:
         customdata=list(zip(d["key"], d["n"], d["q1"], d["q3"])),
         hovertemplate=("%{customdata[0]}<br>median C_L = %{y:.3g}"
                        "<br>IQR = [%{customdata[2]:.3g}, %{customdata[3]:.3g}]  (n=%{customdata[1]})"
+                       "<br><i>click to open station →</i>"
                        "<extra>" + itype + "</extra>")))
     theo = config.theoretical_cl(itype)
     if theo and theo > 0:
