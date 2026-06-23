@@ -165,6 +165,33 @@ full 2025→2026 rerun at 30 s costs the same ~11 h as the 300 s run did.
 Bottom line: **the CL61 fix is the fallback; the clean yield win is the 30 s cadence at the literature
 gates.** No gate relaxation.
 
+## 7. Why some streams still return 0 valid (it is genuine, not a bug)
+
+Under the adopted version, 4 of the 31 test streams yield 0 valid (CL31 10/10, CL51 9/10, CL61 8/11).
+Re-running each at 30 s/K0 and tabulating the rejection reason per day shows it is **physical, not a
+gate artefact**:
+
+| stream | type | dominant reason (24 sampled days) | window transmission (median) |
+|---|---|---|---|
+| 0-20000-0-06447_A | CL51 | `window_rejected` 24/24 | **65 %** |
+| 0-20000-0-06418_B | CL61 | `window_rejected` 24/24 | **77 %** |
+| 0-380-5-1_B | CL61 | `window_rejected` 24/24 | **77 %** |
+| 0-20000-0-14015_B | CL61 | `no liquid cloud` 4/4 | (clear; only 4 days of data) |
+
+The window transmission is on the correct **0–100 scale** (good streams read 92–100 %), so these three
+sites genuinely have **degraded/dirty ceilometer windows (65–80 %)**. A window at transmission *T*
+attenuates β two-way, which would inflate the O'Connor coefficient by ~`1/T²` (≈1.7× at 77 %), so the
+literature `window_threshold = 90 %` gate **correctly excludes them** — calibrating through a dirty
+window would give a biased C_L. The 4th stream is genuinely cloud-free with too little data.
+
+**Broader point.** `window_rejected` is the dominant network-wide yield limiter — even *good* streams
+lose many days to it (e.g. CYPN at median 89 % barely passes, 03808_C loses 20/24 days), which is why
+cloud yield plateaus rather than approaching 100 %. **Options:** (a) accept it — these are maintenance
+(window-cleaning) cases and the gate is correct; (b) a future enhancement could *correct* β by the
+known window transmission (divide by `T²`) instead of rejecting, recovering degraded-window sites at
+the cost of a small extra correction uncertainty. Not changed here (out of scope, and it departs from
+the literature method).
+
 ## Reproduce
 
 ```

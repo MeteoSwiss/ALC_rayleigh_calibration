@@ -82,9 +82,9 @@ def main():
         t = META.get(lab, {}).get("group")
         if t in by:
             by[t].append(lab)
-    plot_type("CL61", sorted(by["CL61"]), ncol=4)                 # all 11
-    plot_type("CL31", sorted(by["CL31"])[:8], ncol=4)
-    plot_type("CL51", sorted(by["CL51"])[:8], ncol=4)
+    plot_type("CL61", sorted(by["CL61"]), ncol=4)   # all stations of each type
+    plot_type("CL31", sorted(by["CL31"]), ncol=4)
+    plot_type("CL51", sorted(by["CL51"]), ncol=4)
 
 
 if __name__ == "__main__":
