@@ -32,13 +32,15 @@
   <div class="card">{{ b.figs.ts | safe }}</div>
 
   {% if b.diags %}
-  <section class="diag card" id="diag-{{ b.method }}" data-ts="fig-ts-{{ b.method }}" tabindex="0">
+  <section class="diag card" id="diag-{{ b.method }}" data-ts="fig-ts-{{ b.method }}"
+           data-key="{{ key }}" data-method="{{ b.method }}" data-itype="{{ meta.itype }}" tabindex="0">
     <h3>Diagnostic — <span class="diag-date muted">latest</span>
       <span class="diag-nav">
         <button type="button" class="diag-prev" title="Previous valid calibration (←)">‹ prev cal</button>
         <button type="button" class="diag-next" title="Next valid calibration (→)">next cal ›</button>
         <button type="button" class="diag-up" title="Previous day (↑)">↑ day</button>
         <button type="button" class="diag-down" title="Next day (↓)">↓ day</button>
+        <button type="button" class="diag-flag" title="Flag this date / instrument / method for QC review — saved in your browser; export via the widget at bottom-right">⚑ flag</button>
       </span>
       <span class="muted diag-hint">— <b>← →</b> valid calibrations, <b>↑ ↓</b> all days
         (<span class="cal-key cal-ok"></span> good calibration · <span class="cal-key cal-bad"></span> rejected)</span>

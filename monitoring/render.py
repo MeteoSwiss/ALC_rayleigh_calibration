@@ -72,7 +72,7 @@ def _write_assets(out_dir: Path) -> str | None:
     assets = out_dir / "assets"
     assets.mkdir(parents=True, exist_ok=True)
     (assets / "plotly.min.js").write_text(get_plotlyjs(), encoding="utf-8")
-    for name in ("style.css", "table-sort.js", "paginate.js", "filter.js", "diag.js", "search.js"):
+    for name in ("style.css", "table-sort.js", "paginate.js", "filter.js", "qcflag.js", "diag.js", "search.js"):
         src = _STATIC / name
         if src.exists():
             shutil.copyfile(src, assets / name)

@@ -70,7 +70,24 @@
     var link = section.querySelector(".diag-imglink");
     var label = section.querySelector(".diag-date");
     var calEl = section.querySelector(".diag-cal");
+    var flagBtn = section.querySelector(".diag-flag");
     var idx = validIdx.length ? validIdx[validIdx.length - 1] : items.length - 1;  // default: latest valid
+
+    function curRec() {
+      var k = section.getAttribute("data-key") || "";
+      var li = k.lastIndexOf("_");
+      return {
+        key: k,
+        wmo: li >= 0 ? k.slice(0, li) : k,
+        identifier: li >= 0 ? k.slice(li + 1) : "",
+        itype: section.getAttribute("data-itype") || "",
+        method: section.getAttribute("data-method") || "",
+        date: items[idx] ? items[idx].date : ""
+      };
+    }
+    function syncFlag() {
+      if (flagBtn && window.QCFlags) { flagBtn.classList.toggle("flagged", window.QCFlags.has(curRec())); }
+    }
 
     function show(i) {
       if (i < 0 || i >= items.length) return;
@@ -82,6 +99,7 @@
       Array.prototype.forEach.call(calEl.querySelectorAll(".cal-day.sel"), function (c) { c.classList.remove("sel"); });
       var cell = calEl.querySelector('.cal-day[data-date="' + it.date + '"]');
       if (cell) cell.classList.add("sel");
+      syncFlag();
       active = viewer;
     }
     var viewer = {
@@ -103,6 +121,9 @@
     var up = section.querySelector(".diag-up"), dn = section.querySelector(".diag-down");
     if (up) up.addEventListener("click", function () { viewer.prevAny(); });
     if (dn) dn.addEventListener("click", function () { viewer.nextAny(); });
+    if (flagBtn) flagBtn.addEventListener("click", function () {
+      if (window.QCFlags) { window.QCFlags.toggle(curRec()); syncFlag(); }
+    });
     section.addEventListener("mouseenter", function () { active = viewer; });
     section.addEventListener("focus", function () { active = viewer; });
     wireTimeSeries(section.getAttribute("data-ts"), viewer);
