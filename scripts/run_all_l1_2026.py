@@ -59,6 +59,7 @@ import logging
 import math
 import subprocess
 import sys
+import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
@@ -150,6 +151,14 @@ def _is_success(flag):
         return float(flag) in _SUCCESS
     except (TypeError, ValueError):
         return False
+
+
+def _fmt_hms(seconds):
+    """Format a duration in seconds as H:MM:SS for progress / ETA lines."""
+    seconds = int(max(0.0, seconds))
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h:d}:{m:02d}:{s:02d}"
 
 
 def _write_csv_atomic(path, fieldnames, rows):
@@ -438,18 +447,26 @@ def main():
     # The thread pool only SUPERVISES the per-stream subprocesses (the heavy numpy/netCDF
     # work runs in the children). A hung child is killed at the timeout and the run goes on
     # -- unlike a ProcessPoolExecutor worker, which hangs the whole pool indefinitely.
+    n_todo = len(todo)
+    t0 = time.monotonic()
     with ThreadPoolExecutor(max_workers=args.workers) as ex:
         futs = {ex.submit(_run_stream, s): s for s in todo}
         for k, fut in enumerate(as_completed(futs), 1):
             s = futs[fut]
             try:
                 key, status = fut.result()
-                print(f"[{k}/{len(todo)}] {key} ({s['type']}): {status}", flush=True)
+                msg = f"{key} ({s['type']}): {status}"
             except Exception as exc:  # noqa: BLE001
-                print(f"[{k}/{len(todo)}] FAILED {_key(s)}: {type(exc).__name__}: {exc}", flush=True)
+                msg = f"FAILED {_key(s)}: {type(exc).__name__}: {exc}"
+            # ETA: linear extrapolation from the average per-stream time so far (refines as it runs)
+            elapsed = time.monotonic() - t0
+            remaining = (n_todo - k) * elapsed / k if k else 0.0
+            eta_clock = (datetime.now() + timedelta(seconds=remaining)).strftime("%a %H:%M")
+            print(f"[{k}/{n_todo}] {msg} | elapsed {_fmt_hms(elapsed)} | "
+                  f"ETA {_fmt_hms(remaining)} (~{eta_clock})", flush=True)
 
     Path(OUT / "ALL_DONE.flag").write_text("done")
-    print("L1_2026_DONE", flush=True)
+    print(f"L1_2026_DONE — {n_todo} streams in {_fmt_hms(time.monotonic() - t0)}", flush=True)
 
 
 if __name__ == "__main__":
