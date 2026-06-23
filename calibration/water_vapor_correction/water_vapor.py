@@ -57,9 +57,13 @@ DEFAULT_ABS_CROSS_SECTION = (
 )
 
 
+_ABS_CS_CACHE: dict = {}
+
+
 def load_abs_cross_section(lut_path: Optional[Path] = None) -> Tuple[NDArray, NDArray, NDArray]:
     """
-    Load the HITRAN/MT-CKD absorption cross-section LUT.
+    Load the HITRAN/MT-CKD absorption cross-section LUT (cached — it is static and read-only, so it is
+    parsed once per path and reused across every cloud calibration).
 
     With no path (or a missing / empty one) the bundled 910 nm band LUT
     (:data:`DEFAULT_ABS_CROSS_SECTION`) is used, so the water-vapour correction
@@ -73,6 +77,10 @@ def load_abs_cross_section(lut_path: Optional[Path] = None) -> Tuple[NDArray, ND
     """
     if lut_path is None or str(lut_path).strip() in ("", ".") or not Path(lut_path).exists():
         lut_path = DEFAULT_ABS_CROSS_SECTION
+    key = str(lut_path)
+    cached = _ABS_CS_CACHE.get(key)
+    if cached is not None:
+        return cached
     from netCDF4 import Dataset
     with Dataset(lut_path) as nc:
         wl_nm = np.asarray(nc.variables["lambda"][:], dtype=float)
@@ -81,6 +89,7 @@ def load_abs_cross_section(lut_path: Optional[Path] = None) -> Tuple[NDArray, ND
     # Ensure abscs is [n_wl, n_height]
     if abscs.shape[0] != wl_nm.size and abscs.shape[1] == wl_nm.size:
         abscs = abscs.T
+    _ABS_CS_CACHE[key] = (wl_nm, height_m, abscs)
     return wl_nm, height_m, abscs
 
 

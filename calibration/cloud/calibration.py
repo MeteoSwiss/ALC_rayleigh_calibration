@@ -128,6 +128,12 @@ class CloudCalConfig:
     consistency_range: float = 10.0
     temp_threshold: float = -20.0
     window_threshold: float = 90.0
+    # Window-transmission handling: instead of rejecting profiles below window_threshold, CORRECT the
+    # backscatter for the (two-way) window transmission T -> beta / (T/100)^2, and only reject when
+    # T < window_correction_threshold (so badly-degraded windows where the correction is unreliable
+    # are still dropped). Recovers dirty-window sites that the hard 90 % gate excludes entirely.
+    apply_window_correction: bool = True
+    window_correction_threshold: float = 50.0
     energy_threshold: float = 90.0
     attenuation_factor: float = 20.0
     debug: int = 0
@@ -1016,41 +1022,50 @@ def _interp1_linear_extrap(x: NDArray, y: NDArray, xi: NDArray) -> NDArray:
 def apply_instrument_filters(
     beta: NDArray, data: CeiloData, config: CloudCalConfig
 ) -> Tuple[NDArray, Dict[str, int]]:
-    """Port of ``apply_instrument_filters``: quality-flag / window / energy."""
+    """Quality-flag / window / energy filtering (vectorised over profiles). The window step now
+    CORRECTS the backscatter for the two-way window transmission (beta / (T/100)^2) instead of a hard
+    reject at window_threshold, dropping only profiles below window_correction_threshold."""
     beta_filtered = beta.copy()
     n_profiles = beta.shape[1]
     stats = {"window_rejected": 0, "energy_rejected": 0, "quality_flag_rejected": 0}
 
-    # 1. Quality flag (only present if oriented [range x time]; else data.quality_flag is None)
+    def _alive():
+        return ~np.all(np.isnan(beta_filtered), axis=0)
+
+    # 1. Quality flag (only present if oriented [range x time]).
     if data.quality_flag is not None and data.quality_flag.size:
         lower_gate = _find_first(data.range >= config.cal_minheight)
         upper_gate = _find_last(data.range <= config.cal_maxheight)
         if lower_gate is not None and upper_gate is not None:
-            qf = data.quality_flag
-            for i in range(n_profiles):
-                if qf.shape[0] == beta.shape[0]:
-                    profile_flags = qf[lower_gate:upper_gate + 1, i]
-                else:
-                    profile_flags = qf[i, lower_gate:upper_gate + 1]
-                if np.any(profile_flags > 0):
-                    beta_filtered[:, i] = np.nan
-                    stats["quality_flag_rejected"] += 1
+            qf = np.asarray(data.quality_flag)
+            band = (qf[lower_gate:upper_gate + 1, :] if qf.shape[0] == beta.shape[0]
+                    else qf[:, lower_gate:upper_gate + 1].T)            # (gate, time)
+            bad = np.any(band > 0, axis=0)
+            stats["quality_flag_rejected"] = int(np.sum(bad & _alive()))
+            beta_filtered[:, bad] = np.nan
 
-    # 2. Window transmission
+    # 2. Window transmission: correct (two-way), reject only below the correction threshold.
     if data.window_transmission is not None and data.window_transmission.size:
-        for i in range(n_profiles):
-            if data.window_transmission[i] < config.window_threshold:
-                if not np.all(np.isnan(beta_filtered[:, i])):
-                    beta_filtered[:, i] = np.nan
-                    stats["window_rejected"] += 1
+        wt = np.asarray(data.window_transmission, dtype=float)
+        thr = float(getattr(config, "window_correction_threshold", config.window_threshold))
+        with np.errstate(invalid="ignore"):
+            reject = wt < thr                                          # NaN -> False (kept), as before
+        stats["window_rejected"] = int(np.sum(reject & _alive()))
+        beta_filtered[:, reject] = np.nan
+        if getattr(config, "apply_window_correction", True):
+            corr = np.ones(n_profiles)
+            with np.errstate(invalid="ignore"):
+                ok = (wt >= thr) & (wt > 0)                            # finite, kept profiles only
+            corr[ok] = (wt[ok] / 100.0) ** 2
+            beta_filtered /= corr[np.newaxis, :]
 
-    # 3. Laser energy
+    # 3. Laser energy.
     if data.laser_energy is not None and data.laser_energy.size:
-        for i in range(n_profiles):
-            if data.laser_energy[i] < config.energy_threshold:
-                if not np.all(np.isnan(beta_filtered[:, i])):
-                    beta_filtered[:, i] = np.nan
-                    stats["energy_rejected"] += 1
+        le = np.asarray(data.laser_energy, dtype=float)
+        with np.errstate(invalid="ignore"):
+            rej = le < config.energy_threshold
+        stats["energy_rejected"] = int(np.sum(rej & _alive()))
+        beta_filtered[:, rej] = np.nan
 
     return beta_filtered, stats
 
@@ -1061,7 +1076,9 @@ def apply_instrument_filters(
 def calculate_lidar_ratio(
     beta: NDArray, range_data: NDArray, config: CloudCalConfig
 ) -> Tuple[NDArray, NDArray]:
-    """Port of ``calculate_lidar_ratio``: S = 1/(2*trapz(beta dz)) per profile."""
+    """S = 1/(2*trapz(beta dz)) per profile (vectorised). Same skip rules (all-NaN / >10 % NaN / <3
+    valid) and the same trapezoid as before; the common all-valid columns are integrated in one numpy
+    op, only the rare partial-NaN columns fall back to the per-column loop -> bit-identical result."""
     n_profiles = beta.shape[1]
     S = np.full(n_profiles, np.nan)
     integrated_beta = np.full(n_profiles, np.nan)
@@ -1071,23 +1088,24 @@ def calculate_lidar_ratio(
     if lower_gate is None or upper_gate is None:
         return S, integrated_beta
 
-    for i in range(n_profiles):
-        col = beta[:, i]
-        if np.all(np.isnan(col)):
-            continue
-        beta_profile = col[lower_gate:upper_gate + 1]
-        if np.sum(np.isnan(beta_profile)) > beta_profile.size * 0.1:
-            continue
-        valid_mask = ~np.isnan(beta_profile)
-        if np.sum(valid_mask) < 3:
-            continue
-        # trapz(range_data(lower_gate + find(valid_mask) - 1), beta_profile(valid_mask))
-        x = range_data[lower_gate:upper_gate + 1][valid_mask]
-        y = beta_profile[valid_mask]
-        integ = _trapz(y, x)
-        integrated_beta[i] = integ
-        if integ > 0:
-            S[i] = 1.0 / (2.0 * integ)
+    bw = beta[lower_gate:upper_gate + 1, :]                       # (gate, time)
+    x = np.asarray(range_data[lower_gate:upper_gate + 1], dtype="float64")
+    dx = np.diff(x)[:, np.newaxis]                               # (gate-1, 1)
+    nan_mask = np.isnan(bw)
+    n_total = bw.shape[0]
+    n_nan = nan_mask.sum(axis=0)
+    eligible = (n_total - n_nan >= 3) & (n_nan <= n_total * 0.1)
+    # all-valid columns -> one vectorised trapezoid (identical formula to _trapz)
+    no_nan = eligible & (n_nan == 0)
+    if np.any(no_nan):
+        sub = bw[:, no_nan]
+        integrated_beta[no_nan] = np.sum(0.5 * (sub[1:] + sub[:-1]) * dx, axis=0)
+    # the few partial-NaN columns -> exact per-column trapz over the valid points
+    for i in np.where(eligible & (n_nan > 0))[0]:
+        m = ~nan_mask[:, i]
+        integrated_beta[i] = _trapz(bw[m, i], x[m])
+    pos = integrated_beta > 0
+    S[pos] = 1.0 / (2.0 * integrated_beta[pos])
     return S, integrated_beta
 
 
