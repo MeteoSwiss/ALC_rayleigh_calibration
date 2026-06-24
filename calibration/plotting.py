@@ -984,8 +984,21 @@ def plot_rayleigh_diagnostics_compact(
                          label=(label if first else None))
             first = False
 
-    _hatched_runs(not_used & flagged, "red", "///", "flagged (low cloud)")
+    _hatched_runs(not_used & flagged, "red", "///", "excluded (low cloud)")
     _hatched_runs(not_used & ~flagged, "0.25", "\\\\", "screened / not used")
+
+    # High cloud KEPT for the fit (base above the molecular window): the signal ABOVE the cloud is
+    # masked out before fitting, so flag that masked region in cyan -- it is shown for context but was
+    # NOT used in the fit. (Low cloud columns are excluded outright above; this marks the used ones.)
+    if cbh0 is not None:
+        high_cloud = used & np.isfinite(cbh0) & ~flagged
+        if np.any(high_cloud):
+            y_hi = float(rr.max()) * 1e-3
+            y_lo = np.where(high_cloud, np.clip((cbh0 - 500.0) * 1e-3, 0.0, y_hi), y_hi)
+            ax_r.fill_between(hours_since_start, y_lo, y_hi, where=high_cloud, step="mid",
+                              facecolor="none", edgecolor="#19d3f3", hatch="xx",
+                              linewidth=0.0, alpha=0.75, zorder=3,
+                              label="high cloud (masked above fit)")
 
     # cloud detections (lowest cloud base over time)
     if cbh0 is not None and np.any(np.isfinite(cbh0)):
@@ -1001,8 +1014,8 @@ def plot_rayleigh_diagnostics_compact(
 
     ax_r.set_xlabel("Hours since start")
     ax_r.set_ylabel("Range (km)")
-    ax_r.set_title("Range-corrected signal — full matrix, molecular layer (gold), "
-                   "cloud base (dots), excluded profiles hatched")
+    ax_r.set_title("Range-corrected signal — full night; molecular layer (gold), cloud base (dots); "
+                   "excluded hatched (red=low cloud, grey=screened), high-cloud masked region (cyan)")
     ax_r.grid(True, alpha=0.2)
     ax_r.legend(loc="upper right", fontsize=7, framealpha=0.85, ncol=2)
 
