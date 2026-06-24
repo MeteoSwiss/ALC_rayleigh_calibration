@@ -1,11 +1,13 @@
 // Per-station diagnostic viewer: shows the diagnostic image for a chosen day, a month calendar
-// (good calibrations green, rejected-but-imaged days grey, days with no image blank), and two
-// navigation axes:
-//   * Left / Right  (and the prev/next buttons): step between VALID (successful) calibrations.
-//   * Up / Down     (and the up/down buttons):   step through ALL imaged days (success + rejected).
+// (good calibrations green, rejected-but-imaged days grey, days with no image blank). When a viewer
+// is hovered/focused, three keyboard axes (mirrored by on-card buttons / header links) navigate:
+//   * Left / Right       (prev/next-cal buttons): step between VALID (successful) calibrations.
+//   * Ctrl+Left / Right  (the day buttons):       step through ALL imaged days (success + rejected).
+//   * Up / Down          (header links):          go to the previous / next STATION page.
 // Also syncs with a click on the Plotly time series and on a date in the "all calibrations" table.
 // One viewer per method section (.diag). Station pages live at stations/<key>.html, so image paths
-// (stored site-root-relative as "diag/<key>/<file>") are prefixed with "../".
+// (stored site-root-relative as "diag/<key>/<file>") are prefixed with "../". Prev/next station URLs
+// come from #station-nav (data-prev / data-next).
 (function () {
   var active = null;  // viewer that the arrow keys control (last interacted with)
 
@@ -143,12 +145,21 @@
     show(idx);
   }
 
+  function navStation(dir) {
+    var nav = document.getElementById("station-nav");
+    if (!nav) return false;
+    var url = dir < 0 ? nav.getAttribute("data-prev") : nav.getAttribute("data-next");
+    if (url) { window.location.href = url; return true; }
+    return false;  // already at the first / last station
+  }
+
   document.addEventListener("keydown", function (e) {
-    if (!active || e.target.tagName === "SELECT" || e.target.tagName === "INPUT") return;
-    if (e.key === "ArrowLeft") { active.prevValid(); e.preventDefault(); }
-    else if (e.key === "ArrowRight") { active.nextValid(); e.preventDefault(); }
-    else if (e.key === "ArrowUp") { active.prevAny(); e.preventDefault(); }
-    else if (e.key === "ArrowDown") { active.nextAny(); e.preventDefault(); }
+    if (!active || e.target.tagName === "SELECT" || e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+    var allDays = e.ctrlKey || e.metaKey;   // Ctrl (Cmd on macOS) -> step through ALL imaged days
+    if (e.key === "ArrowLeft") { (allDays ? active.prevAny() : active.prevValid()); e.preventDefault(); }
+    else if (e.key === "ArrowRight") { (allDays ? active.nextAny() : active.nextValid()); e.preventDefault(); }
+    else if (e.key === "ArrowUp") { if (navStation(-1)) e.preventDefault(); }
+    else if (e.key === "ArrowDown") { if (navStation(1)) e.preventDefault(); }
   });
 
   Array.prototype.forEach.call(document.querySelectorAll(".diag"), buildViewer);

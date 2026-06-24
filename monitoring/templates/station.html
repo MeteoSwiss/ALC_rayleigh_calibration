@@ -1,8 +1,11 @@
 {% extends "base.html" %}
 {% block title %}{{ key }} — calibration{% endblock %}
-{% block headerextra %}<a class="back" href="{{ base }}index.html">&larr; summary</a>{% endblock %}
+{% block headerextra %}<a class="back" href="{{ base }}index.html">&larr; summary</a>
+{% if prev_station %}<a class="back" href="{{ prev_station }}" title="Previous station (Up arrow)">&uarr; prev station</a>{% endif %}
+{% if next_station %}<a class="back" href="{{ next_station }}" title="Next station (Down arrow)">&darr; next station</a>{% endif %}{% endblock %}
 
 {% block content %}
+<div id="station-nav" data-prev="{{ prev_station }}" data-next="{{ next_station }}" hidden></div>
 <h1>{{ key }} <span class="badge">{{ meta.itype }}</span>
   {% for b in blocks %}<span class="mtag mtag-{{ b.method }}">{{ b.label }}</span>{% endfor %}
 </h1>
@@ -38,11 +41,11 @@
       <span class="diag-nav">
         <button type="button" class="diag-prev" title="Previous valid calibration (←)">‹ prev cal</button>
         <button type="button" class="diag-next" title="Next valid calibration (→)">next cal ›</button>
-        <button type="button" class="diag-up" title="Previous day (↑)">↑ day</button>
-        <button type="button" class="diag-down" title="Next day (↓)">↓ day</button>
+        <button type="button" class="diag-up" title="Previous day, incl. rejected (Ctrl+←)">‹ day</button>
+        <button type="button" class="diag-down" title="Next day, incl. rejected (Ctrl+→)">day ›</button>
         <button type="button" class="diag-flag" title="Flag this date / instrument / method for QC review — saved in your browser; export via the widget at bottom-right">⚑ flag</button>
       </span>
-      <span class="muted diag-hint">— <b>← →</b> valid calibrations, <b>↑ ↓</b> all days
+      <span class="muted diag-hint">— <b>← →</b> valid calibrations, <b>Ctrl+← →</b> all days, <b>↑ ↓</b> change station
         (<span class="cal-key cal-ok"></span> good calibration · <span class="cal-key cal-bad"></span> rejected)</span>
     </h3>
     <div class="diag-body">

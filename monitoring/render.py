@@ -361,6 +361,10 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
     if limit_pages:
         keys = keys[:limit_pages]
     station_tmpl = env.get_template("station.html")
+    # Full station order (independent of only_keys/limit) so each page's up/down "previous/next
+    # station" links always point at real neighbours, even on an incremental rebuild.
+    all_keys = list(st["key"])
+    nav_idx = {k: i for i, k in enumerate(all_keys)}
     for key in keys:
         meta = st[st["key"] == key].iloc[0].to_dict()
         methods = [m for m in config.METHOD_ORDER
@@ -370,8 +374,12 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
         if len(methods) >= 2:
             by_method = {m: cal[(cal["key"] == key) & (cal["method"] == m)] for m in methods}
             overlay = charts.fig_to_div(charts.cl_overlay(by_method), "fig-overlay")
+        i = nav_idx.get(key)
+        prev_station = f"{all_keys[i - 1]}.html" if (i is not None and i > 0) else ""
+        next_station = f"{all_keys[i + 1]}.html" if (i is not None and i < len(all_keys) - 1) else ""
         html = station_tmpl.render(base="../", logo=logo, key=key, meta=meta,
-                                   blocks=blocks, overlay=overlay, search_json=search_json)
+                                   blocks=blocks, overlay=overlay, search_json=search_json,
+                                   prev_station=prev_station, next_station=next_station)
         (out_dir / "stations" / f"{key}.html").write_text(html, encoding="utf-8")
 
     return dict(out_dir=str(out_dir), n_pages=len(keys), n_series=int(len(series)),
