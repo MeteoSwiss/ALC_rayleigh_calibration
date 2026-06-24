@@ -53,6 +53,7 @@ from ..io.cams import ensure_cams_file
 from ..plotting import (
     plot_rcs_timeseries,
     plot_rayleigh_diagnostics_compact,
+    plot_rayleigh_diagnostics_failure,
 )
 
 
@@ -78,6 +79,33 @@ def _plot_dir(options: CalibrationOptions, info: InstrumentInfo, date_str: str) 
 def _plot_tag(info: InstrumentInfo, date_str: str) -> str:
     """File-name prefix for a plot, e.g. '20260101_0-20000-0-06610'."""
     return f"{date_str}_{info.wmo_id}"
+
+
+def _emit_failure_plot(options: CalibrationOptions, info: InstrumentInfo, date_str: str, *,
+                       rcs, range_alc, hours_since_start, reason: str,
+                       cbh=None, altitude: float = 0.0, p_mol=None,
+                       molecular_window=None) -> None:
+    """Save a Rayleigh *failure* diagnostic for a night that did not calibrate, under the
+    SAME ``<tag>_rayleigh_diag_compact.png`` filename as a success so the monitoring viewer
+    lists it. Gated on ``plot_main`` (like the success dashboard); never raises."""
+    if not getattr(options, "plot_main", False):
+        return
+    try:
+        pdir = _plot_dir(options, info, date_str)
+        tag = _plot_tag(info, date_str)
+        plot_rayleigh_diagnostics_failure(
+            range_alc=range_alc, hours_since_start=hours_since_start, rcs=rcs,
+            reason=reason, altitude=altitude, cbh=cbh,
+            no_cloud_value=info.instrument_type.no_cloud_value,
+            p_mol=p_mol, molecular_window=molecular_window,
+            z_low_cloud=getattr(options, "z_low_cloud", None),
+            range_start_m=getattr(options, "range_start_m", 2000.0),
+            range_end_m=getattr(options, "range_end_m", 6000.0),
+            title=f"{info.site_name} ({info.wmo_id}) — {date_str}",
+            save_path=pdir / f"{tag}_rayleigh_diag_compact.png",
+        )
+    except Exception as exc:  # noqa: BLE001 - a plot failure must never lose the calibration
+        logger.warning(f"failure diagnostic plot failed: {exc}")
 
 
 @dataclass
@@ -340,11 +368,18 @@ def calibrate_rayleigh(
     # Step 3: Filter cloudy profiles
     # =========================================================================
     no_cloud_value = info.instrument_type.no_cloud_value
+    data_precloud = data   # keep the unscreened night so a failure plot can show the clouds
     data, is_clear, is_partial = filter_cloudy_profiles(
         data, options, no_cloud_value, info.instrument_type)
 
     if not is_clear:
         logger.warning("Not a clear night")
+        _emit_failure_plot(
+            options, info, date_str, rcs=data_precloud.rcs,
+            range_alc=data_precloud.range_alc,
+            hours_since_start=data_precloud.hours_since_start,
+            reason="Not a clear night (cloud/fog in or below the molecular window)",
+            cbh=data_precloud.cbh, altitude=data_precloud.altitude)
         return CalibrationResult(
             lidar_constant=-1,
             flag=-1,
@@ -616,6 +651,11 @@ def calibrate_rayleigh(
     # than emitting a spurious constant.
     if not np.isfinite(fit_result.slope) or not np.isfinite(fit_result.relative_error):
         logger.warning("No eligible molecular window (signal not proportional to molecular)")
+        _emit_failure_plot(
+            options, info, date_str, rcs=data.rcs, range_alc=data.range_alc,
+            hours_since_start=data.hours_since_start,
+            reason="No molecular window passed the validity gates",
+            cbh=data.cbh, altitude=data.altitude, p_mol=mol_props.p_mol)
         return CalibrationResult(
             lidar_constant=-1,
             flag=-2,
@@ -624,8 +664,14 @@ def calibrate_rayleigh(
         )
 
     if not fit_result.is_valid:
+        win = (fit_result.range_start_m, fit_result.range_end_m)
         if fit_result.slope <= 0:
             logger.warning("Negative Rayleigh fit slope")
+            _emit_failure_plot(
+                options, info, date_str, rcs=data.rcs, range_alc=data.range_alc,
+                hours_since_start=data.hours_since_start,
+                reason="Negative Rayleigh fit slope", cbh=data.cbh,
+                altitude=data.altitude, p_mol=mol_props.p_mol, molecular_window=win)
             return CalibrationResult(
                 lidar_constant=-1,
                 flag=-7,
@@ -634,6 +680,11 @@ def calibrate_rayleigh(
             )
         else:
             logger.warning("Rayleigh fit issue: |b| > a")
+            _emit_failure_plot(
+                options, info, date_str, rcs=data.rcs, range_alc=data.range_alc,
+                hours_since_start=data.hours_since_start,
+                reason="Rayleigh fit unstable (|intercept| > slope)", cbh=data.cbh,
+                altitude=data.altitude, p_mol=mol_props.p_mol, molecular_window=win)
             return CalibrationResult(
                 lidar_constant=-1,
                 flag=-8,
@@ -643,6 +694,13 @@ def calibrate_rayleigh(
 
     if fit_result.relative_error > options.threshold_quality:
         logger.warning(f"Poor Rayleigh fit quality: {fit_result.relative_error:.1f}%")
+        _emit_failure_plot(
+            options, info, date_str, rcs=data.rcs, range_alc=data.range_alc,
+            hours_since_start=data.hours_since_start,
+            reason=(f"Signal not proportional to molecular "
+                    f"(fit rel. error {fit_result.relative_error:.0f}% > {options.threshold_quality:.0f}%)"),
+            cbh=data.cbh, altitude=data.altitude, p_mol=mol_props.p_mol,
+            molecular_window=(fit_result.range_start_m, fit_result.range_end_m))
         return CalibrationResult(
             lidar_constant=-1,
             flag=-2,
@@ -699,6 +757,12 @@ def calibrate_rayleigh(
 
     if n_ok == 0:
         logger.warning("All perturbation runs failed")
+        _emit_failure_plot(
+            options, info, date_str, rcs=data.rcs, range_alc=data.range_alc,
+            hours_since_start=data.hours_since_start,
+            reason="All Klett / lidar-constant perturbations failed", cbh=data.cbh,
+            altitude=data.altitude, p_mol=mol_props.p_mol,
+            molecular_window=(fit_result.range_start_m, fit_result.range_end_m))
         return CalibrationResult(
             lidar_constant=-1,
             flag=-5,
