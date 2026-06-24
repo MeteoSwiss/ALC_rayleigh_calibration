@@ -364,6 +364,33 @@ def cl_overlay(by_method: dict) -> go.Figure:
     return fig
 
 
+def monitoring_timeseries(hk_df: pd.DataFrame, itype: str | None = None) -> go.Figure:
+    """Instrument monitoring: daily-mean laser power/energy & window transmission (%) on the left
+    axis and temperatures (degC) on the right axis, over time. Plots only the housekeeping fields the
+    stream actually reports (others are blank in <key>_hk.csv and skipped); gaps are real downtime."""
+    fig = go.Figure()
+    has_temp = False
+    for field, label, unit, group in config.HK_PANEL:
+        if field not in hk_df.columns:
+            continue
+        y = pd.to_numeric(hk_df[field], errors="coerce")
+        if not y.notna().any():
+            continue
+        if group == "temp":
+            has_temp = True
+        fig.add_trace(go.Scatter(
+            x=hk_df["datetime"], y=y, mode="lines", name=f"{label} [{unit}]",
+            line=dict(color=config.HK_COLORS.get(field), width=1.4),
+            yaxis=("y2" if group == "temp" else "y"), connectgaps=False,
+            hovertemplate="%{x|%Y-%m-%d}<br>" + label + "=%{y:.1f} " + unit + "<extra></extra>"))
+    lay = {**_LAYOUT, "height": 300, "title": "Instrument monitoring — daily averages",
+           "legend": dict(orientation="h", y=1.16), "yaxis": dict(title="laser / window [%]")}
+    if has_temp:
+        lay["yaxis2"] = dict(title="temperature [degC]", overlaying="y", side="right", showgrid=False)
+    fig.update_layout(**lay)
+    return fig
+
+
 # --- Cheap inline sparkline -------------------------------------------------
 
 def sparkline_svg(values, width: int = 110, height: int = 26, color: str = "#1f77b4") -> str:

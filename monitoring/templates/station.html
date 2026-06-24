@@ -82,4 +82,11 @@
   </table>
 </section>
 {% endfor %}
+
+{% if monitoring %}
+<section class="card">
+  <h2>Instrument monitoring <span class="muted">— daily averages: laser power, window transmission, temperatures</span></h2>
+  {{ monitoring | safe }}
+</section>
+{% endif %}
 {% endblock %}

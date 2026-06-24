@@ -318,8 +318,32 @@ def _method_block(key, method, cal, kal, series, diags=None, op_all=None, oldray
     )
 
 
+def _load_hk(fullcal_dir, key):
+    """Per-stream daily housekeeping (<key>_hk.csv) for the monitoring panel; None if absent/empty."""
+    if not fullcal_dir:
+        return None
+    p = Path(fullcal_dir) / key / f"{key}_hk.csv"
+    if not p.exists():
+        return None
+    try:
+        df = pd.read_csv(p, dtype={"date": str})
+    except Exception:
+        return None
+    if "date" not in df.columns or not len(df):
+        return None
+    df["datetime"] = pd.to_datetime(df["date"], format="%Y%m%d", errors="coerce")
+    hk_cols = [f for f, *_ in config.HK_PANEL if f in df.columns]
+    for c in hk_cols:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    df = df.dropna(subset=["datetime"]).sort_values("datetime")
+    if not any(df[c].notna().any() for c in hk_cols):   # nothing to plot
+        return None
+    return df
+
+
 def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
-               flagex_dir=None, opcoeff_csv=None, only_keys=None, oldray_dir=None) -> dict:
+               flagex_dir=None, opcoeff_csv=None, only_keys=None, oldray_dir=None,
+               fullcal_dir=None) -> dict:
     out_dir = Path(out_dir)
     (out_dir / "stations").mkdir(parents=True, exist_ok=True)
     logo = _write_assets(out_dir)
@@ -424,9 +448,13 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
         i = nav_idx.get(key)
         prev_station = f"{all_keys[i - 1]}.html" if (i is not None and i > 0) else ""
         next_station = f"{all_keys[i + 1]}.html" if (i is not None and i < len(all_keys) - 1) else ""
+        hk_df = _load_hk(fullcal_dir, key)
+        monitoring = (charts.fig_to_div(charts.monitoring_timeseries(hk_df, meta.get("itype")), "fig-hk")
+                      if hk_df is not None else None)
         html = station_tmpl.render(base="../", logo=logo, key=key, meta=meta,
                                    blocks=blocks, overlay=overlay, search_json=search_json,
-                                   prev_station=prev_station, next_station=next_station)
+                                   prev_station=prev_station, next_station=next_station,
+                                   monitoring=monitoring)
         (out_dir / "stations" / f"{key}.html").write_text(html, encoding="utf-8")
 
     return dict(out_dir=str(out_dir), n_pages=len(keys), n_series=int(len(series)),

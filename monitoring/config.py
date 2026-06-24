@@ -99,6 +99,20 @@ METHOD_LABELS = {"rayleigh": "Rayleigh", "cloud": "Liquid-cloud"}
 METHOD_COLORS = {"rayleigh": "#1f77b4", "cloud": "#2ca02c"}
 METHOD_ORDER = ["rayleigh", "cloud"]
 
+# --- Instrument monitoring panel (station pages) ---------------------------------------------------
+# Canonical housekeeping field (column in <key>_hk.csv) -> (label, unit, axis group). Two y-axes:
+# laser power/energy and window transmission share the "pct" (%) axis; temperatures use the "temp"
+# (degC) axis. The panel draws only the fields a stream actually reports (others are blank -> skipped).
+HK_PANEL = [
+    ("laser",         "Laser power/energy",  "%",  "pct"),
+    ("window",        "Window transmission", "%",  "pct"),
+    ("temp_optics",   "Optics/laser temp",   "degC", "temp"),
+    ("temp_internal", "Internal temp",       "degC", "temp"),
+    ("temp_detector", "Detector temp",       "degC", "temp"),
+]
+HK_COLORS = {"laser": "#d62728", "window": "#1f77b4", "temp_optics": "#ff7f0e",
+             "temp_internal": "#2ca02c", "temp_detector": "#9467bd"}
+
 
 def method_label(method) -> str:
     return METHOD_LABELS.get(str(method), str(method))

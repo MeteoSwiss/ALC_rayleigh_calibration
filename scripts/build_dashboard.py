@@ -105,7 +105,8 @@ def main() -> None:
 
     print("Rendering site ...", flush=True)
     site = render.build_site(db_path, args.out, limit_pages=args.limit_pages, flagex_dir=args.flagex,
-                             opcoeff_csv=args.opcoeff, only_keys=only_keys, oldray_dir=args.oldray)
+                             opcoeff_csv=args.opcoeff, only_keys=only_keys, oldray_dir=args.oldray,
+                             fullcal_dir=args.fullcal)
     # stamp the build time so the next --changed-only run knows what to re-render
     (args.out / ".last_build").write_text(time.strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
     print(f"  {site['n_pages']} station pages -> {site['out_dir']}  "
