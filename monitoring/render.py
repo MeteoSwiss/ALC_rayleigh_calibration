@@ -7,6 +7,7 @@ Each station may carry one or two method series (Rayleigh and/or cloud).
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -180,10 +181,49 @@ def _series_table_rows(cal: pd.DataFrame, series: pd.DataFrame, st: pd.DataFrame
     return rows
 
 
+# How per-night diagnostic PNGs are placed under the site's diag/ folder. Default 'symlink' makes the
+# site reference the originals WITHOUT duplicating data -- the diagnostic set can be ~100k images /
+# tens of GB and already lives next to the site on the same filesystem, so copying it is wasteful.
+# 'hardlink' is similar but survives a plain rsync; 'copy' duplicates the bytes (use only when the
+# site must move to a different filesystem -- e.g. rsync'd to a laptop without -L). python's
+# http.server follows symlinks, so the SSH-tunnel viewer works with the default.
+_DIAG_LINK_MODE = os.environ.get("ALC_DIAG_LINK", "symlink").lower()
+
+
+def _materialize(src: Path, dst: Path, mode: str) -> None:
+    """Make *dst* resolve to *src* as a symlink (default), hardlink, or copy. Idempotent and cheap;
+    falls back to copy if linking is unsupported (cross-filesystem, or Windows without privilege)."""
+    if mode == "copy":
+        if dst.exists() and not dst.is_symlink() and dst.stat().st_size == src.stat().st_size:
+            return
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if dst.is_symlink():
+            dst.unlink()
+        shutil.copyfile(src, dst)
+        return
+    # link modes: (re)create the link -- a metadata op, effectively free vs copying the bytes
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if dst.is_symlink() or dst.exists():
+        try:
+            dst.unlink()
+        except OSError:
+            pass
+    try:
+        if mode == "hardlink":
+            os.link(src, dst)
+        else:
+            os.symlink(os.path.abspath(src), dst)
+        return
+    except OSError:
+        shutil.copyfile(src, dst)
+
+
 def _copy_diagnostics(diag: pd.DataFrame, cal: pd.DataFrame, out_dir: Path) -> dict:
-    """Copy per-calibration diagnostic PNGs into the site (diag/<key>/<method>_<date>.png) and
+    """Place per-calibration diagnostic PNGs under the site (diag/<key>/<method>_<date>.png) and
     return {(key, method): [ {date, rel, success}, ... ]} sorted by date for the station-page viewer.
-    `success` (from cal) drives the green/grey calendar and the valid-only (left/right) navigation."""
+    By default the PNGs are SYMLINKED, not copied, so a ~100k-image / tens-of-GB diagnostic set is
+    not duplicated (set ALC_DIAG_LINK=copy for a portable site, or =hardlink). `success` (from cal)
+    drives the green/grey calendar and the valid-only (left/right) navigation."""
     by: dict = {}
     if not len(diag):
         return by
@@ -196,15 +236,10 @@ def _copy_diagnostics(diag: pd.DataFrame, cal: pd.DataFrame, out_dir: Path) -> d
         if not src.exists():
             continue
         key, method, date = str(r["key"]), str(r["method"]), str(r["date"])
-        dst_dir = out_dir / "diag" / key
         fname = f"{method}_{date}.png"
-        dst = dst_dir / fname
+        dst = out_dir / "diag" / key / fname
         try:
-            # Incremental copy: skip PNGs already present at the same size. Re-copying the whole
-            # diagnostic set (~75k files) every build is very slow, especially on OneDrive.
-            if not (dst.exists() and dst.stat().st_size == src.stat().st_size):
-                dst_dir.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(src, dst)
+            _materialize(src, dst, _DIAG_LINK_MODE)
         except OSError:
             continue
         by.setdefault((key, method), []).append(
