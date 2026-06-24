@@ -343,14 +343,93 @@ def _preserve_existing_rows(csv_path, methods, start, end):
     return keep
 
 
+# --- Instrument monitoring (housekeeping) -----------------------------------
+# Daily means of the laser / optics / temperature essentials for the station-page monitoring panel.
+# Canonical field -> candidate L1 variable names (first present wins); manufacturers differ -- Lufft
+# CHM15k uses status_laser / temperature_optical_module / temperature_detector, Vaisala CL31/51/61
+# use laser_energy / temperature_laser. Temperatures are stored in degC (the L1 files store K).
+HK_FIELDS = ["date", "laser", "window", "temp_optics", "temp_internal", "temp_detector"]
+_HK_SOURCES = {
+    "laser":         ("status_laser", "laser_energy"),                    # laser power / pulse energy (%)
+    "window":        ("window_transmission",),                           # window transmission (%)
+    "temp_optics":   ("temperature_optical_module", "temperature_laser"),
+    "temp_internal": ("temp_int",),
+    "temp_detector": ("temperature_detector",),
+}
+_HK_TEMP = {"temp_optics", "temp_internal", "temp_detector"}             # K -> degC
+
+
+def _do_hk(s, start, end):
+    """Per-day daily-mean housekeeping (laser/optics/temperature) for one stream. Cheap: opens each
+    L1 file but reads ONLY the small 1-D HK variables (never the rcs matrix). Runs for every
+    instrument type and every day with data, independent of calibration -> the monitoring panel."""
+    import netCDF4  # lazy: only this leaf needs it
+    rows = []
+    for d in _days(start, end):
+        fp = _l1_file(s["wmo"], s["ident"], d)
+        if not fp.exists():
+            continue
+        row = {"date": d.strftime("%Y%m%d")}
+        try:
+            nc = netCDF4.Dataset(str(fp))
+            try:
+                for field, cands in _HK_SOURCES.items():
+                    val = float("nan")
+                    for nm in cands:
+                        if nm in nc.variables:
+                            a = np.asarray(nc.variables[nm][:], dtype=float).ravel()
+                            a = np.where(np.isfinite(a) & (a > -990.0), a, np.nan)
+                            if np.isfinite(a).any():
+                                m = float(np.nanmean(a))
+                                val = (m - 273.15) if field in _HK_TEMP else m
+                            break
+                    row[field] = "" if val != val else f"{val:.3f}"   # val!=val -> NaN
+            finally:
+                nc.close()
+        except Exception:  # noqa: BLE001 - one unreadable file must not kill the stream
+            continue
+        if any(row[f] for f in HK_FIELDS if f != "date"):
+            rows.append(row)
+    return rows
+
+
+def _preserve_existing_hk(csv_path, start, end):
+    """Existing _hk.csv rows OUTSIDE the processed window, so partial/daily runs accumulate history."""
+    if not csv_path.exists():
+        return []
+    s, e = start.strftime("%Y%m%d"), end.strftime("%Y%m%d")
+    keep = []
+    try:
+        with open(csv_path, newline="", encoding="utf-8") as f:
+            for r in csv.DictReader(f):
+                if not (s <= str(r.get("date", "")) <= e):
+                    keep.append({k: r.get(k, "") for k in HK_FIELDS})
+    except (OSError, csv.Error):
+        return []
+    return keep
+
+
 # --- One instrument stream --------------------------------------------------
 def _process_stream(payload):
-    s, start, end, methods = payload
+    s, start, end, methods, hk_only = payload
     warnings.filterwarnings("ignore")
     logging.getLogger().setLevel(logging.CRITICAL)
     key = _key(s)
     sdir = OUT / key
     sdir.mkdir(parents=True, exist_ok=True)
+
+    def _write_hk():
+        hk = _do_hk(s, start, end)
+        if not hk:
+            return
+        hk += _preserve_existing_hk(sdir / f"{key}_hk.csv", start, end)
+        hk.sort(key=lambda r: r["date"])
+        _write_csv_atomic(sdir / f"{key}_hk.csv", HK_FIELDS, hk)
+
+    # Backfill / refresh the monitoring CSV only (skip the calibration) -- cheap.
+    if hk_only:
+        _write_hk()
+        return key, s["type"], 0, 0
 
     rows = []
     if "rayleigh" in methods and s["type"] in RAYLEIGH_TYPES:
@@ -370,6 +449,7 @@ def _process_stream(payload):
     _write_csv_atomic(sdir / f"{key}_cal.csv", CSV_FIELDS, rows)
     _write_csv_atomic(sdir / f"{key}_kalman.csv",
                       ["method", "date", "kalman", "kalman_std"], _kalman_rows(rows))
+    _write_hk()   # monitoring panel: daily HK means for every processed day
 
     n_ok = sum(1 for r in rows if _is_success(r["flag"]))
     return key, s["type"], len(rows), n_ok
@@ -417,6 +497,9 @@ def main():
     ap.add_argument("--ignore-coverage", action="store_true",
                     help="select every census stream of the type, ignoring its first/last coverage "
                          "snapshot (use for daily runs whose date is past the snapshot)")
+    ap.add_argument("--hk-only", action="store_true",
+                    help="only (re)extract the per-day housekeeping <key>_hk.csv (laser/optics/temperature "
+                         "daily means) for the dashboard monitoring panel; skip calibration. Cheap backfill.")
     args = ap.parse_args()
 
     start = datetime.strptime(args.start, "%Y%m%d")
@@ -434,18 +517,23 @@ def main():
         if s is None:
             print(f"stream {args.stream} not in census", flush=True)
             return
-        _process_stream((s, start, end, methods))
+        _process_stream((s, start, end, methods, args.hk_only))
         return
 
     types = [t.strip() for t in args.types.split(",")]
     streams = select(census, types, args.per_type, args.limit, start, end,
                      ignore_coverage=args.ignore_coverage)
-    # drop streams that have no work for the requested methods (e.g. CHM15k/Mini-MPL under --methods cloud)
-    relevant = (RAYLEIGH_TYPES if "rayleigh" in methods else set()) | (CLOUD_TYPES if "cloud" in methods else set())
+    # drop streams that have no work for the requested methods (e.g. CHM15k/Mini-MPL under --methods cloud);
+    # --hk-only extracts housekeeping for EVERY instrument type, so keep all selected streams.
+    if args.hk_only:
+        relevant = set(ITYPE)
+    else:
+        relevant = (RAYLEIGH_TYPES if "rayleigh" in methods else set()) | (CLOUD_TYPES if "cloud" in methods else set())
     streams = [s for s in streams if s["type"] in relevant]
     OUT.mkdir(parents=True, exist_ok=True)
-    done = {p.parent.name for p in OUT.glob("*/*_cal.csv")}
-    todo = streams if args.force else [s for s in streams if _key(s) not in done]
+    marker = "*_hk.csv" if args.hk_only else "*_cal.csv"
+    done = {p.parent.name for p in OUT.glob(f"*/{marker}")}
+    todo = streams if (args.force or args.hk_only) else [s for s in streams if _key(s) not in done]
     print(f"window {args.start}..{args.end} | methods={','.join(sorted(methods))} | "
           f"{len(streams)} streams selected; {len(done)} with output; {len(todo)} to do"
           f"{' (forced)' if args.force else ''}; {args.workers} workers "
@@ -456,12 +544,15 @@ def main():
         key = _key(s)
         cmd = [sys.executable, str(Path(__file__).resolve()), "--stream", key,
                "--start", args.start, "--end", args.end, "--methods", args.methods]
+        if args.hk_only:
+            cmd.append("--hk-only")
         try:
             subprocess.run(cmd, timeout=STREAM_TIMEOUT, check=False,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except subprocess.TimeoutExpired:
             return key, "TIMEOUT (killed)"
-        return key, ("ok" if (OUT / key / f"{key}_cal.csv").exists() else "no-output")
+        marker = f"{key}_hk.csv" if args.hk_only else f"{key}_cal.csv"
+        return key, ("ok" if (OUT / key / marker).exists() else "no-output")
 
     # The thread pool only SUPERVISES the per-stream subprocesses (the heavy numpy/netCDF
     # work runs in the children). A hung child is killed at the timeout and the run goes on
