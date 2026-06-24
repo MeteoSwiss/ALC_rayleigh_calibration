@@ -35,7 +35,7 @@ FLAG_MEANINGS = {
     -6: "Uncertainty exceeds value",                 # both
     -7: "Negative fit slope",                        # Rayleigh-specific
     -8: "Fit issue: |b| > a",                        # Rayleigh-specific
-    -9: "Aerosol below molecular window",            # Rayleigh-specific
+    -9: "Another layer with lower signal",           # Rayleigh-specific
     # Cloud-specific rejection reasons: when no profile survives the cloud filters, the dominant
     # rejection (the filter that removed the most profiles) is reported instead of the generic -1.
     -20: "Cloud: window transmission too low",       # Cloud-specific

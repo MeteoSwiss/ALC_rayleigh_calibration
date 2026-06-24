@@ -291,32 +291,11 @@ def calibrate_rayleigh(
 
     logger.info(f"Loaded {len(data.time)} profiles")
 
-    # Optional pre-averaging: reduces the Rayleigh input to coarser blocks before any
-    # filtering or fitting, matching the cloud-calibration speedup.
-    avg_time_s = getattr(options, "average_time_s", None)
-    avg_range_m = getattr(options, "average_range_m", None)
-    # Native L1/RAW are on a fine grid (e.g. CHM15k 15 m x 15 s, CL61 raw 4.8 m x ~60 s) that the
-    # gated molecular methods (v2/earlinet) over-reject even though the signal matches L2's beta_att;
-    # bin to the standard L2 grid (30 m x 300 s) so L1/RAW and L2 calibrate consistently. Only when
-    # the level is L1 or RAW and no explicit averaging was requested (L2 is already on that grid -> a
-    # no-op; a coarser native grid is also a no-op). See network_v2_vs_v11_report.md ("L1 vs L2 - the
-    # tie on L1 is a native-grid effect") and attbsc_validation_technical.md sec 7.6.
-    if (avg_time_s is None and avg_range_m is None
-            and getattr(options, "data_level", None) in (DataLevel.L1, DataLevel.RAW)
-            and getattr(options, "l1_bin_to_l2_grid", True)):
-        avg_time_s = getattr(options, "l1_grid_time_s", 300.0)
-        avg_range_m = getattr(options, "l1_grid_range_m", 30.0)
-        logger.info("L1 native grid -> binning to the L2 grid (%.0f s x %.0f m)", avg_time_s, avg_range_m)
-    data = average_ceilometer_data(
-        data,
-        average_time_s=avg_time_s,
-        average_range_m=avg_range_m,
-    )
-    if avg_time_s or avg_range_m:
-        logger.info(
-            "Averaged Rayleigh input to %s profiles x %s range bins",
-            len(data.time), len(data.range_alc),
-        )
+    # NOTE: the L1->L2-grid binning is DEFERRED to after the cloud screen (Step 3b) so the
+    # clear-night screen sees the cloud base at NATIVE resolution. Binning the cloud flag first
+    # blew a single 30-s low cloud up to a whole 5-min block, spuriously rejecting otherwise-clear
+    # nights; screening native and binning the cleaned profiles afterwards avoids that while still
+    # giving the molecular fit the L2-grid signal.
 
     # =========================================================================
     # Step 2: Filter to nighttime window (solar time)
@@ -361,7 +340,8 @@ def calibrate_rayleigh(
     # Step 3: Filter cloudy profiles
     # =========================================================================
     no_cloud_value = info.instrument_type.no_cloud_value
-    data, is_clear, is_partial = filter_cloudy_profiles(data, options, no_cloud_value)
+    data, is_clear, is_partial = filter_cloudy_profiles(
+        data, options, no_cloud_value, info.instrument_type)
 
     if not is_clear:
         logger.warning("Not a clear night")
@@ -373,6 +353,26 @@ def calibrate_rayleigh(
         )
 
     logger.info(f"After cloud filtering: {len(data.time)} profiles (partial: {is_partial})")
+
+    # =========================================================================
+    # Step 3b: Bin the cloud-screened NATIVE profiles to the L2 grid (deferred from before the
+    # screen). Native L1/RAW sit on a fine grid (CHM15k 15 m x 15 s, CL61 ~4.8 m x ~30 s) that the
+    # gated molecular methods (v2/earlinet) over-reject even though the signal matches L2's beta_att;
+    # binning to the standard L2 grid (30 m x 300 s) makes L1/RAW and L2 calibrate consistently. It
+    # runs on the already-clean profiles, so cloudy periods are excluded at native resolution first.
+    # =========================================================================
+    avg_time_s = getattr(options, "average_time_s", None)
+    avg_range_m = getattr(options, "average_range_m", None)
+    if (avg_time_s is None and avg_range_m is None
+            and getattr(options, "data_level", None) in (DataLevel.L1, DataLevel.RAW)
+            and getattr(options, "l1_bin_to_l2_grid", True)):
+        avg_time_s = getattr(options, "l1_grid_time_s", 300.0)
+        avg_range_m = getattr(options, "l1_grid_range_m", 30.0)
+        logger.info("L1 native grid -> binning to the L2 grid (%.0f s x %.0f m)", avg_time_s, avg_range_m)
+    data = average_ceilometer_data(data, average_time_s=avg_time_s, average_range_m=avg_range_m)
+    if avg_time_s or avg_range_m:
+        logger.info("Averaged Rayleigh input to %s profiles x %s range bins",
+                    len(data.time), len(data.range_alc))
 
     # =========================================================================
     # Step 4: Load atmospheric model
@@ -807,7 +807,7 @@ def calibrate_rayleigh(
     error_pct = abs((cl_slope - cl_median) / cl_median * 100)
 
     # ── Quality control: decide the outcome but DEFER the return, so a diagnostic image is still
-    #    produced for data-bearing rejections (-3 method disagreement, -6 too noisy, -9 aerosol). ──
+    #    produced for data-bearing rejections (-3 method disagreement, -6 too noisy, -9 lower-signal layer). ──
     qc_flag = None
     qc_message = None
     if error_pct > options.threshold_quality:
@@ -817,11 +817,12 @@ def calibrate_rayleigh(
         logger.warning(f"Uncertainty exceeds CL value: {uncertainty:.2e} > {cl_median:.2e}")
         qc_flag, qc_message = -6, f"Uncertainty exceeds value: {uncertainty:.2e} > {cl_median:.2e}"
     elif getattr(options, "aerosol_qc_enabled", True) and fit_result.search_diagnostics is not None:
-        # Scattering-ratio gate -- aerosol layer in/below the chosen molecular window. Each candidate
-        # window's fit slope is a C_L proxy; in clean air they are nearly equal across the 2-6 km
-        # search range (molecular two-way transmittance varies <1 %). When aerosol sits in/just below
-        # the chosen window its slope is inflated vs the cleanest (least-attenuated) window. Validated
-        # on L1 Mar-May 2026: clean nights p95=1.4; aerosol (e.g. 0-20000-0-10838 2026-03-03) >2.8.
+        # "Another layer with lower signal" gate. Each candidate window's fit slope is a C_L proxy;
+        # in clean air they are nearly equal across the 2-6 km search range (molecular two-way
+        # transmittance varies <1 %). When the CHOSEN window's slope is much higher than the cleanest
+        # (lowest-signal) candidate window, a cleaner molecular layer exists elsewhere -> the chosen
+        # window carries excess backscatter (typically aerosol) and the selection is suspect. Validated
+        # on L1 Mar-May 2026: clean nights p95=1.4; contaminated (e.g. 0-20000-0-10838 2026-03-03) >2.8.
         d = fit_result.search_diagnostics
         slp = np.asarray(d.slopes, dtype=float)
         r2g = np.asarray(d.r_squared, dtype=float)
@@ -836,11 +837,11 @@ def calibrate_rayleigh(
             scat = chosen_slope / c_ref if (np.isfinite(chosen_slope) and c_ref > 0) else np.nan
             thr = float(getattr(options, "aerosol_scattering_threshold", 2.0))
             if np.isfinite(scat) and scat > thr:
-                logger.warning(f"Aerosol below molecular window: scattering ratio {scat:.1f} > {thr}")
-                qc_flag, qc_message = -9, f"Aerosol contamination below window: scattering ratio {scat:.1f}"
+                logger.warning(f"Another layer with lower signal found: ratio {scat:.1f} > {thr}")
+                qc_flag, qc_message = -9, f"Another layer with lower signal found (signal ratio {scat:.1f})"
 
     _outcome = {None: "OK", -3: "method disagreement", -6: "too noisy",
-                -9: "aerosol below window"}.get(qc_flag, "rejected")
+                -9: "lower-signal layer found"}.get(qc_flag, "rejected")
 
     # ── Plot: compact 4x4 Rayleigh diagnostics dashboard (success AND data-bearing rejections) ──
     if options.plot_main:

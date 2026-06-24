@@ -660,6 +660,36 @@ def _block_reduce_mean(arr: NDArray, factor: int, axis: int) -> NDArray:
     return np.moveaxis(out, 0, axis)
 
 
+def _block_reduce_cloud_base(arr: NDArray, factor: int, axis: int) -> NDArray:
+    """Block-reduce a cloud-base-height array by the LOWEST valid cloud base per block.
+
+    The cloud base is the lowest cloud point, so a block of profiles is summarised by the
+    *minimum* valid base, NOT the mean. Non-physical entries — the no-cloud sentinel, fill
+    values, non-positive or absurdly large heights — are treated as NaN and ignored; a block
+    with no valid cloud reduces to NaN (no cloud). Averaging instead (the previous behaviour)
+    blends real heights with the no-cloud sentinel, fabricating phantom low clouds and dragging
+    high cirrus below the low-cloud screen threshold -> spurious "not a clear night" rejections.
+    """
+    if factor <= 1:
+        return arr
+    a = np.moveaxis(np.asarray(arr, dtype="float64"), axis, 0)
+    a = np.where(np.isfinite(a) & (a > 0.0) & (a < 20000.0), a, np.nan)
+    n = a.shape[0]
+    n_full = n // factor
+    rem = n - n_full * factor
+    out_blocks = []
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)  # all-NaN block -> NaN (no cloud)
+        if n_full > 0:
+            full = a[: n_full * factor].reshape((n_full, factor) + a.shape[1:])
+            out_blocks.append(np.nanmin(full, axis=1))
+        if rem > 0:
+            out_blocks.append(np.nanmin(a[n_full * factor:], axis=0, keepdims=True))
+    if not out_blocks:
+        return a[:0]
+    return np.moveaxis(np.concatenate(out_blocks, axis=0), 0, axis)
+
+
 def _datetime64_block_mean(time_dt: List[datetime], factor: int) -> List[datetime]:
     """Block-mean a datetime list and return Python datetimes at block centres."""
     if factor <= 1 or not time_dt:
@@ -721,7 +751,9 @@ def average_ceilometer_data(
                 out.time_datetime = _datetime64_block_mean(out.time_datetime, time_factor)
                 out.hours_since_start = _block_reduce_mean(out.hours_since_start, time_factor, axis=0)
                 if out.cbh.size:
-                    out.cbh = _block_reduce_mean(out.cbh, time_factor, axis=0)
+                    # cloud base = lowest point: reduce by min over valid bases, NOT mean
+                    # (mean blends the no-cloud sentinel into phantom low clouds).
+                    out.cbh = _block_reduce_cloud_base(out.cbh, time_factor, axis=0)
                 if out.temperature_optical_module.size:
                     out.temperature_optical_module = _block_reduce_mean(out.temperature_optical_module, time_factor, axis=0)
                 if out.window_transmission.size:
@@ -876,6 +908,7 @@ def filter_cloudy_profiles(
     data: CeilometerData,
     options: CalibrationOptions,
     no_cloud_value: float,
+    instrument_type: Optional["InstrumentType"] = None,
 ) -> Tuple[CeilometerData, bool, bool]:
     """
     Filter profiles affected by low clouds.
@@ -898,11 +931,20 @@ def filter_cloudy_profiles(
     # when fog/precip obscures the beam -> those profiles have no molecular column and must be
     # excluded from the Rayleigh fit (treated like a low cloud). (Edmonton 2026-02-01: ~1/3 of
     # the night was fog with cbh="no cloud", which previously slipped through.)
+    # ONLY for the Vaisalas: the CHM15k/Mini-MPL report a vertical visibility ALONGSIDE clouds in
+    # non-obscuring conditions, so treating their VV as fog would over-reject usable profiles.
     vv = getattr(data, "vertical_visibility", None)
-    has_fog = (np.isfinite(vv) & (vv > 0)) if vv is not None else np.zeros(len(data.cbh), dtype=bool)
+    use_vv_fog = instrument_type is not None and instrument_type.reports_vv_obscuration
+    if use_vv_fog and vv is not None:
+        has_fog = np.isfinite(vv) & (vv > 0)
+    else:
+        has_fog = np.zeros(len(data.cbh), dtype=bool)
 
-    # Check if completely clear (no cloud AND no fog)
-    is_clear_night = bool(np.all(data.cbh == no_cloud_value) and not np.any(has_fog))
+    # Check if completely clear (no cloud AND no fog). No-cloud is encoded either as the
+    # instrument sentinel (no_cloud_value) or as NaN — the cloud-aware time binning leaves a
+    # block with no valid cloud as NaN — so treat both as "no cloud".
+    cbh_is_no_cloud = np.isnan(data.cbh) | (data.cbh == no_cloud_value)
+    is_clear_night = bool(np.all(cbh_is_no_cloud) and not np.any(has_fog))
 
     if is_clear_night:
         return data, True, False
@@ -932,15 +974,15 @@ def filter_cloudy_profiles(
     if n_clear < min_profiles:
         return data, False, False
 
-    # Mark profiles contaminated by nearby clouds (15 min window); >=1 profile even on coarse data
+    # Mark profiles contaminated by nearby clouds (15 min window); >=1 profile even on coarse data.
+    # Vectorised dilation of has_low_cloud by +/-(window-1): a profile within 15 min of any low
+    # cloud is contaminated. (The per-profile Python loop was O(N) -> too slow now the screen runs
+    # at native resolution, before the L2-grid binning.)
     contamination_window = max(1, int(round(profiles_per_min * 15)))
-    contaminated = np.zeros(len(data.time), dtype=bool)
-
-    for i in range(len(data.time)):
-        start_idx = max(0, i - contamination_window + 1)
-        end_idx = min(len(data.time), i + contamination_window)
-        if np.any(has_low_cloud[start_idx:end_idx]):
-            contaminated[i] = True
+    from scipy.ndimage import maximum_filter1d
+    contaminated = maximum_filter1d(
+        np.asarray(has_low_cloud, dtype=np.uint8),
+        size=2 * contamination_window - 1, mode="constant", cval=0) > 0
 
     n_remaining = np.sum(~contaminated)
 

@@ -36,7 +36,7 @@ FLAG_MEANINGS = {
     -6: "Uncertainty exceeds value",
     -7: "Negative fit slope",
     -8: "Fit issue: |b| > a",
-    -9: "Aerosol below molecular window",
+    -9: "Another layer with lower signal",
     -20: "Cloud: window transmission too low",
     -21: "Cloud: laser energy too low",
     -22: "Cloud: peak not sharp above",
@@ -226,21 +226,22 @@ FLAG_DOCS = [
      "detail": "A consistency check on the molecular-fit coefficients failed — the offset term dominates the slope term, flagging an ill-conditioned fit rather than a clean molecular signal.",
      "recognize": "Rayleigh-only molecular-fit diagnostic."},
     {"value": -9, "methods": "Rayleigh",
-     "summary": "Aerosol layer below the molecular window (scattering-ratio gate).",
-     "detail": "A dedicated aerosol-contamination QC. Each candidate molecular window's fit slope is "
-               "a lidar-constant proxy; in clean air these are nearly equal across the 2–6 km search "
-               "range (molecular two-way transmittance varies < 1 %). When an aerosol layer sits in "
-               "or just below the chosen window, that window's slope is inflated relative to the "
-               "cleanest (least-attenuated) window. The night is rejected when the chosen window's "
+     "summary": "Another candidate window has much lower signal than the one chosen.",
+     "detail": "A molecular-window selection QC. Each candidate window's fit slope is a lidar-constant "
+               "proxy; in clean air these are nearly equal across the 2–6 km search range (molecular "
+               "two-way transmittance varies < 1 %). When the chosen window carries excess backscatter "
+               "(typically an aerosol layer in or near it), its slope is inflated relative to the "
+               "cleanest (lowest-signal) candidate window — meaning a cleaner molecular layer was "
+               "available and the selection is suspect. The night is rejected when the chosen window's "
                "slope exceeds a robust cleanest reference (10th percentile of the clean-window "
                "slopes) by more than the threshold (default 2.0). Validated on L1 Mar–May 2026: "
                "clean nights cluster at ~1.1–1.4 (p95 = 1.4) with a clear gap to the aerosol tail "
                "above ~2.8 (e.g. STORNAWAY-type residual free-tropospheric aerosol; 0-20000-0-10838 "
                "on 2026-03-03 scores ~2.8). It catches contamination that the slope-vs-window "
                "cross-check (−3) lets through.",
-     "recognize": "Message reads 'Aerosol contamination below window: scattering ratio X'. In the "
-                  "Rayleigh diagnostic the range-corrected-signal panel shows an enhanced layer "
-                  "below the chosen molecular window."},
+     "recognize": "Message reads 'Another layer with lower signal found (signal ratio X)'. In the "
+                  "Rayleigh diagnostic the range-corrected-signal panel shows a cleaner (lower-signal) "
+                  "layer than the chosen molecular window."},
     {"value": -20, "methods": "Cloud",
      "summary": "Cloud rejected — window transmission too low.",
      "detail": "Cloud rejection reasons (−20…−26) replace the generic 'no liquid cloud' when a cloud "

@@ -72,13 +72,12 @@ def read_earlinet(code, start, end, station_alt, overlap):
         if good.sum() < 5:
             continue
         b = np.interp(grid, rng[good], bsc[good], left=np.nan, right=np.nan)  # m^-1 sr^-1
-        # overlap: fill below overlap-min with the first valid value above it
-        ov = grid < overlap
-        if ov.any():
-            fill_idx = np.where(~ov & np.isfinite(b))[0]
-            if fill_idx.size:
-                b[ov] = b[fill_idx[0]]
-        ext = np.nan_to_num(b * LR_1064)                      # m^-1
+        # No extrapolation where the research lidar has no data (below its overlap / lowest valid
+        # gate, and above its top gate): the backscatter stays NaN there. We do NOT assume the
+        # extinction is constant at low altitude, so the attenuated backscatter is NaN in those
+        # gates and is simply excluded from the comparison, rather than compared against a
+        # fabricated constant-extinction profile.
+        ext = np.nan_to_num(b * LR_1064)   # m^-1; NaN -> 0 for the two-way transmission integral only
         od = np.concatenate([[0], np.cumsum((ext[1:] + alpha_mol[1:] + ext[:-1] + alpha_mol[:-1]) / 2 * np.diff(grid))])
         trans = np.exp(-od)
         att = (b + mol.beta_mol) * trans * trans * 1e6        # Mm^-1 sr^-1

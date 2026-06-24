@@ -15,6 +15,7 @@ try:
 except Exception:
     pass
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))            # repo root -> import calibration
 import numpy as np
 from calibration import calibrate_rayleigh, CalibrationOptions, InstrumentInfo, DataLevel
 from calibration.config import InstrumentType

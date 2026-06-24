@@ -86,6 +86,17 @@ class InstrumentType(str, Enum):
         return -9.0
 
     @property
+    def reports_vv_obscuration(self) -> bool:
+        """Whether a reported vertical visibility means the beam is OBSCURED (no molecular column).
+
+        The Vaisala CL31/CL51/CL61 report a vertical visibility INSTEAD of a cloud base when fog or
+        precipitation obscures the beam, so VV > 0 marks a profile with no usable molecular signal.
+        The Lufft CHM15k (and Mini-MPL) report a vertical visibility ALONGSIDE clouds even in
+        non-obscuring conditions, so their VV must NOT be treated as fog — doing so wrongly excludes
+        a large fraction of otherwise-usable profiles (~25 % of CHM night profiles at Payerne)."""
+        return self in {InstrumentType.CL31, InstrumentType.CL51, InstrumentType.CL61}
+
+    @property
     def lidar_constant_units(self) -> str:
         """Return the units for lidar constant for this instrument type."""
         if self in {InstrumentType.CL31, InstrumentType.CL51, InstrumentType.CL61}:

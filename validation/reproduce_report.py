@@ -111,7 +111,8 @@ def preprocess(date_str):
     data = filter_time_range(data, date_str, options)
     if len(data.time) == 0:
         return None
-    data, clear, _ = filter_cloudy_profiles(data, options, info.instrument_type.no_cloud_value)
+    data, clear, _ = filter_cloudy_profiles(
+        data, options, info.instrument_type.no_cloud_value, info.instrument_type)
     if not clear:
         return None
     atm = load_standard_atmosphere(STD_ATM, np.asarray(data.altitude_grid))

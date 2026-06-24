@@ -1520,7 +1520,8 @@ def average_ceilo_data(data: CeiloData, config: CloudCalConfig) -> CeiloData:
         data.time_num = _block_reduce_mean(np.asarray(data.time_num, dtype="float64"),
                                            t_factor, axis=0)
         if data.cbh is not None and data.cbh.size:
-            data.cbh = _block_reduce_mean(data.cbh, t_factor, axis=0)
+            # cloud base = lowest point: reduce by min over valid bases, not mean.
+            data.cbh = _block_reduce_cloud_base(data.cbh, t_factor, axis=0)
         if data.window_transmission is not None and data.window_transmission.size:
             data.window_transmission = _block_reduce_mean(
                 data.window_transmission, t_factor, axis=0)
@@ -1560,6 +1561,32 @@ def _block_reduce_max(arr: NDArray, factor: int, axis: int) -> NDArray:
             out_blocks.append(np.nanmax(tail, axis=0, keepdims=True))
     out = np.concatenate(out_blocks, axis=0)
     return np.moveaxis(out, 0, axis)
+
+
+def _block_reduce_cloud_base(arr: NDArray, factor: int, axis: int) -> NDArray:
+    """Block-reduce a cloud-base-height array by the LOWEST valid cloud base per block.
+
+    The cloud base is the lowest cloud point, so a block is summarised by the *minimum* valid
+    base, not the mean. Non-physical entries (no-cloud sentinel, fill, <=0 or >=20 km) are
+    treated as NaN and ignored; a block with no valid cloud reduces to NaN. Averaging instead
+    would blend real heights toward the no-cloud sentinel and mis-place the cloud base used by
+    the 500-2400 m cloud-base filter.
+    """
+    if factor <= 1:
+        return arr
+    a = np.moveaxis(np.asarray(arr, dtype="float64"), axis, 0)
+    a = np.where(np.isfinite(a) & (a > 0.0) & (a < 20000.0), a, np.nan)
+    n = a.shape[0]
+    n_full = n // factor
+    rem = n - n_full * factor
+    out_blocks = []
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        if n_full > 0:
+            out_blocks.append(np.nanmin(a[: n_full * factor].reshape((n_full, factor) + a.shape[1:]), axis=1))
+        if rem > 0:
+            out_blocks.append(np.nanmin(a[n_full * factor:], axis=0, keepdims=True))
+    return np.moveaxis(np.concatenate(out_blocks, axis=0), 0, axis)
 
 
 def _matlab_unix_block_time(time_dt: NDArray, factor: int) -> NDArray:

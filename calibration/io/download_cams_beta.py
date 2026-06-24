@@ -18,20 +18,28 @@ Computed and added:
 
 Usage
 -----
-    python download_cams_beta.py 20260601            # one day
-    python download_cams_beta.py 20260601 20260605   # inclusive range
-    python download_cams_beta.py 202606              # whole month
+    python download_cams_beta.py 20260601                    # one day -> CAMS_Beta_20260601.nc
+    python download_cams_beta.py 20260601 20260605           # inclusive range -> one combined file
+    python download_cams_beta.py 202606                      # whole month -> CAMS_Beta_202606.nc
+    python download_cams_beta.py --daily 20260601 20260605   # one CAMS_Beta_YYYYMMDD.nc per day
+    python download_cams_beta.py --out D:/CAMS 202606         # write into a chosen folder
+
+All forms include the full variable set (aerosol extinction + ground backscatter at
+355/532/1064 nm, plus t/q/z/lnsp). The calibration auto-download is the only path that
+trims to t/q/z/lnsp; for aerosol work use this CLI (or download_daily_files()).
 
 Notes
 -----
 * These optical fields exist only as type=forecast (no analysis version), so the
   request always uses type=forecast, the 00 UTC run, steps 3..24 (8 valid times
   per day -> matches the 248 steps in a 31-day file).
+* Requests are chunked by day (one ADS request per date) to stay under the ADS
+  per-request cost limit, with an automatic variable-split fallback for big days.
 * ADS pre-interpolates to a regular 0.4 deg grid and ignores the 'grid' keyword.
   Set REGRID_TO_1DEG = True to bilinearly resample onto the historical 1 deg grid
   (-27..45 E, 27.5..73.5 N) so the series matches older MARS-derived files.
-* GRIB -> netCDF uses the eccodes tool `grib_to_netcdf` (same as your current
-  pipeline). It must be on PATH.
+* GRIB -> netCDF uses cfgrib (pure Python; the eccodes binary ships in the pip
+  wheel, no conda), or the eccodes `grib_to_netcdf` CLI if it is on PATH.
 """
 
 import os
@@ -496,10 +504,42 @@ def download_to_netcdf(dates, out_path, variables=None, keep_intermediate=KEEP_I
     return out_path
 
 
+def download_daily_files(dates, out_dir=OUTPUT_DIR, variables=None):
+    """Download each day in *dates* to its OWN ``CAMS_Beta_YYYYMMDD.nc`` (one file per
+    day), with the full variable set by default (aerosol optical fields + t/q/z/lnsp).
+
+    *dates* is a list of "YYYY-MM-DD" strings (as produced by parse_args). Days whose
+    file already exists are skipped, so an interrupted run resumes cleanly. Returns the
+    list of written paths.
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    written = []
+    for d in dates:
+        ymd = d.replace("-", "")
+        out_path = os.path.join(out_dir, f"CAMS_Beta_{ymd}.nc")
+        if os.path.exists(out_path):
+            print(f"[skip] {out_path} already exists")
+        else:
+            download_to_netcdf([d], out_path, variables=variables)
+        written.append(out_path)
+    return written
+
+
 def main():
-    dates, label = parse_args(sys.argv[1:])
-    final_nc = os.path.join(OUTPUT_DIR, f"CAMS_Beta_{label}.nc")
-    download_to_netcdf(dates, final_nc)
+    argv = list(sys.argv[1:])
+    out_dir = OUTPUT_DIR
+    if "--out" in argv:
+        i = argv.index("--out")
+        out_dir = argv[i + 1]
+        del argv[i:i + 2]
+    per_day = "--daily" in argv
+    argv = [a for a in argv if a != "--daily"]
+
+    dates, label = parse_args(argv)
+    if per_day:
+        download_daily_files(dates, out_dir)
+    else:
+        download_to_netcdf(dates, os.path.join(out_dir, f"CAMS_Beta_{label}.nc"))
 
 
 if __name__ == "__main__":
