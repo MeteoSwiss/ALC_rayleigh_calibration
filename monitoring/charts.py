@@ -243,9 +243,11 @@ def cl_median_iqr_by_station(d: pd.DataFrame, itype: str) -> go.Figure:
 # --- Station-page figures (one set per method) ------------------------------
 
 def series_timeseries(g_m: pd.DataFrame, kal_m: pd.DataFrame, method: str,
-                      op_df: pd.DataFrame | None = None) -> go.Figure:
+                      op_df: pd.DataFrame | None = None,
+                      oldray_df: pd.DataFrame | None = None) -> go.Figure:
     """Calibration value over time for ONE method: successes + uncertainty + Kalman best estimate,
-    plus (optional) the daily OPERATIONAL calibration constant from the L2 files as a black line.
+    plus (optional) the daily OPERATIONAL calibration constant from the L2 files as a black line,
+    and (optional, Rayleigh only) the OLD operational Rayleigh calibration as black 'x' markers.
 
     The Kalman line/band is the operational E-PROFILE random-walk best estimate, preferring
     the precomputed series (kal_m) and falling back to an on-the-fly fit.
@@ -260,6 +262,12 @@ def series_timeseries(g_m: pd.DataFrame, kal_m: pd.DataFrame, method: str,
             x=od["datetime"], y=od["op_coeff"], mode="lines", name="Operational constant (L2)",
             line=dict(color="#111111", width=1.3),
             hovertemplate="%{x|%Y-%m-%d}<br>operational=%{y:.3e}<extra></extra>"))
+    if oldray_df is not None and len(oldray_df):
+        orr = oldray_df.sort_values("datetime")
+        fig.add_trace(go.Scatter(
+            x=orr["datetime"], y=orr["value"], mode="markers", name="Old Rayleigh (operational)",
+            marker=dict(symbol="x", size=7, color="#000000"),
+            hovertemplate="%{x|%Y-%m-%d}<br>old Rayleigh=%{y:.3e}<extra></extra>"))
     if len(ok):
         fig.add_trace(go.Scatter(
             x=ok["datetime"], y=ok["cal_value"], mode="markers", name=f"{vname} (per cal)",

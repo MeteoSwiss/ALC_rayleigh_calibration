@@ -161,6 +161,50 @@ def _op_station_df(op_all, key, ref_cl):
     return pd.DataFrame({"datetime": d["datetime"].to_numpy()[keep], "op_coeff": op[keep]})
 
 
+def _load_oldray(oldray_dir) -> dict | None:
+    """Old operational Rayleigh calibrations from a tree of yearly NetCDFs
+    (``ALC_calibration_<key><YYYY>.nc`` under *oldray_dir*, e.g. /scratch/mch/mhrvo/Calib_oper).
+    Returns {key: DataFrame(datetime, value)} of the Rayleigh (calibration_method==0) lidar constant
+    for the station-page time-series overlay, or None if the dir is absent / xarray is unavailable.
+    Read with a lazy xarray import so a minimal dashboard env still builds when the overlay is off."""
+    if not oldray_dir:
+        return None
+    d = Path(oldray_dir)
+    if not d.exists():
+        return None
+    try:
+        import xarray as xr
+    except Exception:
+        print(f"  oldray: xarray unavailable -> skipping old-Rayleigh overlay ({oldray_dir})", flush=True)
+        return None
+    import re
+    by: dict = {}
+    files = sorted(d.glob("**/ALC_calibration_*.nc"))
+    for f in files:
+        m = re.match(r"ALC_calibration_(.+)\d{4}\.nc$", f.name)
+        if not m:
+            continue
+        key = m.group(1)
+        try:
+            ds = xr.open_dataset(f)
+            t = ds["time"].values
+            v = np.asarray(ds["lidar_constant"].values, dtype=float)
+            meth = (np.asarray(ds["calibration_method"].values, dtype=float)
+                    if "calibration_method" in ds.variables else np.zeros(v.shape))
+            ds.close()
+        except Exception:
+            continue
+        keep = np.isfinite(v) & (v > 0) & (meth == 0)
+        if not keep.any():
+            continue
+        by.setdefault(key, []).append(pd.DataFrame({"datetime": pd.to_datetime(t[keep]), "value": v[keep]}))
+    if not by:
+        return None
+    out = {k: pd.concat(v, ignore_index=True).sort_values("datetime") for k, v in by.items()}
+    print(f"  oldray: old-Rayleigh overlay for {len(out)} stations (from {len(files)} files)", flush=True)
+    return out
+
+
 def _series_table_rows(cal: pd.DataFrame, series: pd.DataFrame, st: pd.DataFrame) -> list[dict]:
     """One row per (station, method) with a value sparkline + method badge + country (for filtering)."""
     last_by = {(k, m): g[g["success"] == 1].sort_values("datetime")["cal_value"].tail(30).tolist()
@@ -249,7 +293,7 @@ def _copy_diagnostics(diag: pd.DataFrame, cal: pd.DataFrame, out_dir: Path) -> d
     return by
 
 
-def _method_block(key, method, cal, kal, series, diags=None, op_all=None):
+def _method_block(key, method, cal, kal, series, diags=None, op_all=None, oldray_all=None):
     """Figures + aggregates for one method section on a station page."""
     g_m = cal[(cal["key"] == key) & (cal["method"] == method)].sort_values("datetime")
     kal_m = kal[(kal["key"] == key) & (kal["method"] == method)] if len(kal) else kal
@@ -259,10 +303,12 @@ def _method_block(key, method, cal, kal, series, diags=None, op_all=None):
     ref = pd.to_numeric(g_m[g_m["success"] == 1]["cal_value"], errors="coerce")
     ref = ref[ref > 0]
     op_df = _op_station_df(op_all, key, float(ref.median()) if len(ref) else None)
+    # Old operational Rayleigh overlay (black x) — Rayleigh series only.
+    oldray_df = oldray_all.get(key) if (oldray_all is not None and method == "rayleigh") else None
     return dict(
         method=method, label=config.method_label(method), meta=meta,
         figs={
-            "ts": charts.fig_to_div(charts.series_timeseries(g_m, kal_m, method, op_df), f"fig-ts-{safe}"),
+            "ts": charts.fig_to_div(charts.series_timeseries(g_m, kal_m, method, op_df, oldray_df), f"fig-ts-{safe}"),
             "flags": charts.fig_to_div(charts.monthly_flag_bars(g_m, method), f"fig-mf-{safe}"),
             "aux": charts.fig_to_div(charts.aux_timeseries(g_m, method), f"fig-aux-{safe}"),
         },
@@ -273,7 +319,7 @@ def _method_block(key, method, cal, kal, series, diags=None, op_all=None):
 
 
 def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
-               flagex_dir=None, opcoeff_csv=None, only_keys=None) -> dict:
+               flagex_dir=None, opcoeff_csv=None, only_keys=None, oldray_dir=None) -> dict:
     out_dir = Path(out_dir)
     (out_dir / "stations").mkdir(parents=True, exist_ok=True)
     logo = _write_assets(out_dir)
@@ -289,6 +335,7 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
     # Operational calibration constant from the L2 files (optional): two ratio maps + per-station
     # black line on the time series.
     op_all = _load_opcoeff(opcoeff_csv)
+    oldray_all = _load_oldray(oldray_dir)
     keystats = keystats.merge(_opcoeff_ratios(cal, op_all, st), on="key", how="left")
 
     summary_figs = {
@@ -369,7 +416,7 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
         meta = st[st["key"] == key].iloc[0].to_dict()
         methods = [m for m in config.METHOD_ORDER
                    if len(cal[(cal["key"] == key) & (cal["method"] == m)])]
-        blocks = [_method_block(key, m, cal, kal, series, diag_by.get((key, m), []), op_all) for m in methods]
+        blocks = [_method_block(key, m, cal, kal, series, diag_by.get((key, m), []), op_all, oldray_all) for m in methods]
         overlay = None
         if len(methods) >= 2:
             by_method = {m: cal[(cal["key"] == key) & (cal["method"] == m)] for m in methods}

@@ -21,6 +21,7 @@ Examples
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 import webbrowser
@@ -74,6 +75,10 @@ def main() -> None:
     ap.add_argument("--opcoeff", type=Path, default=None,
                     help="CSV (key,date,op_coeff) of operational L2 calibration constants "
                          "(from scripts/extract_l2_opcoeff.py) for the ratio maps + time-series line")
+    ap.add_argument("--oldray", type=Path,
+                    default=(Path(os.environ["ALC_OLDRAY_DIR"]) if os.environ.get("ALC_OLDRAY_DIR") else None),
+                    help="dir of OLD operational Rayleigh NetCDFs (ALC_calibration_<key><YYYY>.nc, e.g. "
+                         "/scratch/mch/mhrvo/Calib_oper) to overlay as black 'x' markers on the Rayleigh time series")
     ap.add_argument("--changed-only", action="store_true",
                     help="incremental: re-render only station pages whose <key>_cal.csv changed since "
                          "the last build (the summary always rebuilds). Fast path for daily updates.")
@@ -100,7 +105,7 @@ def main() -> None:
 
     print("Rendering site ...", flush=True)
     site = render.build_site(db_path, args.out, limit_pages=args.limit_pages, flagex_dir=args.flagex,
-                             opcoeff_csv=args.opcoeff, only_keys=only_keys)
+                             opcoeff_csv=args.opcoeff, only_keys=only_keys, oldray_dir=args.oldray)
     # stamp the build time so the next --changed-only run knows what to re-render
     (args.out / ".last_build").write_text(time.strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
     print(f"  {site['n_pages']} station pages -> {site['out_dir']}  "
