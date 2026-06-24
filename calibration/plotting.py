@@ -1036,25 +1036,34 @@ def plot_rayleigh_diagnostics_failure(
     ax_p = fig.add_subplot(gs[0, 2])
 
     range_alc = np.asarray(range_alc, dtype=float)
+    rcs_full = np.asarray(rcs, dtype=float)
+    hours = np.asarray(hours_since_start, dtype=float)
     has_window = molecular_window is not None and np.all(np.isfinite(molecular_window))
 
     # --- RCS time-height matrix (always available when there are profiles) ---
-    rcs_t = np.asarray(rcs, dtype=float).T.copy()
+    # Native L1 can be thousands x thousands of cells (CL61 raw especially); stride the mesh to
+    # <=~800 per axis so a failure plot stays fast and light. Visual only -- the mean-profile panel
+    # below still uses the full-resolution data.
+    st_t = max(1, int(np.ceil(rcs_full.shape[0] / 800)))
+    st_r = max(1, int(np.ceil(rcs_full.shape[1] / 800)))
+    rcs_t = rcs_full[::st_t, ::st_r].T.copy()
     rcs_t[rcs_t <= 0] = np.nan
+    hours_hm = hours[::st_t]
+    range_hm = range_alc[::st_r]
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=RuntimeWarning)
         log_rcs = np.log10(rcs_t)
     valid = log_rcs[np.isfinite(log_rcs)]
     vmin, vmax = (float(np.percentile(valid, 5)), float(np.percentile(valid, 95))) if valid.size else (0.0, 6.0)
-    hm = ax_r.pcolormesh(hours_since_start, range_alc * 1e-3, log_rcs,
+    hm = ax_r.pcolormesh(hours_hm, range_hm * 1e-3, log_rcs,
                          shading="auto", cmap="viridis", vmin=vmin, vmax=vmax)
     plt.colorbar(hm, ax=ax_r, pad=0.01).set_label(r"log$_{10}$(RCS)")
     if cbh is not None:
         c = np.asarray(cbh, dtype=float)
         c0 = c[:, 0] if c.ndim > 1 else c
-        c0 = np.where((c0 == no_cloud_value) | (c0 <= 0), np.nan, c0)
+        c0 = np.where((c0 == no_cloud_value) | (c0 <= 0), np.nan, c0)[::st_t]
         if np.any(np.isfinite(c0)):
-            ax_r.scatter(hours_since_start, c0 * 1e-3, s=7, c="white",
+            ax_r.scatter(hours_hm, c0 * 1e-3, s=7, c="white",
                          edgecolors="k", linewidths=0.2, zorder=5, label="cloud base")
     if has_window:
         z_lo, z_hi = molecular_window[0] * 1e-3, molecular_window[1] * 1e-3
