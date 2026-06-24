@@ -1018,19 +1018,31 @@ def filter_cloudy_profiles(
         time_units=data.time_units,
     )
 
-    # Mask signal above high clouds (500m below cloud base)
-    n_partial = 0
+    # Mask signal above clouds (500 m below the cloud base) on every remaining profile -- the
+    # attenuated signal above a cloud must never enter the fit. A profile is still USABLE for the
+    # Rayleigh fit if its molecular window survives the mask: it is cloud-free, OR the cloud sits high
+    # enough that the mask starts above the window top (cloud_base - 500 > range_end_m). Counting only
+    # the fully-cloud-free profiles (the previous behaviour) wrongly rejected otherwise-fine nights
+    # with persistent cirrus WELL ABOVE the 2-6 km window -- e.g. SOFIA 2025-01-28 had 349 fully-clear
+    # profiles (< the 3 h minimum) but 2161 with the cloud base >= 6.5 km, i.e. a clean 2-6 km column.
+    mask_margin = 500.0
+    window_top = options.range_end_m
+    n_cloud_masked = 0
+    n_usable = 0
     for i in range(len(filtered_data.time)):
         if filtered_data.cbh[i, 0] != no_cloud_value:
             cloud_height = filtered_data.cbh[i, 0]
-            mask_above = filtered_data.range_alc >= (cloud_height - 500)
-            filtered_data.rcs[i, mask_above] = np.nan
-            n_partial += 1
+            filtered_data.rcs[i, filtered_data.range_alc >= (cloud_height - mask_margin)] = np.nan
+            n_cloud_masked += 1
+            if (cloud_height - mask_margin) > window_top:   # mask starts above the window -> intact
+                n_usable += 1
+        else:
+            n_usable += 1
 
-    # Check if enough profiles remain after masking
-    n_final = len(filtered_data.time) - n_partial
-    if n_final < min_profiles:
+    # Enough profiles with a usable (clean) molecular window?
+    if n_usable < min_profiles:
         return data, False, False
 
-    is_partially_clear = n_partial > 0
+    # A night calibrated with some signal masked above clouds is a PARTIAL success (flag 0.5).
+    is_partially_clear = n_cloud_masked > 0
     return filtered_data, True, is_partially_clear
