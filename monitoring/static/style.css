@@ -173,3 +173,30 @@ td a:hover { text-decoration: underline; }
 .cal-key { display: inline-block; width: 11px; height: 11px; border-radius: 3px; vertical-align: -1px; margin: 0 1px; }
 .cal-key.cal-ok { background: #2ca02c; }
 .cal-key.cal-bad { background: #d9dde1; border: 1px solid #b9bfc5; }
+
+/* QC flag comment dialog */
+.qcm-overlay { position: fixed; inset: 0; z-index: 2000; background: rgba(12,22,38,.45);
+  display: flex; align-items: center; justify-content: center; }
+.qcm-dialog { background: var(--card); color: var(--ink); border: 1px solid var(--line);
+  border-radius: 11px; box-shadow: 0 14px 44px rgba(0,0,0,.32); width: 460px; max-width: 92vw; padding: 18px 20px; }
+.qcm-head { font-weight: 700; font-size: 15px; }
+.qcm-sub { color: var(--muted); font-size: 12px; margin: 3px 0 14px;
+  font-family: ui-monospace, "Cascadia Code", monospace; }
+.qcm-presets { display: flex; flex-direction: column; gap: 8px; }
+.qcm-preset { text-align: left; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px;
+  background: #f3f6fb; color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; }
+.qcm-preset b { display: inline-block; min-width: 16px; color: var(--brand); }
+.qcm-preset:hover { background: #e7eff8; border-color: var(--accent); }
+.qcm-label { display: block; margin: 14px 0 5px; font-size: 12px; color: var(--muted); }
+.qcm-text { width: 100%; font: inherit; font-size: 13px; padding: 7px 9px; border: 1px solid var(--line);
+  border-radius: 7px; resize: vertical; background: #fff; color: var(--ink); }
+.qcm-text:focus { outline: none; border-color: var(--accent); }
+.qcm-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 16px; }
+.qcm-right { display: flex; gap: 8px; }
+.qcm-actions button { font: inherit; font-size: 13px; padding: 7px 14px; border-radius: 7px;
+  cursor: pointer; border: 1px solid var(--line); background: #fff; color: var(--ink); }
+.qcm-save { background: var(--brand); color: #fff; border-color: var(--brand); }
+.qcm-save:hover { background: #0d4a76; }
+.qcm-cancel:hover { background: #f0f2f5; }
+.qcm-remove { color: #a3261f; border-color: #e3b3ae; }
+.qcm-remove:hover { background: #fbecea; }

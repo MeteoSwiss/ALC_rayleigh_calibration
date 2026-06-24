@@ -115,6 +115,12 @@
         dates.forEach(function (x) { var diff = Math.abs(+x - +d); if (diff < bd) { bd = diff; best = x; } });
         if (best) show(pos[best]);
       },
+      openFlag: function () { if (window.QCFlags) window.QCFlags.openDialog(curRec(), syncFlag); },
+      quickFlag: function (i) {
+        if (window.QCFlags && window.QCFlags.PRESETS && window.QCFlags.PRESETS[i] != null) {
+          window.QCFlags.set(curRec(), window.QCFlags.PRESETS[i]); syncFlag();
+        }
+      },
     };
 
     buildCalendar(calEl, items, function (d) { viewer.jump(d); active = viewer; });
@@ -124,7 +130,7 @@
     if (up) up.addEventListener("click", function () { viewer.prevAny(); });
     if (dn) dn.addEventListener("click", function () { viewer.nextAny(); });
     if (flagBtn) flagBtn.addEventListener("click", function () {
-      if (window.QCFlags) { window.QCFlags.toggle(curRec()); syncFlag(); }
+      if (window.QCFlags) { window.QCFlags.openDialog(curRec(), syncFlag); }
     });
     section.addEventListener("mouseenter", function () { active = viewer; });
     section.addEventListener("focus", function () { active = viewer; });
@@ -154,12 +160,17 @@
   }
 
   document.addEventListener("keydown", function (e) {
+    if (window.QCFlags && window.QCFlags.isDialogOpen && window.QCFlags.isDialogOpen()) return;  // dialog owns the keyboard
     if (!active || e.target.tagName === "SELECT" || e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
     var allDays = e.ctrlKey || e.metaKey;   // Ctrl (Cmd on macOS) -> step through ALL imaged days
     if (e.key === "ArrowLeft") { (allDays ? active.prevAny() : active.prevValid()); e.preventDefault(); }
     else if (e.key === "ArrowRight") { (allDays ? active.nextAny() : active.nextValid()); e.preventDefault(); }
     else if (e.key === "ArrowUp") { if (navStation(-1)) e.preventDefault(); }
     else if (e.key === "ArrowDown") { if (navStation(1)) e.preventDefault(); }
+    else if (e.key === "0") { active.openFlag(); e.preventDefault(); }            // open flag + comment dialog
+    else if (e.key === "1") { active.quickFlag(0); e.preventDefault(); }          // aerosol contamination
+    else if (e.key === "2") { active.quickFlag(1); e.preventDefault(); }          // cloud contamination
+    else if (e.key === "3") { active.quickFlag(2); e.preventDefault(); }          // low signal (condensation?)
   });
 
   Array.prototype.forEach.call(document.querySelectorAll(".diag"), buildViewer);
