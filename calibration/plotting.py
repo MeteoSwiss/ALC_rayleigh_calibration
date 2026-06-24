@@ -812,10 +812,16 @@ def plot_rayleigh_diagnostics_compact(
     cloud_base_height: Optional[NDArray[np.float64]] = None,
     no_cloud_value: float = -9.0,
     z_low_cloud: Optional[float] = None,
+    rcs_range_alc: Optional[NDArray[np.float64]] = None,
     title: str = "",
     save_path: Optional[Path] = None,
 ) -> "Figure":
-    """Wide Rayleigh dashboard: molecular, window, sensitivity and an annotated RCS panel."""
+    """Wide Rayleigh dashboard: molecular, window, sensitivity and an annotated RCS panel.
+
+    The RCS panel (``rcs``/``hours_since_start``/``cloud_base_height``/``used_profile_indices``) may be
+    on a different (e.g. full pre-screen, native-range) grid than the fit panels; pass its range axis
+    as ``rcs_range_alc`` (defaults to ``range_alc``) so excluded profiles can be shown hatched rather
+    than gapped."""
     plt = _get_plt()
 
     fig = plt.figure(figsize=(24, 14), layout="constrained")
@@ -926,16 +932,18 @@ def plot_rayleigh_diagnostics_compact(
     ax_s3.grid(True, axis="y", alpha=0.25)
 
     # --- Annotated RCS pcolor: molecular layer, cloud detections, profile usage ---
+    rr = rcs_range_alc if rcs_range_alc is not None else range_alc   # RCS panel may use its own range axis
     rcs_plot = np.asarray(rcs, dtype=float).copy().T
     rcs_plot[rcs_plot <= 0] = np.nan
-    log_rcs = np.log10(rcs_plot)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        log_rcs = np.log10(rcs_plot)
     valid = log_rcs[np.isfinite(log_rcs)]
     if valid.size:
         vmin, vmax = float(np.percentile(valid, 5)), float(np.percentile(valid, 95))
     else:
         vmin, vmax = 0.0, 6.0
 
-    hm = ax_r.pcolormesh(hours_since_start, range_alc * 1e-3, log_rcs,
+    hm = ax_r.pcolormesh(hours_since_start, rr * 1e-3, log_rcs,
                          shading="auto", cmap="viridis", vmin=vmin, vmax=vmax)
     plt.colorbar(hm, ax=ax_r, pad=0.01).set_label(r"log$_{10}$(RCS)")
 

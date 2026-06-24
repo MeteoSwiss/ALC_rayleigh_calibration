@@ -368,9 +368,10 @@ def calibrate_rayleigh(
     # Step 3: Filter cloudy profiles
     # =========================================================================
     no_cloud_value = info.instrument_type.no_cloud_value
-    data_precloud = data   # keep the unscreened night so a failure plot can show the clouds
+    data_precloud = data   # keep the unscreened night so the diagnostic plots can show the clouds
+    cloud_masks = {}       # filled with keep_mask (over data_precloud) for the hatched RCS panel
     data, is_clear, is_partial = filter_cloudy_profiles(
-        data, options, no_cloud_value, info.instrument_type)
+        data, options, no_cloud_value, info.instrument_type, masks_out=cloud_masks)
 
     if not is_clear:
         logger.warning("Not a clear night")
@@ -931,6 +932,21 @@ def calibrate_rayleigh(
             and fit_result.search_diagnostics is not None
         ):
             diag = fit_result.search_diagnostics
+            # RCS panel shows the FULL time-filtered night so cloud/contaminated profiles appear
+            # HATCHED, not as gaps: feed data_precloud (pre-screen) and mark "used" = the profiles
+            # the cloud screen kept (~contaminated). Native L1 can be huge -> stride (visual only).
+            keep_native = cloud_masks.get("keep_mask")
+            if keep_native is not None and len(keep_native) == data_precloud.rcs.shape[0]:
+                _st = max(1, int(np.ceil(data_precloud.rcs.shape[0] / 1000)))
+                disp_rcs = data_precloud.rcs[::_st]
+                disp_hours = data_precloud.hours_since_start[::_st]
+                disp_cbh = data_precloud.cbh[::_st]
+                disp_range = data_precloud.range_alc          # native range axis for this panel
+                disp_used = np.where(np.asarray(keep_native, dtype=bool)[::_st])[0]
+            else:                                   # fallback: the screened/binned data (old behaviour)
+                disp_rcs, disp_hours, disp_cbh = data.rcs, data.hours_since_start, data.cbh
+                disp_range = data.range_alc
+                disp_used = np.asarray(keep_idx, dtype=int)
             try:
                 plot_rayleigh_diagnostics_compact(
                     range_alc=data.range_alc,
@@ -953,12 +969,13 @@ def calibrate_rayleigh(
                     cl_matrix=cl_matrix,
                     cl_median=cl_median,
                     cl_uncertainty=uncertainty,
-                    hours_since_start=data.hours_since_start,
-                    rcs=data.rcs,
-                    used_profile_indices=np.asarray(keep_idx, dtype=int),
-                    cloud_base_height=data.cbh,
+                    hours_since_start=disp_hours,
+                    rcs=disp_rcs,
+                    used_profile_indices=disp_used,
+                    cloud_base_height=disp_cbh,
                     no_cloud_value=info.instrument_type.no_cloud_value,
                     z_low_cloud=options.z_low_cloud,
+                    rcs_range_alc=disp_range,
                     title=f"{plot_title_base} — Rayleigh diagnostics (compact) [{_outcome}]",
                     save_path=pdir / f"{tag}_rayleigh_diag_compact.png",
                 )

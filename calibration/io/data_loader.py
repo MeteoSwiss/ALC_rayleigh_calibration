@@ -909,6 +909,7 @@ def filter_cloudy_profiles(
     options: CalibrationOptions,
     no_cloud_value: float,
     instrument_type: Optional["InstrumentType"] = None,
+    masks_out: Optional[dict] = None,
 ) -> Tuple[CeilometerData, bool, bool]:
     """
     Filter profiles affected by low clouds.
@@ -947,6 +948,8 @@ def filter_cloudy_profiles(
     is_clear_night = bool(np.all(cbh_is_no_cloud) and not np.any(has_fog))
 
     if is_clear_night:
+        if masks_out is not None:
+            masks_out["keep_mask"] = np.ones(len(data.cbh), dtype=bool)   # nothing excluded
         return data, True, False
 
     # Profiles per minute. MUST stay a float: rounding to int collapses to 0 for coarse data
@@ -1045,4 +1048,8 @@ def filter_cloudy_profiles(
 
     # A night calibrated with some signal masked above clouds is a PARTIAL success (flag 0.5).
     is_partially_clear = n_cloud_masked > 0
+    if masks_out is not None:
+        # over the INPUT profiles: which survived the screen (~contaminated) -> lets the diagnostic
+        # plot show the WHOLE night with the excluded (cloud/contaminated) profiles hatched, not gapped.
+        masks_out["keep_mask"] = keep_mask
     return filtered_data, True, is_partially_clear
