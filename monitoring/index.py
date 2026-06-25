@@ -131,11 +131,15 @@ def _enrich_metadata(stations: pd.DataFrame, l2_dir: Path) -> pd.DataFrame:
         wmo, ident = str(s["wmo"]), str(s["identifier"])
         if not wmo or wmo == "nan":
             wmo, _, ident = str(s["key"]).rpartition("_")
-        matches = sorted(Path(l2_dir).glob(f"{wmo}/*/L2_{wmo}_{ident}*.nc"))
-        if not matches:
+        # L2 archives nest as <wmo>/YYYY/MM/L2_*.nc (2 levels) or <wmo>/<sub>/L2_*.nc (1 level);
+        # take the FIRST match lazily -- site/country/institution are constant per station, so any
+        # file works, and next() avoids enumerating the whole (large) per-station L2 tree.
+        match = (next(Path(l2_dir).glob(f"{wmo}/*/*/L2_{wmo}_{ident}*.nc"), None)
+                 or next(Path(l2_dir).glob(f"{wmo}/*/L2_{wmo}_{ident}*.nc"), None))
+        if not match:
             continue
         try:
-            with netCDF4.Dataset(matches[-1]) as d:
+            with netCDF4.Dataset(match) as d:
                 site = str(getattr(d, "site_location", "") or "")
                 inst = str(getattr(d, "institution", "") or "")
         except OSError:
