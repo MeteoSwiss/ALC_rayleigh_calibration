@@ -221,7 +221,8 @@ def cl_median_iqr_by_station(d: pd.DataFrame, itype: str) -> go.Figure:
                      arrayminus=(d["med"] - d["q1"]).clip(lower=0),
                      thickness=0.7, width=0, color="rgba(50,50,50,0.55)"),
         customdata=list(zip(d["key"], d["n"], d["q1"], d["q3"],
-                            d["country"] if "country" in d.columns else [""] * len(d))),
+                            d["country"] if "country" in d.columns else [""] * len(d),
+                            d["med"])),   # [5]=median: the client country-filter rebuilds bars from customdata
         hovertemplate=("%{customdata[0]}<br>median C_L = %{y:.3g}"
                        "<br>IQR = [%{customdata[2]:.3g}, %{customdata[3]:.3g}]  (n=%{customdata[1]})"
                        "<br><i>click to open station →</i>"

@@ -78,12 +78,11 @@
   function filterBars(gd, c) {
     if (!gd.data || !gd.data[0] || !gd.data[0].customdata) return 1;   // not ready -> don't hide it
     if (!gd._fullbars) {
-      // customdata = [key, n, q1, q3, country]. Use Array.from (Plotly may store y / error_y.array as
-      // non-sliceable typed/base64 arrays), and recompute the IQR error bars from q1/q3 rather than
-      // reading error_y.array back -- which is why an earlier version threw and the filter no-op'd.
-      var d0 = gd.data[0];
-      gd._fullbars = { y: Array.from(d0.y || []), cd: Array.from(d0.customdata || []),
-                       itype: d0.name || "" };
+      // Read EVERYTHING from customdata = [key, n, q1, q3, country, median]. Plotly stores y and
+      // error_y.array as base64-encoded typed arrays (Array.from gives []), so reconstruct the bar
+      // height from the median (cd[5]) and the IQR error bars from q1/q3 (cd[2]/cd[3]) -- otherwise
+      // the bars get undefined heights and vanish even though the count/axis update.
+      gd._fullbars = { cd: Array.from(gd.data[0].customdata || []), itype: gd.data[0].name || "" };
     }
     var f = gd._fullbars, idx = [];
     for (var i = 0; i < f.cd.length; i++) {
@@ -91,9 +90,9 @@
     }
     window.Plotly.restyle(gd, {
       x: [idx.map(function (_, j) { return j; })],
-      y: [idx.map(function (i) { return f.y[i]; })],
-      "error_y.array": [idx.map(function (i) { return Math.max(0, f.cd[i][3] - f.y[i]); })],
-      "error_y.arrayminus": [idx.map(function (i) { return Math.max(0, f.y[i] - f.cd[i][2]); })],
+      y: [idx.map(function (i) { return f.cd[i][5]; })],                                  // median
+      "error_y.array": [idx.map(function (i) { return Math.max(0, f.cd[i][3] - f.cd[i][5]); })],     // q3 - median
+      "error_y.arrayminus": [idx.map(function (i) { return Math.max(0, f.cd[i][5] - f.cd[i][2]); })], // median - q1
       customdata: [idx.map(function (i) { return f.cd[i]; })]
     }, [0]);
     window.Plotly.relayout(gd, { "title.text": f.itype +
