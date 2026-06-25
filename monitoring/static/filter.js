@@ -30,6 +30,10 @@
   if (!fc && !ft) return;
   var tables = Array.prototype.slice.call(document.querySelectorAll("table.filterable"));
   var count = document.getElementById("filter-count");
+  // Per-instrument-type ranked-histogram sections ("Median C_L per station, by type"): when a type
+  // is selected, show only its histogram (and the section header); otherwise show all of them.
+  var cliqrSections = Array.prototype.slice.call(document.querySelectorAll("section.cliqr"));
+  var cliqrHeader = document.querySelector("h2.sec-h");
 
   function val(sel) { return sel ? sel.value : ""; }
 
@@ -67,10 +71,27 @@
     });
   }
 
+  function filterHistograms(t) {
+    var anyShown = 0;
+    cliqrSections.forEach(function (s) {
+      var show = (!t || s.getAttribute("data-type") === t);
+      s.style.display = show ? "" : "none";
+      if (show) {
+        anyShown++;
+        if (window.Plotly) {            // re-fit: it may have been display:none at last resize
+          var gd = s.querySelector(".plotly-graph-div");
+          if (gd) { try { window.Plotly.Plots.resize(gd); } catch (e) {} }
+        }
+      }
+    });
+    if (cliqrHeader) cliqrHeader.style.display = anyShown ? "" : "none";
+  }
+
   function apply() {
     var c = val(fc), t = val(ft);
     filterTables(c, t);
     filterMap(c, t);
+    filterHistograms(t);
   }
   if (fc) fc.addEventListener("change", apply);
   if (ft) ft.addEventListener("change", apply);

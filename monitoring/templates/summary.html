@@ -46,7 +46,7 @@
 <h2 class="sec-h">Median C&#8203;<sub>L</sub> per station — ranked, by instrument type
   <span class="muted">(error bar = inter-quartile range)</span></h2>
 {% for t, div in cl_iqr %}
-<section><div class="card">{{ div | safe }}</div></section>
+<section class="cliqr" data-type="{{ t }}"><div class="card">{{ div | safe }}</div></section>
 {% endfor %}
 {% endif %}
 
