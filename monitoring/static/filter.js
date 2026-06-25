@@ -71,18 +71,42 @@
     });
   }
 
-  function filterHistograms(t) {
+  // Filter one ranked-histogram figure's BARS to a country (re-ranking the survivors 0..M-1) and
+  // update its station-count title; returns the number of bars shown. The full bar arrays are cached
+  // on first call so every filter is taken from the complete set. The theoretical / network-median
+  // reference lines are layout shapes and intentionally stay at their full-network values.
+  function filterBars(gd, c) {
+    if (!gd.data || !gd.data[0]) return 1;               // Plotly not ready yet -> don't hide it
+    if (!gd._fullbars) {
+      var d0 = gd.data[0], ey = d0.error_y || {};
+      gd._fullbars = { y: (d0.y || []).slice(), arr: (ey.array || []).slice(),
+                       arrm: (ey.arrayminus || []).slice(), cd: (d0.customdata || []).slice(),
+                       itype: d0.name || "" };
+    }
+    var f = gd._fullbars, idx = [];
+    for (var i = 0; i < f.cd.length; i++) {
+      if (!c || (f.cd[i] && f.cd[i][4] === c)) idx.push(i);   // customdata = [key,n,q1,q3,country]
+    }
+    window.Plotly.restyle(gd, {
+      x: [idx.map(function (_, j) { return j; })],
+      y: [idx.map(function (i) { return f.y[i]; })],
+      "error_y.array": [idx.map(function (i) { return f.arr[i]; })],
+      "error_y.arrayminus": [idx.map(function (i) { return f.arrm[i]; })],
+      customdata: [idx.map(function (i) { return f.cd[i]; })]
+    }, [0]);
+    window.Plotly.relayout(gd, { "title.text": f.itype +
+      " — stations ranked by median C_L (n=" + idx.length + " stations, error bar = IQR)" });
+    return idx.length;
+  }
+
+  function filterHistograms(c, t) {
     var anyShown = 0;
     cliqrSections.forEach(function (s) {
-      var show = (!t || s.getAttribute("data-type") === t);
+      var gd = s.querySelector(".plotly-graph-div");
+      var n = (gd && window.Plotly) ? filterBars(gd, c) : 1;   // subset bars by country (all sections)
+      var show = (!t || s.getAttribute("data-type") === t) && n > 0;   // hide empty / off-type ones
       s.style.display = show ? "" : "none";
-      if (show) {
-        anyShown++;
-        if (window.Plotly) {            // re-fit: it may have been display:none at last resize
-          var gd = s.querySelector(".plotly-graph-div");
-          if (gd) { try { window.Plotly.Plots.resize(gd); } catch (e) {} }
-        }
-      }
+      if (show) { anyShown++; try { window.Plotly.Plots.resize(gd); } catch (e) {} }
     });
     if (cliqrHeader) cliqrHeader.style.display = anyShown ? "" : "none";
   }
@@ -91,7 +115,7 @@
     var c = val(fc), t = val(ft);
     filterTables(c, t);
     filterMap(c, t);
-    filterHistograms(t);
+    filterHistograms(c, t);
   }
   if (fc) fc.addEventListener("change", apply);
   if (ft) ft.addEventListener("change", apply);

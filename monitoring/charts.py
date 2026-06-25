@@ -205,7 +205,7 @@ def cl_median_iqr_by_station(d: pd.DataFrame, itype: str) -> go.Figure:
     """Stations of ONE instrument type ranked low->high by their MEDIAN lidar constant C_L, with the
     interquartile range (Q1..Q3 of that station's successful daily C_L) drawn as an asymmetric error
     bar. Red dashed = the theoretical C_L for the type; blue dashed = the type's network median of the
-    per-station medians. ``d`` has one row per station: columns key, med, q1, q3, n.
+    per-station medians. ``d`` has one row per station: columns key, med, q1, q3, n[, country].
     """
     d = d[d["med"] > 0].sort_values("med").reset_index(drop=True)
     if d.empty:
@@ -220,7 +220,8 @@ def cl_median_iqr_by_station(d: pd.DataFrame, itype: str) -> go.Figure:
                      array=(d["q3"] - d["med"]).clip(lower=0),
                      arrayminus=(d["med"] - d["q1"]).clip(lower=0),
                      thickness=0.7, width=0, color="rgba(50,50,50,0.55)"),
-        customdata=list(zip(d["key"], d["n"], d["q1"], d["q3"])),
+        customdata=list(zip(d["key"], d["n"], d["q1"], d["q3"],
+                            d["country"] if "country" in d.columns else [""] * len(d))),
         hovertemplate=("%{customdata[0]}<br>median C_L = %{y:.3g}"
                        "<br>IQR = [%{customdata[2]:.3g}, %{customdata[3]:.3g}]  (n=%{customdata[1]})"
                        "<br><i>click to open station →</i>"

@@ -385,6 +385,9 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
     gb = okc.groupby(["itype", "key"])["cal_value"]
     sta_iqr = pd.DataFrame({"med": gb.median(), "q1": gb.quantile(0.25),
                             "q3": gb.quantile(0.75), "n": gb.size()}).reset_index()
+    # carry each station's country so the nav country-filter can subset the bars client-side
+    sta_iqr["country"] = sta_iqr["key"].map(
+        dict(zip(st["key"], st["country"])) if "country" in st.columns else {}).fillna("")
     cl_iqr_figs = [(t, charts.fig_to_div(charts.cl_median_iqr_by_station(sta_iqr[sta_iqr["itype"] == t], t),
                                          f"fig-cliqr-{t}"))
                    for t in config.TYPE_ORDER if (sta_iqr["itype"] == t).any()]
