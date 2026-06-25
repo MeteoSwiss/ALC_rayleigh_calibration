@@ -6,6 +6,7 @@ Each station may carry one or two method series (Rayleigh and/or cloud).
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -20,6 +21,22 @@ from monitoring import charts, config, metrics
 
 _TEMPLATES = Path(__file__).parent / "templates"
 _STATIC = Path(__file__).parent / "static"
+
+# Project JS/CSS that get a cache-busting ?v=<hash> so browsers always pick up changes (Plotly is
+# stable + large -> left unversioned). Same list is used to copy them into the site.
+_VERSIONED_ASSETS = ("style.css", "table-sort.js", "paginate.js", "filter.js", "qcflag.js",
+                     "diag.js", "histlink.js", "search.js")
+
+
+def _asset_version() -> str:
+    """Short content hash of the versioned assets -> cache-busting token (?v=). Changes only when a
+    JS/CSS file changes, so data-only rebuilds keep URLs cacheable but code changes are never stale."""
+    h = hashlib.md5()
+    for name in _VERSIONED_ASSETS:
+        p = _STATIC / name
+        if p.exists():
+            h.update(p.read_bytes())
+    return h.hexdigest()[:8]
 
 
 def _fmt(x, spec="{:.3g}", dash="—"):
@@ -39,6 +56,7 @@ def _env() -> Environment:
     env.globals["flag_color"] = config.flag_color
     env.globals["flag_anchor"] = config.flag_anchor
     env.globals["method_label"] = config.method_label
+    env.globals["asset_v"] = _asset_version()   # cache-busting token for ?v= on JS/CSS
     return env
 
 
@@ -73,8 +91,7 @@ def _write_assets(out_dir: Path) -> str | None:
     assets = out_dir / "assets"
     assets.mkdir(parents=True, exist_ok=True)
     (assets / "plotly.min.js").write_text(get_plotlyjs(), encoding="utf-8")
-    for name in ("style.css", "table-sort.js", "paginate.js", "filter.js", "qcflag.js", "diag.js",
-                 "histlink.js", "search.js"):
+    for name in _VERSIONED_ASSETS:
         src = _STATIC / name
         if src.exists():
             shutil.copyfile(src, assets / name)
