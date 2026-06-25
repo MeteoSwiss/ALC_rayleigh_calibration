@@ -76,22 +76,24 @@
   // on first call so every filter is taken from the complete set. The theoretical / network-median
   // reference lines are layout shapes and intentionally stay at their full-network values.
   function filterBars(gd, c) {
-    if (!gd.data || !gd.data[0]) return 1;               // Plotly not ready yet -> don't hide it
+    if (!gd.data || !gd.data[0] || !gd.data[0].customdata) return 1;   // not ready -> don't hide it
     if (!gd._fullbars) {
-      var d0 = gd.data[0], ey = d0.error_y || {};
-      gd._fullbars = { y: (d0.y || []).slice(), arr: (ey.array || []).slice(),
-                       arrm: (ey.arrayminus || []).slice(), cd: (d0.customdata || []).slice(),
+      // customdata = [key, n, q1, q3, country]. Use Array.from (Plotly may store y / error_y.array as
+      // non-sliceable typed/base64 arrays), and recompute the IQR error bars from q1/q3 rather than
+      // reading error_y.array back -- which is why an earlier version threw and the filter no-op'd.
+      var d0 = gd.data[0];
+      gd._fullbars = { y: Array.from(d0.y || []), cd: Array.from(d0.customdata || []),
                        itype: d0.name || "" };
     }
     var f = gd._fullbars, idx = [];
     for (var i = 0; i < f.cd.length; i++) {
-      if (!c || (f.cd[i] && f.cd[i][4] === c)) idx.push(i);   // customdata = [key,n,q1,q3,country]
+      if (!c || (f.cd[i] && f.cd[i][4] === c)) idx.push(i);   // [4] = country
     }
     window.Plotly.restyle(gd, {
       x: [idx.map(function (_, j) { return j; })],
       y: [idx.map(function (i) { return f.y[i]; })],
-      "error_y.array": [idx.map(function (i) { return f.arr[i]; })],
-      "error_y.arrayminus": [idx.map(function (i) { return f.arrm[i]; })],
+      "error_y.array": [idx.map(function (i) { return Math.max(0, f.cd[i][3] - f.y[i]); })],
+      "error_y.arrayminus": [idx.map(function (i) { return Math.max(0, f.y[i] - f.cd[i][2]); })],
       customdata: [idx.map(function (i) { return f.cd[i]; })]
     }, [0]);
     window.Plotly.relayout(gd, { "title.text": f.itype +
