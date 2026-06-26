@@ -13,32 +13,82 @@
 
   function pad(n) { return (n < 10 ? "0" : "") + n; }
 
+  // Calendar showing a WINDOW of 3 months at a time, with prev/next-month arrows and a
+  // month dropdown. Returns a controller: .ensureVisible(date) scrolls the window to a
+  // date's month and highlights it (called by the viewer's show()).
+  var CAL_WIN = 3;
   function buildCalendar(calEl, items, onPick) {
     var info = {};
     items.forEach(function (it) { info[it.date] = !!it.success; });
-    var first = items[0].date, last = items[items.length - 1].date;
-    var y = +first.slice(0, 4), m = +first.slice(4, 6) - 1;
-    var y1 = +last.slice(0, 4), m1 = +last.slice(4, 6) - 1;
     var WD = ["M", "T", "W", "T", "F", "S", "S"];
-    var html = "";
-    while (y < y1 || (y === y1 && m <= m1)) {
-      html += '<div class="cal-month"><div class="cal-title">' + y + "-" + pad(m + 1) + "</div><div class=\"cal-grid\">";
-      WD.forEach(function (w) { html += '<div class="cal-wd">' + w + "</div>"; });
-      var offset = (new Date(y, m, 1).getDay() + 6) % 7;   // Monday-first
-      for (var i = 0; i < offset; i++) html += '<div class="cal-day empty"></div>';
-      var nd = new Date(y, m + 1, 0).getDate();
-      for (var dd = 1; dd <= nd; dd++) {
-        var ds = "" + y + pad(m + 1) + pad(dd);
-        var cls = (ds in info) ? ("avail " + (info[ds] ? "good" : "rejected")) : "none";
-        html += '<div class="cal-day ' + cls + '" data-date="' + ds + '">' + dd + "</div>";
-      }
-      html += "</div></div>";
-      m++; if (m > 11) { m = 0; y++; }
-    }
-    calEl.innerHTML = html;
-    Array.prototype.forEach.call(calEl.querySelectorAll(".cal-day.avail"), function (c) {
-      c.addEventListener("click", function () { onPick(c.getAttribute("data-date")); });
+    // full ordered list of YYYYMM from the first to the last imaged day
+    var months = [];
+    var y = +items[0].date.slice(0, 4), m = +items[0].date.slice(4, 6) - 1;
+    var y1 = +items[items.length - 1].date.slice(0, 4), m1 = +items[items.length - 1].date.slice(4, 6) - 1;
+    while (y < y1 || (y === y1 && m <= m1)) { months.push("" + y + pad(m + 1)); m++; if (m > 11) { m = 0; y++; } }
+
+    calEl.innerHTML =
+      '<div class="cal-nav">' +
+      '<button type="button" class="cal-prev" title="Earlier months">‹</button>' +
+      '<select class="cal-select" title="Jump to month"></select>' +
+      '<button type="button" class="cal-next" title="Later months">›</button>' +
+      '</div><div class="cal-window"></div>';
+    var selEl = calEl.querySelector(".cal-select");
+    var winEl = calEl.querySelector(".cal-window");
+    var prevB = calEl.querySelector(".cal-prev");
+    var nextB = calEl.querySelector(".cal-next");
+    months.forEach(function (ym, i) {
+      var o = document.createElement("option");
+      o.value = i; o.textContent = ym.slice(0, 4) + "-" + ym.slice(4, 6);
+      selEl.appendChild(o);
     });
+    var start = Math.max(0, months.length - CAL_WIN);   // default: the latest 3 months
+    var ctl = { selDate: null };
+
+    function monthHtml(ym) {
+      var yy = +ym.slice(0, 4), mm = +ym.slice(4, 6) - 1;
+      var h = '<div class="cal-month"><div class="cal-title">' + ym.slice(0, 4) + "-" + ym.slice(4, 6) +
+        '</div><div class="cal-grid">';
+      WD.forEach(function (w) { h += '<div class="cal-wd">' + w + "</div>"; });
+      var offset = (new Date(yy, mm, 1).getDay() + 6) % 7;   // Monday-first
+      for (var i = 0; i < offset; i++) h += '<div class="cal-day empty"></div>';
+      var nd = new Date(yy, mm + 1, 0).getDate();
+      for (var dd = 1; dd <= nd; dd++) {
+        var ds = "" + yy + pad(mm + 1) + pad(dd);
+        var cls = (ds in info) ? ("avail " + (info[ds] ? "good" : "rejected")) : "none";
+        h += '<div class="cal-day ' + cls + '" data-date="' + ds + '">' + dd + "</div>";
+      }
+      return h + "</div></div>";
+    }
+    function render() {
+      var maxStart = Math.max(0, months.length - CAL_WIN);
+      start = Math.min(Math.max(0, start), maxStart);
+      winEl.innerHTML = months.slice(start, start + CAL_WIN).map(monthHtml).join("");
+      selEl.value = start;
+      prevB.disabled = (start <= 0);
+      nextB.disabled = (start >= maxStart);
+      Array.prototype.forEach.call(winEl.querySelectorAll(".cal-day.avail"), function (c) {
+        c.addEventListener("click", function () { onPick(c.getAttribute("data-date")); });
+      });
+      if (ctl.selDate) {
+        var cell = winEl.querySelector('.cal-day[data-date="' + ctl.selDate + '"]');
+        if (cell) cell.classList.add("sel");
+      }
+    }
+    prevB.addEventListener("click", function () { start -= 1; render(); });
+    nextB.addEventListener("click", function () { start += 1; render(); });
+    selEl.addEventListener("change", function () { start = +selEl.value; render(); });
+
+    ctl.ensureVisible = function (date) {
+      ctl.selDate = date;
+      var mi = months.indexOf(date.slice(0, 6));
+      if (mi >= 0 && (mi < start || mi >= start + CAL_WIN)) {
+        start = mi - (CAL_WIN - 1);   // show the selected month as the most recent of the 3
+      }
+      render();
+    };
+    render();
+    return ctl;
   }
 
   function wireTimeSeries(tsId, viewer, tries) {
@@ -72,6 +122,7 @@
     var link = section.querySelector(".diag-imglink");
     var label = section.querySelector(".diag-date");
     var calEl = section.querySelector(".diag-cal");
+    var cal = null;   // calendar controller (assigned by buildCalendar below)
     var flagBtn = section.querySelector(".diag-flag");
     var idx = validIdx.length ? validIdx[validIdx.length - 1] : items.length - 1;  // default: latest valid
 
@@ -94,13 +145,11 @@
     function show(i) {
       if (i < 0 || i >= items.length) return;
       idx = i;
-      var it = items[idx], src = "../" + it.rel;
+      var it = items[idx], src = /^https?:\/\//.test(it.rel) ? it.rel : "../" + it.rel;
       img.src = src; link.href = src;
       label.textContent = it.date.slice(0, 4) + "-" + it.date.slice(4, 6) + "-" + it.date.slice(6, 8) +
         (it.success ? "  ✓ valid" : "  ✗ rejected") + "  (day " + (idx + 1) + " of " + items.length + ")";
-      Array.prototype.forEach.call(calEl.querySelectorAll(".cal-day.sel"), function (c) { c.classList.remove("sel"); });
-      var cell = calEl.querySelector('.cal-day[data-date="' + it.date + '"]');
-      if (cell) cell.classList.add("sel");
+      if (cal) cal.ensureVisible(it.date);   // scroll the 3-month window to this date + highlight
       syncFlag();
       active = viewer;
     }
@@ -123,7 +172,7 @@
       },
     };
 
-    buildCalendar(calEl, items, function (d) { viewer.jump(d); active = viewer; });
+    cal = buildCalendar(calEl, items, function (d) { viewer.jump(d); active = viewer; });
     section.querySelector(".diag-prev").addEventListener("click", function () { viewer.prevValid(); });
     section.querySelector(".diag-next").addEventListener("click", function () { viewer.nextValid(); });
     var up = section.querySelector(".diag-up"), dn = section.querySelector(".diag-down");

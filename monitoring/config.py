@@ -20,6 +20,23 @@ DEFAULT_L2_DIR = Path(os.environ.get("ALC_L2_DIR", "A:/E-PROFILE_L2_monthly"))  
 DEFAULT_OUT_DIR = Path(os.environ.get("ALC_DASHBOARD_DIR", str(_PROJECT / "dashboard_l1_2026")))   # generated static site
 DB_NAME = "calib_index.sqlite"
 
+
+def _norm_base_url(u: str) -> str:
+    """Normalize an image base URL: strip whitespace and ensure a single trailing slash. '' stays ''."""
+    u = (u or "").strip()
+    if not u:
+        return ""
+    return u if u.endswith("/") else u + "/"
+
+
+# Public base URL for the bulky per-image assets (per-night diagnostic PNGs, OmB / sensitivity figures,
+# flag examples). When set (ALC_IMG_BASE_URL, or --img-base-url), the site references those images as
+# ABSOLUTE URLs under this base instead of site-relative paths -- so they can live in object storage
+# (e.g. an EWC S3 bucket https://object-store.os-api.cci2.ecmwf.int/<bucket>/) while the HTML is served
+# from a small web server. Empty (default) -> unchanged site-relative behaviour. The bucket layout
+# mirrors the site: <base>diag/<key>/<method>_<date>.png, <base>ombsens/<key>/..., <base>flagex/...
+IMG_BASE_URL = _norm_base_url(os.environ.get("ALC_IMG_BASE_URL", ""))
+
 # --- Flag meanings ----------------------------------------------------------
 # MIRROR of calibration/flags.py :: FLAG_MEANINGS (the homogenized cloud/Rayleigh table).
 # Kept local on purpose so the dashboard runs without importing (or installing) the heavy
@@ -37,6 +54,7 @@ FLAG_MEANINGS = {
     -7: "Negative fit slope",
     -8: "Fit issue: |b| > a",
     -9: "Another layer with lower signal",
+    -10: "Closest CAMS data too far",
     -20: "Cloud: window transmission too low",
     -21: "Cloud: laser energy too low",
     -22: "Cloud: peak not sharp above",
@@ -69,6 +87,7 @@ FLAG_COLORS = {
     -7: "#d73027",
     -8: "#a50026",
     -9: "#e07b39",
+    -10: "#5e3c99",
     -20: "#fff2cc", -21: "#ffe699", -22: "#ffd966", -23: "#f1c232",
     -24: "#e69138", -25: "#d79b00", -26: "#bf9000",
     -99: "#000000",
@@ -83,6 +102,22 @@ TYPE_COLORS = {
     "Mini-MPL": "#9467bd",
 }
 TYPE_ORDER = ["CHM15k", "CL31", "CL51", "CL61", "Mini-MPL"]
+
+# Plotly marker symbol per instrument type — used on EVERY network map so the symbol encodes the
+# instrument family (colour is then free to encode the data value). scattergeo honours a per-POINT
+# marker.symbol array (verified), so the maps stay single-trace and filter.js needs no restructure.
+TYPE_SYMBOLS = {
+    "CHM15k": "circle",
+    "CL31": "square",
+    "CL51": "diamond",
+    "CL61": "triangle-up",
+    "Mini-MPL": "star",
+}
+
+
+def type_symbol(itype) -> str:
+    """Plotly marker symbol for an instrument type (falls back to circle)."""
+    return TYPE_SYMBOLS.get(str(itype), "circle")
 
 # Theoretical (reference) lidar constant per instrument type, on the C_L scale. Used to express a
 # station's median C_L as a percent of the nominal value. Mirrors INSTRUMENT_CAL_DEFAULT in the

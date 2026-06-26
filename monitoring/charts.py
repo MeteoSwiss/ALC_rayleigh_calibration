@@ -28,6 +28,30 @@ def _value_name(method: str) -> str:
     return _VALUE_NAME.get(str(method), "value")
 
 
+# --- Map helpers ------------------------------------------------------------
+
+def _symbols_for(itypes) -> list:
+    """Per-point marker symbol array keyed by instrument type. scattergeo honours a per-POINT
+    marker.symbol array, so every map stays single-trace (filter.js still drives marker.size via
+    customdata, and the symbols simply ride along)."""
+    return [config.type_symbol(t) for t in itypes]
+
+
+def _add_symbol_legend(fig: go.Figure) -> None:
+    """Add a small manual symbol->instrument-type legend via dummy legend-only scattergeo traces
+    (no real points). The data trace carries showlegend=False, so the legend reads purely as the
+    symbol key. Placed top-left, horizontal, so it does not crowd the colorbar on the right."""
+    for t in config.TYPE_ORDER:
+        fig.add_trace(go.Scattergeo(
+            lat=[None], lon=[None], mode="markers", name=t,
+            marker=dict(size=9, symbol=config.type_symbol(t), color="#666",
+                        line=dict(width=0.4, color="#555")),
+            showlegend=True, hoverinfo="skip"))
+    fig.update_layout(legend=dict(orientation="h", yanchor="top", y=1.0, xanchor="left", x=0.0,
+                                  bgcolor="rgba(255,255,255,0.6)", font=dict(size=10),
+                                  itemclick=False, itemdoubleclick=False))
+
+
 # --- Summary-page figures ---------------------------------------------------
 
 def network_map(keystats: pd.DataFrame) -> go.Figure:
@@ -61,12 +85,13 @@ def network_map(keystats: pd.DataFrame) -> go.Figure:
         text=[f"<b>{nm or k}</b><br>{k}<br>{t} · {ct} · {m}<br>{sr:.0f}% success · {nd} cal"
               for k, nm, t, ct, m, sr, nd in zip(d["key"], name, d["itype"], country, d["methods"],
                                                  d["success_rate"].fillna(0), d["n_dates"].fillna(0))],
-        hoverinfo="text", customdata=customdata,
-        marker=dict(size=sizes,
+        hoverinfo="text", customdata=customdata, showlegend=False,
+        marker=dict(size=sizes, symbol=_symbols_for(d["itype"]),
                     color=np.asarray(d["success_rate"].fillna(0), dtype=float),
                     colorscale="RdYlGn", cmin=0, cmax=80,
                     colorbar=dict(title="success %"), line=dict(width=0.4, color="#555")),
     ))
+    _add_symbol_legend(fig)
     fig.update_geos(scope="europe", resolution=50, showcountries=True, countrycolor="#bbbbbb",
                     showland=True, landcolor="#f5f5f5",
                     lataxis_range=config.MAP_LAT_RANGE, lonaxis_range=config.MAP_LON_RANGE)
@@ -104,10 +129,100 @@ def ratio_map(keystats: pd.DataFrame, col: str, title: str, cbar: str,
         text=[f"<b>{nm or k}</b><br>{k}<br>{t} · {ct}<br>{v:.0f}% of reference · {nd:.0f} cal"
               for k, nm, t, ct, v, nd in zip(d["key"], name, d["itype"], country, vals,
                                              d["n_dates"].fillna(0))],
-        hoverinfo="text", customdata=customdata,
-        marker=dict(size=sizes, color=vals, colorscale="RdBu", cmin=cmin, cmax=cmax, cmid=100.0,
+        hoverinfo="text", customdata=customdata, showlegend=False,
+        marker=dict(size=sizes, symbol=_symbols_for(d["itype"]),
+                    color=vals, colorscale="RdBu", cmin=cmin, cmax=cmax, cmid=100.0,
                     colorbar=dict(title=cbar), line=dict(width=0.4, color="#555")),
     ))
+    _add_symbol_legend(fig)
+    fig.update_geos(scope="europe", resolution=50, showcountries=True, countrycolor="#bbbbbb",
+                    showland=True, landcolor="#f5f5f5",
+                    lataxis_range=config.MAP_LAT_RANGE, lonaxis_range=config.MAP_LON_RANGE)
+    fig.update_layout(**{**_LAYOUT, "height": 460, "margin": dict(l=0, r=0, t=40, b=0)}, title=title)
+    return fig
+
+
+def _empty_map(title: str) -> go.Figure:
+    """An empty Europe map with a '— no data' title (shared by the value-coloured map builders)."""
+    fig = go.Figure()
+    fig.update_geos(scope="europe", resolution=50, showcountries=True, countrycolor="#bbbbbb",
+                    showland=True, landcolor="#f5f5f5",
+                    lataxis_range=config.MAP_LAT_RANGE, lonaxis_range=config.MAP_LON_RANGE)
+    fig.update_layout(**{**_LAYOUT, "height": 460, "margin": dict(l=0, r=0, t=40, b=0)},
+                      title=f"{title} — no data")
+    return fig
+
+
+def omb_bias_map(keystats: pd.DataFrame) -> go.Figure:
+    """Station map coloured by the mean observation-minus-background (CAMS) bias of OUR calibrated
+    backscatter, ``omb_bias`` [Mm^-1 sr^-1] (= median_bias_ours * 1e6). RdBu diverging centred at 0;
+    blue = we read low vs CAMS, red = high. Carries the same customdata layout + per-type symbol as
+    the other maps so filter.js country/type filtering and click-to-station keep working."""
+    title = "Mean OmB bias vs CAMS"
+    col = "omb_bias"
+    base = keystats.dropna(subset=["lat", "lon"]).copy()
+    d = base[np.isfinite(pd.to_numeric(base.get(col), errors="coerce"))].copy() if col in base else base.iloc[0:0]
+    if d.empty:
+        return _empty_map(title)
+    n_dates = np.asarray(d["n_dates"].fillna(1), dtype=float)
+    sizes = np.clip(np.sqrt(n_dates) / 2.0, 5, 18)
+    country = (d["country"].fillna("") if "country" in d.columns
+               else pd.Series([""] * len(d), index=d.index)).astype(str)
+    name = (d["name"].fillna("") if "name" in d.columns
+            else pd.Series([""] * len(d), index=d.index)).astype(str)
+    customdata = [[c, t, float(sz), k, nm] for c, t, sz, k, nm in
+                  zip(country.values, d["itype"].astype(str).values, sizes,
+                      d["key"].astype(str).values, name.values)]
+    vals = np.asarray(pd.to_numeric(d[col], errors="coerce"), dtype=float)
+    fig = go.Figure(go.Scattergeo(
+        lat=d["lat"], lon=d["lon"],
+        text=[f"<b>{nm or k}</b><br>{k}<br>{t} · {ct}<br>O-B = {v:+.2f} Mm⁻¹sr⁻¹"
+              for k, nm, t, ct, v in zip(d["key"], name, d["itype"], country, vals)],
+        hoverinfo="text", customdata=customdata, showlegend=False,
+        marker=dict(size=sizes, symbol=_symbols_for(d["itype"]),
+                    color=vals, colorscale="RdBu", cmin=-1.0, cmax=1.0, cmid=0.0,
+                    colorbar=dict(title="O-B [Mm⁻¹sr⁻¹]"), line=dict(width=0.4, color="#555")),
+    ))
+    _add_symbol_legend(fig)
+    fig.update_geos(scope="europe", resolution=50, showcountries=True, countrycolor="#bbbbbb",
+                    showland=True, landcolor="#f5f5f5",
+                    lataxis_range=config.MAP_LAT_RANGE, lonaxis_range=config.MAP_LON_RANGE)
+    fig.update_layout(**{**_LAYOUT, "height": 460, "margin": dict(l=0, r=0, t=40, b=0)}, title=title)
+    return fig
+
+
+def icao_altitude_map(keystats: pd.DataFrame) -> go.Figure:
+    """Station map coloured by the ICAO 200 ug/m3 detection altitude ``icao_alt`` [m] (= icao_alt_200):
+    the highest altitude at which the instrument can still detect the ICAO low-visibility aerosol load.
+    Sequential Viridis, higher = better. Stations with no detection (blank icao_alt) are omitted (they
+    fall out via the finite-value filter). Same customdata + per-type symbol as the other maps."""
+    title = "ICAO detection altitude"
+    col = "icao_alt"
+    base = keystats.dropna(subset=["lat", "lon"]).copy()
+    d = base[np.isfinite(pd.to_numeric(base.get(col), errors="coerce"))].copy() if col in base else base.iloc[0:0]
+    if d.empty:
+        return _empty_map(title)
+    n_dates = np.asarray(d["n_dates"].fillna(1), dtype=float)
+    sizes = np.clip(np.sqrt(n_dates) / 2.0, 5, 18)
+    country = (d["country"].fillna("") if "country" in d.columns
+               else pd.Series([""] * len(d), index=d.index)).astype(str)
+    name = (d["name"].fillna("") if "name" in d.columns
+            else pd.Series([""] * len(d), index=d.index)).astype(str)
+    customdata = [[c, t, float(sz), k, nm] for c, t, sz, k, nm in
+                  zip(country.values, d["itype"].astype(str).values, sizes,
+                      d["key"].astype(str).values, name.values)]
+    vals = np.asarray(pd.to_numeric(d[col], errors="coerce"), dtype=float)
+    fig = go.Figure(go.Scattergeo(
+        lat=d["lat"], lon=d["lon"],
+        text=[f"<b>{nm or k}</b><br>{k}<br>{t} · {ct}<br>ICAO 200 µg/m³ detect alt = {v:.0f} m"
+              for k, nm, t, ct, v in zip(d["key"], name, d["itype"], country, vals)],
+        hoverinfo="text", customdata=customdata, showlegend=False,
+        marker=dict(size=sizes, symbol=_symbols_for(d["itype"]),
+                    color=vals, colorscale="Viridis",
+                    colorbar=dict(title=dict(text="alt [m]", side="right"), thickness=12),
+                    line=dict(width=0.4, color="#555")),
+    ))
+    _add_symbol_legend(fig)
     fig.update_geos(scope="europe", resolution=50, showcountries=True, countrycolor="#bbbbbb",
                     showland=True, landcolor="#f5f5f5",
                     lataxis_range=config.MAP_LAT_RANGE, lonaxis_range=config.MAP_LON_RANGE)
@@ -261,18 +376,19 @@ def series_timeseries(g_m: pd.DataFrame, kal_m: pd.DataFrame, method: str,
     if op_df is not None and len(op_df):
         od = op_df.sort_values("datetime")
         fig.add_trace(go.Scatter(
-            x=od["datetime"], y=od["op_coeff"], mode="lines", name="Operational constant (L2)",
+            x=od["datetime"], y=od["op_coeff"], mode="lines", name="Applied in L2",
             line=dict(color="#111111", width=1.3),
             hovertemplate="%{x|%Y-%m-%d}<br>operational=%{y:.3e}<extra></extra>"))
     if oldray_df is not None and len(oldray_df):
         orr = oldray_df.sort_values("datetime")
         fig.add_trace(go.Scatter(
-            x=orr["datetime"], y=orr["value"], mode="markers", name="Old Rayleigh (operational)",
+            x=orr["datetime"], y=orr["value"], mode="markers", name="v1.0",
             marker=dict(symbol="x", size=7, color="#000000"),
             hovertemplate="%{x|%Y-%m-%d}<br>old Rayleigh=%{y:.3e}<extra></extra>"))
     if len(ok):
         fig.add_trace(go.Scatter(
-            x=ok["datetime"], y=ok["cal_value"], mode="markers", name=f"{vname} (per cal)",
+            x=ok["datetime"], y=ok["cal_value"], mode="markers",
+            name=("v2.0" if method == "rayleigh" else f"{vname} (per cal)"),
             marker=dict(size=5, color=color, opacity=0.7),
             error_y=dict(type="data", array=ok["uncertainty"], visible=True,
                          thickness=0.6, width=0, color="rgba(120,120,120,0.3)"),
@@ -284,10 +400,12 @@ def series_timeseries(g_m: pd.DataFrame, kal_m: pd.DataFrame, method: str,
                 y=np.concatenate([ks + kstd, (ks - kstd)[::-1]]),
                 fill="toself", fillcolor="rgba(214,39,40,0.12)", line=dict(width=0),
                 hoverinfo="skip", showlegend=False))
-            fig.add_trace(go.Scatter(x=kt, y=ks, mode="lines", name="Kalman best estimate",
+            fig.add_trace(go.Scatter(x=kt, y=ks, mode="lines",
+                                     name=("v2.0 Kalman estimate" if method == "rayleigh" else "Kalman best estimate"),
                                      line=dict(color="#d62728", width=2),
                                      hovertemplate="%{x|%Y-%m-%d}<br>Kalman=%{y:.3e}<extra></extra>"))
-    fig.update_layout(**_LAYOUT, yaxis_title=vname, legend=dict(orientation="h", y=1.14),
+    fig.update_layout(**_LAYOUT, yaxis_title=vname,
+                      legend=dict(orientation="h", y=-0.22, x=0.5, xanchor="center", yanchor="top"),
                       title=f"{config.method_label(method)} — {vname} over time + Kalman")
     fig.update_yaxes(exponentformat="e")
     return fig

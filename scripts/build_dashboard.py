@@ -61,6 +61,12 @@ def main() -> None:
                     help="L2 archive for station name/country/institution (default: %(default)s)")
     ap.add_argument("--out", type=Path, default=config.DEFAULT_OUT_DIR,
                     help="output site folder (default: %(default)s)")
+    ap.add_argument("--img-base-url", default=os.environ.get("ALC_IMG_BASE_URL", ""),
+                    help="public base URL for the per-image assets (diagnostics, OmB/sensitivity, flag "
+                         "examples), e.g. an EWC S3 bucket "
+                         "https://object-store.os-api.cci2.ecmwf.int/<bucket>/ . When set, the site "
+                         "references those images as ABSOLUTE URLs under this base instead of relative "
+                         "paths, so they can be hosted in object storage (default: $ALC_IMG_BASE_URL)")
     ap.add_argument("--types", default=None,
                     help="comma-separated instrument types to include (default: all)")
     ap.add_argument("--limit", type=int, default=None,
@@ -82,7 +88,17 @@ def main() -> None:
     ap.add_argument("--changed-only", action="store_true",
                     help="incremental: re-render only station pages whose <key>_cal.csv changed since "
                          "the last build (the summary always rebuilds). Fast path for daily updates.")
+    ap.add_argument("--workers", type=int, default=int(os.environ.get("ALC_DASH_WORKERS", "1")),
+                    help="parallel worker processes for per-station page rendering (default 1 = "
+                         "serial; or set ALC_DASH_WORKERS). The summary/index build stays serial.")
     args = ap.parse_args()
+
+    # Image base URL (optional): expose it both in-process (config) and to spawned render workers (env),
+    # so the serial and parallel paths emit the same absolute image URLs. Must be set before the worker
+    # pool is created; mirrors how ALC_DIAG_LINK reaches workers via the environment.
+    if args.img_base_url:
+        os.environ["ALC_IMG_BASE_URL"] = args.img_base_url
+        config.IMG_BASE_URL = config._norm_base_url(args.img_base_url)
 
     types = [t.strip() for t in args.types.split(",")] if args.types else None
     db_path = args.out / config.DB_NAME
@@ -106,7 +122,7 @@ def main() -> None:
     print("Rendering site ...", flush=True)
     site = render.build_site(db_path, args.out, limit_pages=args.limit_pages, flagex_dir=args.flagex,
                              opcoeff_csv=args.opcoeff, only_keys=only_keys, oldray_dir=args.oldray,
-                             fullcal_dir=args.fullcal)
+                             fullcal_dir=args.fullcal, workers=args.workers)
     # stamp the build time so the next --changed-only run knows what to re-render
     (args.out / ".last_build").write_text(time.strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
     print(f"  {site['n_pages']} station pages -> {site['out_dir']}  "

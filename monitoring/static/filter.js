@@ -6,8 +6,9 @@
 (function () {
   function pad(n) { return (n < 10 ? "0" : "") + n; }
 
-  // All scattergeo maps share the customdata layout [country, type, size, key, name].
-  var MAP_IDS = ["fig-map", "fig-map-theo", "fig-map-op"];
+  // All scattergeo maps share the customdata layout [country, type, size, key, name] on data[0].
+  // (Maps also carry data[1..5] = dummy symbol-legend traces; we only ever touch trace [0].)
+  var MAP_IDS = ["fig-map", "fig-map-theo", "fig-map-op", "fig-map-omb", "fig-map-icao"];
 
   // Click a map marker -> open that station's page (retry until Plotly has initialised).
   function wireMapClick(id, tries) {

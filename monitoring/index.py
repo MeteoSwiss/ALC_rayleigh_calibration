@@ -159,17 +159,18 @@ def _series_aggregates(cal: pd.DataFrame) -> pd.DataFrame:
         g = g.sort_values("datetime")
         ok = g[g["success"] == 1]
         last = g.iloc[-1]
-        # Success rate counts ATTEMPTABLE days: exclude only no-data (0) and unsuitable conditions
-        # (-1 = cloudy night for Rayleigh / clear sky for cloud -- genuinely no opportunity). Every
-        # other non-success, including the cloud rejections (-20..-26: dirty window, low laser energy,
-        # cloud not a clean stratocumulus), counts as a FAILURE -- so the rate measures "of the days a
-        # calibration could be attempted, how often it succeeded", consistent with both the headline
-        # KPI (metrics.network_summary) and how Rayleigh already counts its own quality failures.
+        # Success rate = valid calibrations / ALL days with a file. EVERY non-success counts against
+        # it: no data (0), no liquid cloud / not a clear night (-1), AND the quality rejections
+        # (-20..-26 dirty window/low laser/etc., signal-not-proportional, ...). This is the true daily
+        # yield -- so a cloud method that only lands on cloudy days reads ~50 %, not ~100 % (the old
+        # formula excluded flag -1, which for cloud is almost all the non-successes). Identical for both
+        # methods. n_suitable (attemptable days, excl. 0/-1) is retained for reference only.
         n_suitable = int((~g["flag"].isin([0, -1])).sum())
+        n_dates = int(len(g))
         records.append(dict(
             key=key, method=method,
-            n_dates=int(len(g)), n_success=int(len(ok)), n_suitable=n_suitable,
-            success_rate=float(100.0 * len(ok) / n_suitable) if n_suitable else float("nan"),
+            n_dates=n_dates, n_success=int(len(ok)), n_suitable=n_suitable,
+            success_rate=float(100.0 * len(ok) / n_dates) if n_dates else float("nan"),
             median_cl=float(ok["cal_value"].median()) if len(ok) else float("nan"),
             median_rel_unc=float(ok["rel_uncertainty"].median()) if len(ok) else float("nan"),
             first_date=str(g.iloc[0]["date"]), last_date=str(last["date"]),

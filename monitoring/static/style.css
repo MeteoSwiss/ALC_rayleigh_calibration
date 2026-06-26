@@ -170,6 +170,12 @@ td a:hover { text-decoration: underline; }
 .cal-day.avail.rejected:hover { background: #c4c9ce; }
 .cal-day.none { color: #ccd2d8; }
 .cal-day.sel { outline: 2px solid #d62728; }
+.cal-nav { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+.cal-nav .cal-select { font-size: 10px; padding: 1px 2px; max-width: 110px; }
+.cal-prev, .cal-next { font-size: 13px; line-height: 1; padding: 0 7px; cursor: pointer;
+  border: 1px solid #ccd2d8; background: #f7f8fa; border-radius: 3px; }
+.cal-prev:disabled, .cal-next:disabled { opacity: .35; cursor: default; }
+.cal-window { display: flex; flex-direction: column; gap: 10px; }
 .cal-key { display: inline-block; width: 11px; height: 11px; border-radius: 3px; vertical-align: -1px; margin: 0 1px; }
 .cal-key.cal-ok { background: #2ca02c; }
 .cal-key.cal-bad { background: #d9dde1; border: 1px solid #b9bfc5; }

@@ -53,6 +53,8 @@ DAY_LAG = int(os.environ.get("ALC_DAY_LAG") or "1")
 BACKFILL_DAYS = int(os.environ.get("ALC_BACKFILL_DAYS") or "5")
 WORKERS = str(os.environ.get("ALC_WORKERS") or "6")
 PY = sys.executable
+PUBLISH = (os.environ.get("ALC_PUBLISH") or "0") == "1"
+PUBLISH_SH = REPO / "ops" / "publish.sh"
 
 PROCESSED = DASHBOARD_DIR / ".processed_days"     # one YYYYMMDD per line: days CAMS was present + run
 HEARTBEAT = DASHBOARD_DIR / ".last_success"
@@ -116,10 +118,22 @@ def update_dashboard() -> bool:
     return subprocess.run(cmd, cwd=str(REPO)).returncode == 0
 
 
+def publish() -> bool:
+    """Publish the freshly-built site to the EWC (images -> S3 bucket, HTML -> web VM) via
+    ops/publish.sh. Best-effort: a publish failure is logged and flagged in the heartbeat but does NOT
+    fail the run -- the calibration and the local dashboard already succeeded."""
+    if not PUBLISH_SH.exists():
+        log("  publish: ops/publish.sh missing -> skip")
+        return False
+    log(f"  publish: bash {PUBLISH_SH}")
+    return subprocess.run(["bash", str(PUBLISH_SH)], cwd=str(REPO)).returncode == 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--day", default=None, help="process this single day YYYYMMDD (overrides D-LAG + backfill)")
     ap.add_argument("--no-dashboard", action="store_true", help="run the calibration only, skip the dashboard")
+    ap.add_argument("--no-publish", action="store_true", help="skip the EWC publish step even if ALC_PUBLISH=1")
     ap.add_argument("--force-all", action="store_true", help="ignore the processed-days record (reprocess the window)")
     args = ap.parse_args()
 
@@ -151,17 +165,23 @@ def main() -> int:
         log(f"day {ds}: calibration {'ok' if ok else 'completed WITH ERRORS (see per-stream output)'}")
 
     dash_ok = True
+    published = None
     if ran and not args.no_dashboard:
         log("updating dashboard (incremental) ...")
         dash_ok = update_dashboard()
         log(f"dashboard update {'ok' if dash_ok else 'FAILED'}")
+        if dash_ok and PUBLISH and not args.no_publish:
+            log("publishing to the EWC ...")
+            published = publish()
+            log(f"publish {'ok' if published else 'FAILED (non-fatal)'}")
     elif not ran:
         log("no day processed -> dashboard not updated")
 
     HEARTBEAT.parent.mkdir(parents=True, exist_ok=True)
     HEARTBEAT.write_text(
         f"{datetime.now(timezone.utc):%Y-%m-%d %H:%M:%S}Z ran={','.join(ran) or '-'} "
-        f"cams_missing={','.join(cams_failures) or '-'} dashboard={'ok' if dash_ok else 'fail'}\n",
+        f"cams_missing={','.join(cams_failures) or '-'} dashboard={'ok' if dash_ok else 'fail'}"
+        f"{'' if published is None else (' publish=' + ('ok' if published else 'fail'))}\n",
         encoding="utf-8")
 
     # hard failure: dashboard build failed, or there was work but nothing could be processed

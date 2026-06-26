@@ -89,4 +89,18 @@
   {{ monitoring | safe }}
 </section>
 {% endif %}
+
+{% if ombsens and ombsens.omb %}
+<section class="card">
+  <h2>Observation &#8722; Background (CAMS) <span class="muted">— calibrated backscatter vs CAMS model over the period</span></h2>
+  <a href="{{ ombsens.omb }}" target="_blank" rel="noopener"><img class="diag-img" src="{{ ombsens.omb }}" alt="Observation minus background (CAMS) diagnostic" style="max-width:100%;height:auto;"></a>
+</section>
+{% endif %}
+
+{% if ombsens and ombsens.sens %}
+<section class="card">
+  <h2>Instrument sensitivity / detection limit <span class="muted">— ICAO detection altitude &amp; nighttime noise floor</span></h2>
+  <a href="{{ ombsens.sens }}" target="_blank" rel="noopener"><img class="diag-img" src="{{ ombsens.sens }}" alt="Instrument sensitivity / detection limit diagnostic" style="max-width:100%;height:auto;"></a>
+</section>
+{% endif %}
 {% endblock %}

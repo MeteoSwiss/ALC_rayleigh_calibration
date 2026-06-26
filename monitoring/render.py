@@ -10,7 +10,9 @@ import hashlib
 import json
 import os
 import shutil
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -83,7 +85,7 @@ def _copy_flag_examples(flagex_dir, out_dir: Path) -> dict:
         except OSError:
             continue
         cap = png.stem.split("__", 1)[1].replace("_", " ") if "__" in png.stem else ""
-        by.setdefault(val, []).append({"rel": f"flagex/{png.name}", "caption": cap})
+        by.setdefault(val, []).append({"rel": f"{config.IMG_BASE_URL}flagex/{png.name}", "caption": cap})
     return by
 
 
@@ -106,14 +108,15 @@ def _write_assets(out_dir: Path) -> str | None:
 
 
 def _keystats(series: pd.DataFrame, st: pd.DataFrame) -> pd.DataFrame:
-    """Per-key rollup (across methods) for the network map. Success rate excludes no-data /
-    unsuitable-conditions days (uses n_suitable), matching the per-series definition."""
+    """Per-key rollup (across methods) for the network map. Success rate = valid / ALL days
+    (n_dates): no-data, no-cloud/not-clear-night and rejections all count against it, matching
+    the per-series definition."""
     agg = (series.groupby("key")
            .agg(n_dates=("n_dates", "sum"), n_success=("n_success", "sum"),
                 n_suitable=("n_suitable", "sum"),
                 methods=("method", lambda s: " + ".join(config.method_label(m) for m in sorted(set(s)))))
            .reset_index())
-    agg["success_rate"] = 100.0 * agg["n_success"] / agg["n_suitable"].replace(0, np.nan)
+    agg["success_rate"] = 100.0 * agg["n_success"] / agg["n_dates"].replace(0, np.nan)
     cols = [c for c in ("key", "itype", "lat", "lon", "country", "name") if c in st.columns]
     return agg.merge(st[cols], on="key", how="left")
 
@@ -279,35 +282,56 @@ def _materialize(src: Path, dst: Path, mode: str) -> None:
         shutil.copyfile(src, dst)
 
 
-def _copy_diagnostics(diag: pd.DataFrame, cal: pd.DataFrame, out_dir: Path) -> dict:
-    """Place per-calibration diagnostic PNGs under the site (diag/<key>/<method>_<date>.png) and
-    return {(key, method): [ {date, rel, success}, ... ]} sorted by date for the station-page viewer.
-    By default the PNGs are SYMLINKED, not copied, so a ~100k-image / tens-of-GB diagnostic set is
-    not duplicated (set ALC_DIAG_LINK=copy for a portable site, or =hardlink). `success` (from cal)
-    drives the green/grey calendar and the valid-only (left/right) navigation."""
-    by: dict = {}
+def _existing_diag(diag: pd.DataFrame) -> pd.DataFrame:
+    """Subset of *diag* whose source PNG still exists on disk (vectorized stat). Shared by the
+    materialize + index steps so the (large) 100k-row table is filtered only once."""
     if not len(diag):
+        return diag
+    src = diag["src"].astype(str).to_numpy()
+    exists = np.fromiter((os.path.exists(s) for s in src), dtype=bool, count=src.shape[0])
+    return diag[exists]
+
+
+def _diag_index_from(d: pd.DataFrame, cal: pd.DataFrame) -> dict:
+    """Build the viewer index {(key, method): [ {date, rel, success}, ... ]} from *d* (already
+    filtered to existing sources). Vectorized (no per-row Python loop) -- the prior iterrows form
+    cost ~23 s on the 146k-row network table; this is ~1 s."""
+    by: dict = {}
+    if not len(d):
         return by
-    succ = set()
+    d = d[["key", "method", "date"]].astype(str).copy()
+    d["rel"] = config.IMG_BASE_URL + "diag/" + d["key"] + "/" + d["method"] + "_" + d["date"] + ".png"
     if len(cal):
         s = cal[cal["success"] == 1]
         succ = set(zip(s["key"].astype(str), s["method"].astype(str), s["date"].astype(str)))
-    for _, r in diag.iterrows():
-        src = Path(str(r["src"]))
-        if not src.exists():
-            continue
-        key, method, date = str(r["key"]), str(r["method"]), str(r["date"])
-        fname = f"{method}_{date}.png"
-        dst = out_dir / "diag" / key / fname
+        d["success"] = [t in succ for t in zip(d["key"], d["method"], d["date"])]
+    else:
+        d["success"] = False
+    d = d.sort_values("date")
+    for (key, method), g in d.groupby(["key", "method"], sort=False):
+        by[(key, method)] = g[["date", "rel", "success"]].to_dict("records")
+    return by
+
+
+def _diag_index(diag: pd.DataFrame, cal: pd.DataFrame) -> dict:
+    """Read-only viewer index (no materialize), used by the parallel render workers that rely on the
+    parent having already materialized the PNGs. See :func:`_diag_index_from`."""
+    return _diag_index_from(_existing_diag(diag), cal)
+
+
+def _copy_diagnostics(diag: pd.DataFrame, cal: pd.DataFrame, out_dir: Path) -> dict:
+    """Place per-calibration diagnostic PNGs under the site (diag/<key>/<method>_<date>.png) and
+    return the viewer index (see :func:`_diag_index_from`). By default the PNGs are SYMLINKED, not
+    copied, so a ~100k-image / tens-of-GB diagnostic set is not duplicated (set ALC_DIAG_LINK=copy
+    for a portable site, or =hardlink)."""
+    d = _existing_diag(diag)
+    for r in d.itertuples(index=False):
+        dst = out_dir / "diag" / str(r.key) / f"{r.method}_{r.date}.png"
         try:
-            _materialize(src, dst, _DIAG_LINK_MODE)
+            _materialize(Path(str(r.src)), dst, _DIAG_LINK_MODE)
         except OSError:
             continue
-        by.setdefault((key, method), []).append(
-            {"date": date, "rel": f"diag/{key}/{fname}", "success": (key, method, date) in succ})
-    for k in by:
-        by[k].sort(key=lambda x: x["date"])
-    return by
+    return _diag_index_from(d, cal)
 
 
 def _method_block(key, method, cal, kal, series, diags=None, op_all=None, oldray_all=None):
@@ -335,6 +359,70 @@ def _method_block(key, method, cal, kal, series, diags=None, op_all=None, oldray
     )
 
 
+def _ombsens_keystats(fullcal_dir) -> pd.DataFrame:
+    """Scan the fullcal dir for the per-stream OmB / sensitivity one-row summaries written by the
+    runner and roll them up into a per-key table for the two new summary maps. Only a subset of
+    streams have these files (a subset run is still populating them), so missing files are skipped.
+
+      <key>_omb.csv  -> omb_bias = median_bias_ours * 1e6   [Mm^-1 sr^-1]
+      <key>_sens.csv -> icao_alt = icao_alt_200             [m] (blank when never detected)
+
+    Returns columns ["key", "omb_bias", "icao_alt"] (NaN where a value is absent)."""
+    rows: dict = {}
+    if not fullcal_dir:
+        return pd.DataFrame(columns=["key", "omb_bias", "icao_alt"])
+    root = Path(fullcal_dir)
+    if not root.exists():
+        return pd.DataFrame(columns=["key", "omb_bias", "icao_alt"])
+    for omb in root.glob("*/*_omb.csv"):
+        key = omb.parent.name
+        try:
+            df = pd.read_csv(omb)
+        except Exception:
+            continue
+        if not len(df):
+            continue
+        v = pd.to_numeric(df.iloc[0].get("median_bias_ours"), errors="coerce")
+        rows.setdefault(key, {})["omb_bias"] = (float(v) * 1e6) if np.isfinite(v) else np.nan
+    for sens in root.glob("*/*_sens.csv"):
+        key = sens.parent.name
+        try:
+            df = pd.read_csv(sens)
+        except Exception:
+            continue
+        if not len(df):
+            continue
+        v = pd.to_numeric(df.iloc[0].get("icao_alt_200"), errors="coerce")
+        rows.setdefault(key, {})["icao_alt"] = float(v) if np.isfinite(v) else np.nan
+    if not rows:
+        return pd.DataFrame(columns=["key", "omb_bias", "icao_alt"])
+    out = pd.DataFrame([{"key": k, "omb_bias": d.get("omb_bias", np.nan),
+                         "icao_alt": d.get("icao_alt", np.nan)} for k, d in rows.items()])
+    return out
+
+
+def _stage_ombsens_pngs(fullcal_dir, key, out_dir: Path) -> dict:
+    """Stage the per-station OmB / sensitivity diagnostic PNGs into the site (under ombsens/<key>/)
+    the same way per-night diagnostics are staged (symlink by default, ALC_DIAG_LINK overrides), and
+    return {'omb': rel, 'sens': rel} for the present files only (missing files are simply omitted)."""
+    out: dict = {}
+    if not fullcal_dir:
+        return out
+    for kind in ("omb", "sens"):
+        src = Path(fullcal_dir) / key / f"{key}_{kind}.png"
+        if not src.exists():
+            continue
+        fname = f"{key}_{kind}.png"
+        dst = out_dir / "ombsens" / key / fname
+        try:
+            _materialize(src, dst, _DIAG_LINK_MODE)
+        except OSError:
+            continue
+        out[kind] = (f"{config.IMG_BASE_URL}ombsens/{key}/{fname}" if config.IMG_BASE_URL
+                     else f"../ombsens/{key}/{fname}")
+    return out
+
+
 def _load_hk(fullcal_dir, key):
     """Per-stream daily housekeeping (<key>_hk.csv) for the monitoring panel; None if absent/empty."""
     if not fullcal_dir:
@@ -358,9 +446,68 @@ def _load_hk(fullcal_dir, key):
     return df
 
 
+# --- per-station page render (shared by the serial + parallel paths) ----------
+def _render_one_station(key, ctx) -> str:
+    """Render and write one station's HTML page from the shared context *ctx*. Independent of every
+    other station (writes only stations/<key>.html and stages that key's own OmB/sens PNGs), so it is
+    safe to run concurrently across stations."""
+    cal, kal, series, st = ctx.cal, ctx.kal, ctx.series, ctx.st
+    meta = st[st["key"] == key].iloc[0].to_dict()
+    methods = [m for m in config.METHOD_ORDER
+               if len(cal[(cal["key"] == key) & (cal["method"] == m)])]
+    blocks = [_method_block(key, m, cal, kal, series, ctx.diag_by.get((key, m), []),
+                            ctx.op_all, ctx.oldray_all) for m in methods]
+    overlay = None
+    if len(methods) >= 2:
+        by_method = {m: cal[(cal["key"] == key) & (cal["method"] == m)] for m in methods}
+        overlay = charts.fig_to_div(charts.cl_overlay(by_method), "fig-overlay")
+    i = ctx.nav_idx.get(key)
+    prev_station = f"{ctx.all_keys[i - 1]}.html" if (i is not None and i > 0) else ""
+    next_station = f"{ctx.all_keys[i + 1]}.html" if (i is not None and i < len(ctx.all_keys) - 1) else ""
+    hk_df = _load_hk(ctx.fullcal_dir, key)
+    monitoring = (charts.fig_to_div(charts.monitoring_timeseries(hk_df, meta.get("itype")), "fig-hk")
+                  if hk_df is not None else None)
+    ombsens = _stage_ombsens_pngs(ctx.fullcal_dir, key, ctx.out_dir)
+    html = ctx.tmpl.render(base="../", logo=ctx.logo, key=key, meta=meta,
+                           blocks=blocks, overlay=overlay, search_json=ctx.search_json,
+                           prev_station=prev_station, next_station=next_station,
+                           monitoring=monitoring, ombsens=ombsens)
+    (ctx.out_dir / "stations" / f"{key}.html").write_text(html, encoding="utf-8")
+    return key
+
+
+# Per-worker context for the parallel render path. Each worker process reloads the (read-only) frames
+# from the SQLite index ONCE via _render_worker_init -- cheaper and more portable (Windows spawn +
+# Linux fork) than pickling the large frames to every task. The parent has already materialized the
+# shared diagnostic PNGs, so workers build only the read-only diag index.
+_WORKER_CTX = None
+
+
+def _render_worker_init(db_path, out_dir, fullcal_dir, opcoeff_csv, oldray_dir, logo, search_json):
+    global _WORKER_CTX
+    if _WORKER_CTX is not None:
+        return  # fork (Linux/CSCS): the worker inherited the parent's ctx -> no reload/re-index
+    # spawn (Windows): rebuild the read-only context from the pickled paths
+    cal, series, st, kal, diag = metrics.load_frames(Path(db_path))
+    all_keys = list(st["key"])
+    _WORKER_CTX = SimpleNamespace(
+        cal=cal, series=series, st=st, kal=kal,
+        diag_by=_diag_index(diag, cal),
+        op_all=_load_opcoeff(opcoeff_csv or None),
+        oldray_all=_load_oldray(oldray_dir or None),
+        tmpl=_env().get_template("station.html"),
+        out_dir=Path(out_dir), fullcal_dir=(fullcal_dir or None),
+        all_keys=all_keys, nav_idx={k: i for i, k in enumerate(all_keys)},
+        logo=(logo or None), search_json=search_json)
+
+
+def _render_worker_task(key):
+    return _render_one_station(key, _WORKER_CTX)
+
+
 def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
                flagex_dir=None, opcoeff_csv=None, only_keys=None, oldray_dir=None,
-               fullcal_dir=None) -> dict:
+               fullcal_dir=None, workers: int | None = None) -> dict:
     out_dir = Path(out_dir)
     (out_dir / "stations").mkdir(parents=True, exist_ok=True)
     logo = _write_assets(out_dir)
@@ -378,6 +525,10 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
     op_all = _load_opcoeff(opcoeff_csv)
     oldray_all = _load_oldray(oldray_dir)
     keystats = keystats.merge(_opcoeff_ratios(cal, op_all, st), on="key", how="left")
+    # OmB-vs-CAMS bias + ICAO detection altitude from the per-stream <key>_omb.csv / <key>_sens.csv
+    # one-row summaries (subset run; missing files are skipped). Merged onto keystats so the two new
+    # maps reuse the network_map/ratio_map customdata + per-type-symbol machinery.
+    keystats = keystats.merge(_ombsens_keystats(fullcal_dir), on="key", how="left")
 
     summary_figs = {
         "map_theo": charts.fig_to_div(charts.ratio_map(
@@ -387,6 +538,8 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
             keystats, "op_pct_op", "Median C_L — % of operational constant (L2)",
             "% of operational", "fig-map-op"), "fig-map-op"),
         "map": charts.fig_to_div(charts.network_map(keystats), "fig-map"),
+        "map_omb": charts.fig_to_div(charts.omb_bias_map(keystats), "fig-map-omb"),
+        "map_icao": charts.fig_to_div(charts.icao_altitude_map(keystats), "fig-map-icao"),
         "success_type": charts.fig_to_div(charts.success_by_type_method(summary["by_type_method"]), "fig-stype"),
         "flag_dist_rayleigh": charts.fig_to_div(charts.flag_distribution_bar(flags, "rayleigh"), "fig-flags-r"),
         "flag_dist_cloud": charts.fig_to_div(charts.flag_distribution_bar(flags, "cloud"), "fig-flags-c"),
@@ -456,26 +609,35 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
     # station" links always point at real neighbours, even on an incremental rebuild.
     all_keys = list(st["key"])
     nav_idx = {k: i for i, k in enumerate(all_keys)}
-    for key in keys:
-        meta = st[st["key"] == key].iloc[0].to_dict()
-        methods = [m for m in config.METHOD_ORDER
-                   if len(cal[(cal["key"] == key) & (cal["method"] == m)])]
-        blocks = [_method_block(key, m, cal, kal, series, diag_by.get((key, m), []), op_all, oldray_all) for m in methods]
-        overlay = None
-        if len(methods) >= 2:
-            by_method = {m: cal[(cal["key"] == key) & (cal["method"] == m)] for m in methods}
-            overlay = charts.fig_to_div(charts.cl_overlay(by_method), "fig-overlay")
-        i = nav_idx.get(key)
-        prev_station = f"{all_keys[i - 1]}.html" if (i is not None and i > 0) else ""
-        next_station = f"{all_keys[i + 1]}.html" if (i is not None and i < len(all_keys) - 1) else ""
-        hk_df = _load_hk(fullcal_dir, key)
-        monitoring = (charts.fig_to_div(charts.monitoring_timeseries(hk_df, meta.get("itype")), "fig-hk")
-                      if hk_df is not None else None)
-        html = station_tmpl.render(base="../", logo=logo, key=key, meta=meta,
-                                   blocks=blocks, overlay=overlay, search_json=search_json,
-                                   prev_station=prev_station, next_station=next_station,
-                                   monitoring=monitoring)
-        (out_dir / "stations" / f"{key}.html").write_text(html, encoding="utf-8")
+    ctx = SimpleNamespace(
+        cal=cal, kal=kal, series=series, st=st, diag_by=diag_by, op_all=op_all,
+        oldray_all=oldray_all, tmpl=station_tmpl, out_dir=out_dir, fullcal_dir=fullcal_dir,
+        all_keys=all_keys, nav_idx=nav_idx, logo=logo, search_json=search_json)
+
+    n_workers = int(workers) if workers else 1
+    if n_workers > 1 and len(keys) > 1:
+        # Per-station pages are independent -> fan out across processes. Each worker reloads the
+        # read-only frames once (_render_worker_init); the diagnostic/asset materialization above
+        # already ran in the parent, so workers only write their own stations/<key>.html + stage
+        # their own OmB/sens PNGs (distinct paths -> no races).
+        print(f"  rendering {len(keys)} station pages on {n_workers} workers ...", flush=True)
+        initargs = (str(db_path), str(out_dir), str(fullcal_dir) if fullcal_dir else "",
+                    str(opcoeff_csv) if opcoeff_csv else "", str(oldray_dir) if oldray_dir else "",
+                    logo or "", search_json)
+        # Expose the parent's ctx so fork()ed workers (Linux/CSCS) inherit it for free; spawn()ed
+        # workers (Windows) ignore this and rebuild from initargs in the initializer.
+        global _WORKER_CTX
+        _WORKER_CTX = ctx
+        try:
+            with ProcessPoolExecutor(max_workers=n_workers, initializer=_render_worker_init,
+                                     initargs=initargs) as ex:
+                for _ in ex.map(_render_worker_task, keys, chunksize=4):
+                    pass
+        finally:
+            _WORKER_CTX = None
+    else:
+        for key in keys:
+            _render_one_station(key, ctx)
 
     return dict(out_dir=str(out_dir), n_pages=len(keys), n_series=int(len(series)),
                 as_of=summary["as_of"])
