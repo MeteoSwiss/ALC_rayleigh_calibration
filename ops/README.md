@@ -104,9 +104,14 @@ ops/publish.sh
 After that the daily `--changed-only` build + publish is incremental (changed pages rsync'd, new images
 synced; the first bulk image upload is tens of GB so consider seeding it from a fast machine).
 
-**Behind a restrictive proxy** (ops host can reach S3 over HTTPS but cannot SSH out to the VM): drop the
-rsync leg and instead `rclone sync` the HTML to an `html/` prefix in the bucket, then run a small
-`rclone sync <remote>:<bucket>/html /var/www/alc` cron on the VM (VM↔bucket is inside EWC, fast).
+**Behind a proxy** (e.g. MeteoSwiss server 434): the S3 client (`aws`/`rclone`) picks up
+`https_proxy`/`http_proxy` from the environment for the image upload; for the HTML rsync set `ALC_VM_SSH`
+to an ssh command carrying the key and a ProxyCommand, e.g.
+`export ALC_VM_SSH='ssh -i ~/.ssh/EWC -o ProxyCommand="connect -S proxy.meteoswiss.ch:1080 %h %p"'`.
+Pick the upload client with `ALC_S3_TOOL` (`rclone` with `ALC_S3_REMOTE`, or `aws` with `ALC_AWS_PROFILE`
++ `ALC_S3_ENDPOINT`). If the host can reach S3 over HTTPS but cannot SSH out to the VM at all, switch HTML
+delivery to a pull model instead: `rclone sync` the HTML to an `html/` prefix in the bucket and run
+`rclone sync <remote>:<bucket>/html /var/www/alc` from a cron on the VM (VM↔bucket is inside EWC, fast).
 
 Publish failures are **non-fatal** (logged + flagged in `.last_success` as `publish=fail`) so they never
 mask a good calibration.

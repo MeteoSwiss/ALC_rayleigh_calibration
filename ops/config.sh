@@ -26,9 +26,19 @@ export ALC_OPCOEFF_CSV=""                                           # optional: 
 export ALC_PUBLISH="${ALC_PUBLISH:-0}"                              # 1 = publish after each successful dashboard build
 export ALC_IMG_BASE_URL="${ALC_IMG_BASE_URL:-}"                    # public bucket base URL baked into the HTML, e.g.
                                                                    #   https://object-store.os-api.cci2.ecmwf.int/eprofile-alc-dashboard/
-export ALC_S3_REMOTE="${ALC_S3_REMOTE:-}"                          # rclone remote name (~/.config/rclone/rclone.conf)
 export ALC_S3_BUCKET="${ALC_S3_BUCKET:-}"                          # bucket name, e.g. eprofile-alc-dashboard
-export ALC_VM_RSYNC_TARGET="${ALC_VM_RSYNC_TARGET:-}"             # ssh host:path of the web docroot, e.g. ewc-alc:/var/www/alc
+export ALC_S3_TOOL="${ALC_S3_TOOL:-rclone}"                        # image-upload client: rclone | aws
+export ALC_S3_REMOTE="${ALC_S3_REMOTE:-}"                          # rclone remote name (ALC_S3_TOOL=rclone), ~/.config/rclone/rclone.conf
+export ALC_AWS_PROFILE="${ALC_AWS_PROFILE:-}"                      # aws profile (ALC_S3_TOOL=aws), e.g. ewc
+export ALC_S3_ENDPOINT="${ALC_S3_ENDPOINT:-}"                      # aws endpoint (ALC_S3_TOOL=aws), e.g. https://object-store.os-api.cci2.ecmwf.int
+export ALC_VM_RSYNC_TARGET="${ALC_VM_RSYNC_TARGET:-}"             # ssh host:path of the web docroot, e.g. hem@136.156.139.31:/var/www/alc
+export ALC_VM_SSH="${ALC_VM_SSH:-ssh}"                             # ssh command for the rsync; add -i KEY + ProxyCommand behind a proxy
+# Behind a proxy (e.g. MeteoSwiss server 434) -- aws/rclone honour http_proxy/https_proxy; the VM rsync
+# uses ALC_VM_SSH. Example:
+#   export https_proxy="http://proxy.meteoswiss.ch:<port>"; export http_proxy="$https_proxy"
+#   export no_proxy="localhost,127.0.0.1"
+#   export ALC_VM_SSH='ssh -i ~/.ssh/EWC -o ProxyCommand="connect -S proxy.meteoswiss.ch:1080 %h %p"'
+#   # rclone over SOCKS only (no HTTP proxy): export ALL_PROXY="socks5://proxy.meteoswiss.ch:1080"
 
 # --- pipeline behaviour -------------------------------------------------------------------------
 export ALC_DAY_LAG="${ALC_DAY_LAG:-1}"                              # process day D-LAG (CAMS available next day -> 1)

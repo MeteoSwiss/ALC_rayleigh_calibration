@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Publish the built dashboard to the European Weather Cloud (or any S3 + web host):
-#   * the bulky image trees (diag/ ombsens/ flagex/)  -> a public S3 bucket (rclone),
+#   * the bulky image trees (diag/ ombsens/ flagex/)  -> a public S3 bucket (rclone or aws),
 #   * the static HTML + assets                          -> the web server's docroot (rsync over ssh).
 # Driven by the ALC_* vars in ops/config.sh. Each leg is skipped (with a note) when its target is not
-# configured, so a partial setup still works. Symlinked diagnostics are dereferenced on upload
-# (--copy-links) so the real bytes land in the bucket. The bucket base URL must also be baked into the
-# HTML at build time via ALC_IMG_BASE_URL so the pages point their images at the bucket.
+# configured. Symlinked diagnostics are dereferenced on upload so the real bytes land in the bucket.
+#
+# Behind a proxy (e.g. a MeteoSwiss server): the S3 client (aws/rclone) honours http_proxy/https_proxy
+# from the environment; the VM rsync uses $ALC_VM_SSH, where you put the key and a ProxyCommand. See
+# ops/config.sh + ops/README.md.
 #
 # Manual use:  ops/publish.sh        # publish whatever is configured
 # From cron:   called by ops/ops_daily.py after a successful build when ALC_PUBLISH=1.
@@ -21,28 +23,41 @@ if [ ! -d "$SITE" ]; then
   exit 1
 fi
 
+S3_TOOL="${ALC_S3_TOOL:-rclone}"     # rclone | aws
+VM_SSH="${ALC_VM_SSH:-ssh}"          # ssh command for the rsync (add -i KEY and a ProxyCommand for a proxy)
 rc=0
 
-# --- 1. images -> public S3 bucket ---------------------------------------------------------------
-if [ -n "${ALC_S3_REMOTE:-}" ] && [ -n "${ALC_S3_BUCKET:-}" ]; then
-  for d in diag ombsens flagex; do
-    if [ -d "$SITE/$d" ]; then
-      echo "publish: rclone sync $d/ -> $ALC_S3_REMOTE:$ALC_S3_BUCKET/$d"
+# sync one local dir to <bucket>/<sub>, dereferencing symlinks, with the configured client.
+s3_sync() {
+  local src="$1" sub="$2"
+  case "$S3_TOOL" in
+    aws)
+      aws ${ALC_AWS_PROFILE:+--profile "$ALC_AWS_PROFILE"} \
+          ${ALC_S3_ENDPOINT:+--endpoint-url "$ALC_S3_ENDPOINT"} \
+          s3 sync "$src" "s3://$ALC_S3_BUCKET/$sub" --follow-symlinks --no-progress ;;
+    *)
       rclone sync --copy-links --transfers 16 --checkers 32 \
-        "$SITE/$d" "$ALC_S3_REMOTE:$ALC_S3_BUCKET/$d" || rc=$?
-    fi
+          "$src" "$ALC_S3_REMOTE:$ALC_S3_BUCKET/$sub" ;;
+  esac
+}
+
+# --- 1. images -> public S3 bucket ---------------------------------------------------------------
+if [ -n "${ALC_S3_BUCKET:-}" ] && { [ -n "${ALC_S3_REMOTE:-}" ] || [ "$S3_TOOL" = "aws" ]; }; then
+  for d in diag ombsens flagex; do
+    [ -d "$SITE/$d" ] || continue
+    echo "publish: $S3_TOOL sync $d/ -> $ALC_S3_BUCKET/$d"
+    s3_sync "$SITE/$d" "$d" || rc=$?
   done
 else
-  echo "publish: ALC_S3_REMOTE/ALC_S3_BUCKET not set -> skipping image upload"
+  echo "publish: S3 target not configured (need ALC_S3_BUCKET + ALC_S3_REMOTE, or ALC_S3_TOOL=aws) -> skip images"
 fi
 
 # --- 2. HTML + assets -> web server docroot ------------------------------------------------------
 # Exclude the image trees (they live in the bucket), the SQLite index, and the build dotfiles.
+# --chmod makes files world-readable so nginx (www-data) can serve them regardless of the build umask.
 if [ -n "${ALC_VM_RSYNC_TARGET:-}" ]; then
   echo "publish: rsync HTML/assets -> $ALC_VM_RSYNC_TARGET"
-  # --chmod makes files world-readable on the web server (nginx runs as www-data); without it the
-  # build host's umask can land non-readable files -> nginx 403/404.
-  rsync -az --delete --chmod=D755,F644 \
+  rsync -az --delete --chmod=D755,F644 -e "$VM_SSH" \
     --exclude 'diag/' --exclude 'ombsens/' --exclude 'flagex/' \
     --exclude 'calib_index.sqlite' --exclude '.last_build' \
     --exclude '.processed_days' --exclude '.last_success' --exclude '.git*' \
