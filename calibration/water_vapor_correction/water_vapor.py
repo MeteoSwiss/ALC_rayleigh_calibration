@@ -140,6 +140,40 @@ _B137 = np.array([
 _RD_CAMS = 287.06  # J/(kg K), as in get_Beta_CAMS_oper_monthly.m
 
 
+def cams_nearest_offset_deg(cams_file, latitude: float, longitude: float):
+    """(offset_deg, grid_spacing_deg) from (lat,lon) to the NEAREST CAMS grid point.
+    offset_deg = max(|dlat|, |dlon wrapped to +-180|); grid_spacing_deg = max(lat,lon spacing)."""
+    import xarray as xr
+    with xr.open_dataset(cams_file) as ds:
+        lats = np.asarray(ds["latitude"].values, dtype=float)
+        lons = np.asarray(ds["longitude"].values, dtype=float)
+    glat = float(lats[np.abs(lats - latitude).argmin()])
+    dlon_arr = np.abs(((lons - longitude + 180.0) % 360.0) - 180.0)
+    glon = float(lons[int(dlon_arr.argmin())])
+    dlat = abs(latitude - glat)
+    dlon = abs(((longitude - glon + 180.0) % 360.0) - 180.0)
+
+    def _sp(a):
+        u = np.unique(a[np.isfinite(a)])
+        return float(np.median(np.abs(np.diff(np.sort(u))))) if u.size > 1 else 1.0
+    return max(dlat, dlon), max(_sp(lats), _sp(lons))
+
+
+def cams_point_too_far(cams_file, latitude: float, longitude: float) -> bool:
+    """True if a station is OUTSIDE the (regional) CAMS domain: its nearest grid point is farther
+    than ~1.5 grid cells (and >= 1 deg) away. The CAMS download is regional (Europe/N-Atlantic), so
+    for an out-of-domain station (e.g. New Zealand) ``.sel(method='nearest')`` silently returns the
+    domain-EDGE cell thousands of km away and yields a bogus water-vapor correction. Guarding on this
+    lets the calibration emit flag -10 ('Closest CAMS data too far') instead of a false success."""
+    if not (np.isfinite(latitude) and np.isfinite(longitude)):
+        return False   # unknown location -> let the normal path decide
+    try:
+        off, sp = cams_nearest_offset_deg(cams_file, latitude, longitude)
+    except Exception:
+        return False   # never let the guard itself break a calibration
+    return off > max(1.0, 1.5 * sp)
+
+
 def _cams_levels(
     cams_file: Path,
     latitude: float,

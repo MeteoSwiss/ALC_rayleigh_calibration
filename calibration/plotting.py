@@ -51,6 +51,30 @@ def _save_and_close(fig, save_path: Optional[Path], dpi: int = 150):
     plt.close(fig)
 
 
+def _time_x(hours_since_start, time_datetime):
+    """X-coordinates for a time-height pcolor. When real timestamps are available, return
+    matplotlib date numbers (so the axis shows wall-clock hours + date); otherwise fall back
+    to hours-since-start. Returns ``(x_array, is_datetime)``."""
+    if time_datetime is not None and len(time_datetime) > 0:
+        from matplotlib import dates as mdates
+        return np.asarray(mdates.date2num(list(time_datetime)), dtype=float), True
+    return np.asarray(hours_since_start, dtype=float), False
+
+
+def _label_time_x(ax, is_datetime):
+    """Label a time-height x-axis: a real datetime axis (hours + date, via ConciseDateFormatter
+    which prints the date as a context label and at day boundaries) when timestamps were used,
+    else the old 'Hours since start'."""
+    if is_datetime:
+        from matplotlib import dates as mdates
+        loc = mdates.AutoDateLocator(minticks=4, maxticks=9)
+        ax.xaxis.set_major_locator(loc)
+        ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(loc))
+        ax.set_xlabel("Time (UTC)")
+    else:
+        ax.set_xlabel("Hours since start")
+
+
 def plot_cloud_diagnostics_compact(data, res, title: str = "",
                                    save_path: Optional[Path] = None) -> "Figure":
     """Compact liquid-cloud (O'Connor) calibration diagnostics, styled like the Rayleigh one.
@@ -813,6 +837,7 @@ def plot_rayleigh_diagnostics_compact(
     no_cloud_value: float = -9.0,
     z_low_cloud: Optional[float] = None,
     rcs_range_alc: Optional[NDArray[np.float64]] = None,
+    time_datetime: Optional[List[datetime]] = None,
     title: str = "",
     save_path: Optional[Path] = None,
 ) -> "Figure":
@@ -943,12 +968,13 @@ def plot_rayleigh_diagnostics_compact(
     else:
         vmin, vmax = 0.0, 6.0
 
-    hm = ax_r.pcolormesh(hours_since_start, rr * 1e-3, log_rcs,
+    x, _use_dt = _time_x(hours_since_start, time_datetime)
+    hm = ax_r.pcolormesh(x, rr * 1e-3, log_rcs,
                          shading="auto", cmap="viridis", vmin=vmin, vmax=vmax)
     plt.colorbar(hm, ax=ax_r, pad=0.01).set_label(r"log$_{10}$(RCS)")
 
-    n_t = int(hours_since_start.size)
-    dt = float(np.median(np.diff(hours_since_start))) if n_t > 1 else 1.0
+    n_t = int(x.size)
+    dt = float(np.median(np.diff(x))) if n_t > 1 else 1.0
 
     # per-profile low-cloud flag: a cloud base below the molecular window (or z_low_cloud)
     cbh0 = None
@@ -976,9 +1002,9 @@ def plot_rayleigh_diagnostics_compact(
         runs = np.split(idx, np.where(np.diff(idx) > 1)[0] + 1)
         first = True
         for run in runs:
-            x0 = hours_since_start[run[0]]
+            x0 = x[run[0]]
             j = run[-1]
-            x1 = hours_since_start[j + 1] if j < n_t - 1 else hours_since_start[j] + dt
+            x1 = x[j + 1] if j < n_t - 1 else x[j] + dt
             ax_r.axvspan(x0, x1, facecolor="none", edgecolor=facecolor, hatch=hatch,
                          linewidth=0.0, alpha=0.85, zorder=3,
                          label=(label if first else None))
@@ -995,14 +1021,14 @@ def plot_rayleigh_diagnostics_compact(
         if np.any(high_cloud):
             y_hi = float(rr.max()) * 1e-3
             y_lo = np.where(high_cloud, np.clip((cbh0 - 500.0) * 1e-3, 0.0, y_hi), y_hi)
-            ax_r.fill_between(hours_since_start, y_lo, y_hi, where=high_cloud, step="mid",
+            ax_r.fill_between(x, y_lo, y_hi, where=high_cloud, step="mid",
                               facecolor="none", edgecolor="#19d3f3", hatch="xx",
                               linewidth=0.0, alpha=0.75, zorder=3,
                               label="high cloud (masked above fit)")
 
     # cloud detections (lowest cloud base over time)
     if cbh0 is not None and np.any(np.isfinite(cbh0)):
-        ax_r.scatter(hours_since_start, cbh0 * 1e-3, s=7, c="white",
+        ax_r.scatter(x, cbh0 * 1e-3, s=7, c="white",
                      edgecolors="k", linewidths=0.2, zorder=5, label="cloud base")
 
     # molecular layer = the Rayleigh fit window (range AGL)
@@ -1012,7 +1038,7 @@ def plot_rayleigh_diagnostics_compact(
     ax_r.axhline(z_lo, color="gold", lw=1.6, zorder=4)
     ax_r.axhline(z_hi, color="gold", lw=1.6, zorder=4, label="molecular layer")
 
-    ax_r.set_xlabel("Hours since start")
+    _label_time_x(ax_r, _use_dt)
     ax_r.set_ylabel("Range (km)")
     ax_r.set_title("Range-corrected signal — full night; molecular layer (gold), cloud base (dots); "
                    "excluded hatched (red=low cloud, grey=screened), high-cloud masked region (cyan)")
@@ -1038,6 +1064,7 @@ def plot_rayleigh_diagnostics_failure(
     z_low_cloud: Optional[float] = None,
     range_start_m: float = 2000.0,
     range_end_m: float = 6000.0,
+    time_datetime: Optional[List[datetime]] = None,
     title: str = "",
     save_path: Optional[Path] = None,
 ) -> "Figure":
@@ -1069,14 +1096,15 @@ def plot_rayleigh_diagnostics_failure(
     st_r = max(1, int(np.ceil(rcs_full.shape[1] / 800)))
     rcs_t = rcs_full[::st_t, ::st_r].T.copy()
     rcs_t[rcs_t <= 0] = np.nan
-    hours_hm = hours[::st_t]
+    x_full, _use_dt = _time_x(hours, time_datetime)
+    x_hm = x_full[::st_t]
     range_hm = range_alc[::st_r]
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=RuntimeWarning)
         log_rcs = np.log10(rcs_t)
     valid = log_rcs[np.isfinite(log_rcs)]
     vmin, vmax = (float(np.percentile(valid, 5)), float(np.percentile(valid, 95))) if valid.size else (0.0, 6.0)
-    hm = ax_r.pcolormesh(hours_hm, range_hm * 1e-3, log_rcs,
+    hm = ax_r.pcolormesh(x_hm, range_hm * 1e-3, log_rcs,
                          shading="auto", cmap="viridis", vmin=vmin, vmax=vmax)
     plt.colorbar(hm, ax=ax_r, pad=0.01).set_label(r"log$_{10}$(RCS)")
     if cbh is not None:
@@ -1084,7 +1112,7 @@ def plot_rayleigh_diagnostics_failure(
         c0 = c[:, 0] if c.ndim > 1 else c
         c0 = np.where((c0 == no_cloud_value) | (c0 <= 0), np.nan, c0)[::st_t]
         if np.any(np.isfinite(c0)):
-            ax_r.scatter(hours_hm, c0 * 1e-3, s=7, c="white",
+            ax_r.scatter(x_hm, c0 * 1e-3, s=7, c="white",
                          edgecolors="k", linewidths=0.2, zorder=5, label="cloud base")
     if has_window:
         z_lo, z_hi = molecular_window[0] * 1e-3, molecular_window[1] * 1e-3
@@ -1092,7 +1120,7 @@ def plot_rayleigh_diagnostics_failure(
         ax_r.axhline(z_lo, color="gold", lw=1.4, zorder=4)
         ax_r.axhline(z_hi, color="gold", lw=1.4, zorder=4, label="molecular window (attempted)")
     ax_r.set_ylim(0, float(range_alc.max()) * 1e-3)
-    ax_r.set_xlabel("Hours since start")
+    _label_time_x(ax_r, _use_dt)
     ax_r.set_ylabel("Range (km)")
     ax_r.set_title("Range-corrected signal — full night")
     ax_r.grid(True, alpha=0.2)

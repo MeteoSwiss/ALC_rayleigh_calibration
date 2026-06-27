@@ -67,7 +67,12 @@ DATASET = "cams-global-atmospheric-composition-forecasts"
 # time setup: log in at https://ads.atmosphere.copernicus.eu and accept the site licences.
 ADS_URL = "https://ads.atmosphere.copernicus.eu/api"
 OUTPUT_DIR = "."
-AREA = [73.5, -27, 27.5, 45]          # North, West, South, East
+# North, West, South, East. Europe + Arctic box covering 421/427 E-PROFILE census
+# stations at 0.4 deg (the north edge reaches 80 N to include Hopen 76.5 N and
+# Bjornoya 74.5 N). 6 far-flung affiliates (Canada, Bonaire, New Zealand) fall
+# outside this box and are not served by the European CAMS download. Override via
+# the ALC_CAMS_AREA env var ("N,W,S,E") for a different domain.
+AREA = [float(x) for x in os.environ.get("ALC_CAMS_AREA", "80,-30,27,45").split(",")]
 RUN_TIME = ["00:00"]
 LEADTIME = ["3", "6", "9", "12", "15", "18", "21", "24"]
 MODEL_LEVELS = ["1"] + [str(k) for k in range(38, 138)]   # 1 (for z) + 38..137
@@ -93,6 +98,21 @@ VARIABLES = [
 # the auto-download omits them — that cuts the ADS request cost ~60% (the per-request limit
 # scales with variables x levels x steps x dates) and keeps the daily files small.
 CALIBRATION_VARIABLES = [
+    "temperature",
+    "specific_humidity",
+    "logarithm_of_surface_pressure",
+    "geopotential",
+]
+
+# Lean set for OmB + water-vapour work: aerosol backscatter at the ceilometer
+# wavelengths (532 nm = Mini-MPL native, 1064 nm = CHM15k native, 910 nm derived
+# via the Angstrom exponent between 532 and 1064) PLUS the molecular/WV fields.
+# Skips 355 nm (no E-PROFILE instrument) and the extinction fields (OmB uses
+# backscatter), so it is ~40% cheaper than the full VARIABLES set while still
+# carrying everything OmB and the WV correction need.
+OMB_VARIABLES = [
+    "attenuated_backscatter_due_to_aerosol_532nm_from_ground",
+    "attenuated_backscatter_due_to_aerosol_1064nm_from_ground",
     "temperature",
     "specific_humidity",
     "logarithm_of_surface_pressure",

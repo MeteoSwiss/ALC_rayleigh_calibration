@@ -108,7 +108,7 @@ def find_optimal_molecular_window(
     min_window_start_m: float = 2000.0,
     min_r2: float = 0.5,
     max_rel_error: float = 50.0,
-    method: str = "eprof_v1.2",
+    method: str = "eprof_v2",
     signal_stack: Optional[NDArray[np.float64]] = None,
 ) -> RayleighFitResult:
     """
@@ -177,10 +177,10 @@ def find_optimal_molecular_window(
         flags a non-calibration night instead of emitting a spurious constant.
 
     method : str
-        Detection strategy (E-PROF version key or legacy alias): "eprof_v1.2" (default,
-        "improved"; the in-line implementation below), or one of "eprof_v1.1"/"eprof_v0.25"/
-        "earlinet"/"eprof_v2"/"bellini", dispatched to
-        :mod:`calibration.rayleigh.molecular_methods`.
+        Detection strategy (E-PROF version key or legacy alias): "eprof_v2" (default, production:
+        optimal composite + time-resolved aerosol flagging, dispatched to
+        :mod:`calibration.rayleigh.molecular_methods`), "eprof_v1.2" ("improved"; the in-line
+        implementation below), or one of "eprof_v1.1"/"eprof_v0.25"/"earlinet"/"bellini".
     """
     import warnings
     from .molecular_methods import resolve_method, select_molecular_window, METHODS

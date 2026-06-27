@@ -41,6 +41,7 @@ from ..water_vapor_correction.water_vapor import (
     laser_spectrum_for,
     cams_water_vapor_profile,
     two_way_wv_transmission,
+    cams_point_too_far,
 )
 from .rayleigh_fit import (
     find_optimal_molecular_window,
@@ -84,7 +85,7 @@ def _plot_tag(info: InstrumentInfo, date_str: str) -> str:
 def _emit_failure_plot(options: CalibrationOptions, info: InstrumentInfo, date_str: str, *,
                        rcs, range_alc, hours_since_start, reason: str,
                        cbh=None, altitude: float = 0.0, p_mol=None,
-                       molecular_window=None) -> None:
+                       molecular_window=None, time_datetime=None) -> None:
     """Save a Rayleigh *failure* diagnostic for a night that did not calibrate, under the
     SAME ``<tag>_rayleigh_diag_compact.png`` filename as a success so the monitoring viewer
     lists it. Gated on ``plot_main`` (like the success dashboard); never raises."""
@@ -95,6 +96,7 @@ def _emit_failure_plot(options: CalibrationOptions, info: InstrumentInfo, date_s
         tag = _plot_tag(info, date_str)
         plot_rayleigh_diagnostics_failure(
             range_alc=range_alc, hours_since_start=hours_since_start, rcs=rcs,
+            time_datetime=time_datetime,
             reason=reason, altitude=altitude, cbh=cbh,
             no_cloud_value=info.instrument_type.no_cloud_value,
             p_mol=p_mol, molecular_window=molecular_window,
@@ -379,6 +381,7 @@ def calibrate_rayleigh(
             options, info, date_str, rcs=data_precloud.rcs,
             range_alc=data_precloud.range_alc,
             hours_since_start=data_precloud.hours_since_start,
+            time_datetime=data_precloud.time_datetime,
             reason="Not a clear night (cloud/fog in or below the molecular window)",
             cbh=data_precloud.cbh, altitude=data_precloud.altitude)
         return CalibrationResult(
@@ -446,6 +449,13 @@ def calibrate_rayleigh(
                 lidar_constant=-1, flag=-4, uncertainty=0,
                 message="No CAMS for molecular profile",
             )
+        if cams_point_too_far(cams_mol_file, info.latitude, info.longitude):
+            logger.warning(f"Closest CAMS grid point too far from station "
+                           f"({info.latitude:.2f},{info.longitude:.2f}); outside CAMS domain")
+            return CalibrationResult(
+                lidar_constant=-1, flag=-10, uncertainty=0,
+                message="Closest CAMS data too far (station outside CAMS domain)",
+            )
         atm_profile = load_cams_atmosphere(
             cams_mol_file, info.latitude, info.longitude, t_start, t_end, altitude_grid
         )
@@ -494,6 +504,13 @@ def calibrate_rayleigh(
             return CalibrationResult(
                 lidar_constant=-1, flag=-4, uncertainty=0,
                 message="No CAMS for water-vapor correction",
+            )
+        if cams_point_too_far(cams_file, info.latitude, info.longitude):
+            logger.warning(f"Closest CAMS grid point too far from station "
+                           f"({info.latitude:.2f},{info.longitude:.2f}); outside CAMS domain")
+            return CalibrationResult(
+                lidar_constant=-1, flag=-10, uncertainty=0,
+                message="Closest CAMS data too far (station outside CAMS domain)",
             )
         lam0_nm, fwhm_nm = laser_spectrum_for(info.instrument_type.value, nominal_wl_nm)
         prof = cams_water_vapor_profile(cams_file, info.latitude, info.longitude, t_start, t_end)
@@ -580,7 +597,7 @@ def calibrate_rayleigh(
         min_window_start_m=options.min_window_start_m,
         min_r2=options.min_window_r2,
         max_rel_error=options.max_window_rel_error,
-        method=getattr(options, "molecular_method", "eprof_v1.2"),
+        method=getattr(options, "molecular_method", "eprof_v2"),
         signal_stack=signal_stack,
     )
 
@@ -655,6 +672,7 @@ def calibrate_rayleigh(
         _emit_failure_plot(
             options, info, date_str, rcs=data.rcs, range_alc=data.range_alc,
             hours_since_start=data.hours_since_start,
+            time_datetime=data.time_datetime,
             reason="No molecular window passed the validity gates",
             cbh=data.cbh, altitude=data.altitude, p_mol=mol_props.p_mol)
         return CalibrationResult(
@@ -671,6 +689,7 @@ def calibrate_rayleigh(
             _emit_failure_plot(
                 options, info, date_str, rcs=data.rcs, range_alc=data.range_alc,
                 hours_since_start=data.hours_since_start,
+                time_datetime=data.time_datetime,
                 reason="Negative Rayleigh fit slope", cbh=data.cbh,
                 altitude=data.altitude, p_mol=mol_props.p_mol, molecular_window=win)
             return CalibrationResult(
@@ -684,6 +703,7 @@ def calibrate_rayleigh(
             _emit_failure_plot(
                 options, info, date_str, rcs=data.rcs, range_alc=data.range_alc,
                 hours_since_start=data.hours_since_start,
+                time_datetime=data.time_datetime,
                 reason="Rayleigh fit unstable (|intercept| > slope)", cbh=data.cbh,
                 altitude=data.altitude, p_mol=mol_props.p_mol, molecular_window=win)
             return CalibrationResult(
@@ -698,6 +718,7 @@ def calibrate_rayleigh(
         _emit_failure_plot(
             options, info, date_str, rcs=data.rcs, range_alc=data.range_alc,
             hours_since_start=data.hours_since_start,
+            time_datetime=data.time_datetime,
             reason=(f"Signal not proportional to molecular "
                     f"(fit rel. error {fit_result.relative_error:.0f}% > {options.threshold_quality:.0f}%)"),
             cbh=data.cbh, altitude=data.altitude, p_mol=mol_props.p_mol,
@@ -761,6 +782,7 @@ def calibrate_rayleigh(
         _emit_failure_plot(
             options, info, date_str, rcs=data.rcs, range_alc=data.range_alc,
             hours_since_start=data.hours_since_start,
+            time_datetime=data.time_datetime,
             reason="All Klett / lidar-constant perturbations failed", cbh=data.cbh,
             altitude=data.altitude, p_mol=mol_props.p_mol,
             molecular_window=(fit_result.range_start_m, fit_result.range_end_m))
@@ -940,11 +962,13 @@ def calibrate_rayleigh(
                 _st = max(1, int(np.ceil(data_precloud.rcs.shape[0] / 1000)))
                 disp_rcs = data_precloud.rcs[::_st]
                 disp_hours = data_precloud.hours_since_start[::_st]
+                disp_dt = list(data_precloud.time_datetime)[::_st]
                 disp_cbh = data_precloud.cbh[::_st]
                 disp_range = data_precloud.range_alc          # native range axis for this panel
                 disp_used = np.where(np.asarray(keep_native, dtype=bool)[::_st])[0]
             else:                                   # fallback: the screened/binned data (old behaviour)
                 disp_rcs, disp_hours, disp_cbh = data.rcs, data.hours_since_start, data.cbh
+                disp_dt = list(data.time_datetime)
                 disp_range = data.range_alc
                 disp_used = np.asarray(keep_idx, dtype=int)
             try:
@@ -970,6 +994,7 @@ def calibrate_rayleigh(
                     cl_median=cl_median,
                     cl_uncertainty=uncertainty,
                     hours_since_start=disp_hours,
+                    time_datetime=disp_dt,
                     rcs=disp_rcs,
                     used_profile_indices=disp_used,
                     cloud_base_height=disp_cbh,

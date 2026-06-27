@@ -13,7 +13,7 @@ the specific reason for a given row is carried in its free-text ``message``.
 
 Code classification
 -------------------
-GENERAL (either method can emit): 1, 0.5, 0, -1, -4, -5, -6, -99.
+GENERAL (either method can emit): 1, 0.5, 0, -1, -4, -5, -6, -10, -99.
 RAYLEIGH-SPECIFIC molecular-fit diagnostics: -2, -3, -7, -8, -9 (the cloud method never emits these).
 """
 from __future__ import annotations
@@ -36,6 +36,7 @@ FLAG_MEANINGS = {
     -7: "Negative fit slope",                        # Rayleigh-specific
     -8: "Fit issue: |b| > a",                        # Rayleigh-specific
     -9: "Another layer with lower signal",           # Rayleigh-specific
+    -10: "Closest CAMS data too far",                # both (910 nm WV: station outside CAMS domain)
     # Cloud-specific rejection reasons: when no profile survives the cloud filters, the dominant
     # rejection (the filter that removed the most profiles) is reported instead of the generic -1.
     -20: "Cloud: window transmission too low",       # Cloud-specific

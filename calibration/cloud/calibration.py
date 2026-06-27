@@ -419,24 +419,21 @@ def read_ceilometer_data(nc_file: str, config: CloudCalConfig) -> Tuple[CeiloDat
                 pass
 
             # --- station lat/lon ---
-            station_latitude = float("nan")
-            station_longitude = float("nan")
-            if "latitude" in var_names:
-                v = np.asarray(nc.variables["latitude"][:]).ravel()
-                if v.size:
-                    station_latitude = float(v[0])
-            elif "station_latitude" in var_names:
-                v = np.asarray(nc.variables["station_latitude"][:]).ravel()
-                if v.size:
-                    station_latitude = float(v[0])
-            if "longitude" in var_names:
-                v = np.asarray(nc.variables["longitude"][:]).ravel()
-                if v.size:
-                    station_longitude = float(v[0])
-            elif "station_longitude" in var_names:
-                v = np.asarray(nc.variables["station_longitude"][:]).ravel()
-                if v.size:
-                    station_longitude = float(v[0])
+            # Prefer the canonical scalar station coordinate; fall back to a VALID per-profile value.
+            # Reject fill values (in L2 the per-profile 'latitude'/'longitude' are often _FillValue
+            # ~1e36) and out-of-range values, so the CAMS lookup never receives garbage coords -- that
+            # silently picked the domain-edge cell (bad WV) and now would spuriously trip the
+            # 'CAMS too far' (-10) guard.
+            def _first_valid_coord(names, lim):
+                for nm in names:
+                    if nm in var_names:
+                        v = np.asarray(nc.variables[nm][:], dtype="float64").ravel()
+                        v = v[np.isfinite(v) & (np.abs(v) <= lim)]
+                        if v.size:
+                            return float(v[0])
+                return float("nan")
+            station_latitude = _first_valid_coord(("station_latitude", "latitude"), 90.0)
+            station_longitude = _first_valid_coord(("station_longitude", "longitude"), 360.0)
             if np.isnan(station_latitude) and not np.isnan(config.station_latitude):
                 station_latitude = config.station_latitude
             if np.isnan(station_longitude) and not np.isnan(config.station_longitude):
@@ -830,6 +827,14 @@ def compute_wv_transmission(data: CeiloData, config: CloudCalConfig) -> NDArray:
             f"(looked for monthly CAMS_Beta_{cams_date[:6]}.nc or daily CAMS_Beta_{cams_date[:8]}.nc)"
         )
     cams_file = str(cams_path)
+    from ..water_vapor_correction.water_vapor import cams_point_too_far
+    if cams_point_too_far(cams_file, data.station_latitude, data.station_longitude):
+        # Regional CAMS has no data at this station (e.g. New Zealand): the nearest grid point is
+        # at the domain edge, thousands of km away -> a bogus WV correction. Fail loudly so the
+        # runner emits flag -10 ('Closest CAMS data too far') instead of a false success.
+        raise ValueError(
+            f"Closest CAMS data too far from station "
+            f"({data.station_latitude:.2f},{data.station_longitude:.2f}); station outside CAMS domain")
     time_cams, cams_z, _cams_T, nw_all = _cams_levels_all_times(
         cams_file, data.station_latitude, data.station_longitude)
 

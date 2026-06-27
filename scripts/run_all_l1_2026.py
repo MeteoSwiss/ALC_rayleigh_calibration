@@ -109,6 +109,18 @@ ITYPE = {
 RAYLEIGH_TYPES = {"CL61", "CHM15k", "Mini-MPL"}
 CLOUD_TYPES = {"CL31", "CL51", "CL61"}
 
+# Operational L2 archive (for the OmB operational-constant overlay) and the
+# authoritative Kalman method per instrument type for the OmB/sensitivity C_L
+# (Rayleigh where the molecular return is usable; cloud for the weak 910 nm
+# CL31/CL51 that have no Rayleigh calibration).
+L2_ROOT = Path(os.environ.get("ALC_L2_DIR", "D:/E-PROFILE_L2_2026"))
+SENS_OMB_METHOD = {"CHM15k": "rayleigh", "CL61": "rayleigh", "Mini-MPL": "rayleigh",
+                   "CL31": "cloud", "CL51": "cloud"}
+OMB_FIELDS = ["date_start", "date_end", "wavelength", "median_bias_ours",
+              "median_bias_op", "median_bias_ours_wv", "rms_ours", "n_obs"]
+SENS_FIELDS = ["date_start", "date_end", "wavelength", "icao_alt_200", "icao_alt_2000",
+               "icao_alt_4000", "sigma_night_3000", "n_days_night", "n_days_day"]
+
 CSV_FIELDS = ["date", "method", "flag", "cal_value", "uncertainty",
               "n_profiles", "bottom_height", "top_height", "message"]
 _SUCCESS = (1, 1.0, 0.5)
@@ -289,9 +301,14 @@ def _do_cloud(s, start, end):
         except Exception as exc:  # noqa: BLE001
             msg = str(exc)
             low = msg.lower()
-            # Only a genuinely MISSING CAMS file is -4 "missing aux data"; other WV failures
-            # (e.g. a missing LUT, or a real bug in the WV chain) must NOT hide behind -4.
-            flag = -4 if ("no cams file" in low or "cams_beta" in low) else -99
+            # Station outside the CAMS domain (nearest grid point too far) -> -10, distinct from a
+            # genuinely MISSING CAMS file (-4). Other WV failures (missing LUT, real bug) -> -99.
+            if "cams data too far" in low or "outside cams domain" in low:
+                flag = -10
+            elif "no cams file" in low or "cams_beta" in low:
+                flag = -4
+            else:
+                flag = -99
             rows.append(dict(date=ds, method="cloud", flag=flag, cal_value=-1, uncertainty=0,
                              n_profiles=0, bottom_height=None, top_height=None,
                              message=f"{type(exc).__name__}: {msg[:140]}"))
@@ -409,9 +426,174 @@ def _preserve_existing_hk(csv_path, start, end):
     return keep
 
 
+# --- OmB + sensitivity (consume the Kalman C_L) -----------------------------
+def _read_kalman_csv(path):
+    """Existing <key>_kalman.csv rows (method, date, kalman) — for --no-cal reuse."""
+    if not path.exists():
+        return []
+    try:
+        with open(path, newline="", encoding="utf-8") as f:
+            return list(csv.DictReader(f))
+    except (OSError, csv.Error):
+        return []
+
+
+def _kalman_map(kalman_rows, method):
+    """date(YYYYMMDD) -> Kalman best-estimate C_L for the given method."""
+    out = {}
+    for r in kalman_rows:
+        if r.get("method") == method:
+            try:
+                out[str(r["date"])] = float(r["kalman"])
+            except (TypeError, ValueError, KeyError):
+                pass
+    return out
+
+
+def _op_map(s, start, end):
+    """date(YYYYMMDD) -> operational L2 calibration_constant_0 (median over the day)."""
+    import netCDF4
+    key = _key(s)
+    out = {}
+    for d in _days(start, end):
+        ds = d.strftime("%Y%m%d")
+        # L2 archives differ in depth: 3-level (<wmo>/<YYYY>/<MM>/) locally, but balfrin
+        # nests 2-level (<wmo>/<YYYY>/). Try both before giving up.
+        cands = [L2_ROOT / s["wmo"] / ds[:4] / ds[4:6] / f"L2_{key}{ds}.nc",
+                 L2_ROOT / s["wmo"] / ds[:4] / f"L2_{key}{ds}.nc"]
+        fp = next((c for c in cands if c.exists()), None)
+        if fp is None:
+            continue
+        try:
+            nc = netCDF4.Dataset(str(fp))
+            try:
+                v = np.asarray(nc.variables["calibration_constant_0"][:], dtype=float)
+            finally:
+                nc.close()
+            v = v[np.isfinite(v) & (v > 0)]
+            if v.size:
+                out[ds] = float(np.median(v))
+        except Exception:  # noqa: BLE001
+            pass
+    return out
+
+
+def _const_per_profile(time, cmap, fallback):
+    """Per-profile calibration constant from a date->constant map (Kalman has all
+    days, so gaps are rare; fill with the series median, else the default)."""
+    med = float(np.median(list(cmap.values()))) if cmap else fallback
+    dates = np.char.replace(
+        np.datetime_as_string(time.astype("datetime64[D]")).astype("U10"), "-", "")
+    return np.array([cmap.get(d, med) for d in dates], dtype="float64")
+
+
+def _load_l1_window(s, start, end):
+    from calibration.io.l1_window import load_l1_window
+    paths = [str(_l1_file(s["wmo"], s["ident"], d)) for d in _days(start, end)
+             if _l1_file(s["wmo"], s["ident"], d).exists()]
+    return load_l1_window(paths) if paths else None
+
+
+def _do_omb(s, start, end, kalman_rows):
+    """Observation-minus-Background vs CAMS (operational + our-calibrated). Writes
+    <key>_omb.png and a one-row <key>_omb.csv. Returns the summary row or None."""
+    from calibration.cloud.calibration import INSTRUMENT_CAL_DEFAULT
+    from calibration.io.cams import find_cams_file, _has_backscatter
+    from calibration.omb.omb import compute_omb
+    from calibration.omb.figures import plot_omb_station
+    key, itype = _key(s), s["type"]
+    method = SENS_OMB_METHOD.get(itype, "rayleigh")
+    kmap = _kalman_map(kalman_rows, method)
+    if not kmap:
+        return None  # no calibrated C_L -> skip (don't fabricate 'ours' from the default constant)
+    cams = find_cams_file(CAMS, end.strftime("%Y%m%d"))
+    if cams is None or not _has_backscatter(cams):
+        return None  # needs the 0.4 deg CAMS-with-backscatter download first
+    data = _load_l1_window(s, start, end)
+    if data is None:
+        return None
+    default = INSTRUMENT_CAL_DEFAULT.get(itype, 1.0)
+    c_ours = _const_per_profile(data["time"], kmap, default)
+    c_op = _const_per_profile(data["time"], _op_map(s, start, end), default)
+    rcs = data["rcs"].astype("float64")
+    res = compute_omb(
+        time=data["time"], range_agl=data["range"],
+        beta_sources={"op": rcs / c_op[:, None], "ours": rcs / c_ours[:, None]},
+        station_lat=data["lat"], station_lon=data["lon"], station_alt=data["alt"],
+        wavelength=data["wl"], cams_file=str(cams), instrument=itype,
+        cloud_base_height=data["cbh"], abs_cs_lookup_table=str(WV_LUT),
+    )
+    sdir = OUT / key
+    plot_omb_station(res, itype, sdir / f"{key}_omb.png",
+                     title=f"{s.get('site', key)} ({s['wmo']}) — OmB "
+                           f"{start:%Y-%m-%d}..{end:%Y-%m-%d}")
+    sc = res.scalar
+    wv = sc.get("ours_wv", {}).get("median_bias", float("nan"))
+    row = dict(date_start=start.strftime("%Y%m%d"), date_end=end.strftime("%Y%m%d"),
+               wavelength=f"{data['wl']:.1f}",
+               median_bias_ours=f"{sc['ours']['median_bias']:.6e}",
+               median_bias_op=f"{sc['op']['median_bias']:.6e}",
+               median_bias_ours_wv=f"{wv:.6e}",
+               rms_ours=f"{sc['ours']['rms']:.6e}", n_obs=sc["ours"]["n_obs"])
+    _write_csv_atomic(sdir / f"{key}_omb.csv", OMB_FIELDS, [row])
+    return row
+
+
+def _do_sens(s, start, end, kalman_rows):
+    """Per-day noise -> detection thresholds over the window. Writes <key>_sens.png
+    and a one-row <key>_sens.csv (headline ICAO detection altitude)."""
+    from calibration.cloud.calibration import INSTRUMENT_CAL_DEFAULT
+    from calibration.sensitivity.network import (
+        sensitivity_over_period, combine_sens_results, plot_sensitivity_station)
+    key, itype = _key(s), s["type"]
+    method = SENS_OMB_METHOD.get(itype, "rayleigh")
+    kmap = _kalman_map(kalman_rows, method)
+    if not kmap:
+        return None  # no calibrated C_L -> skip (sensitivity scale depends on it)
+    default = INSTRUMENT_CAL_DEFAULT.get(itype, 1.0)
+    # Process MONTH BY MONTH and stitch: loading a whole multi-month window at once OOMs
+    # (CL61 17 months > 64 GB even in float32, mostly the concatenate peak). Each month
+    # (~1 GB) is loaded, reduced to its daily beta_min columns, then freed.
+    parts = []
+    m0 = datetime(start.year, start.month, 1)
+    while m0 <= end:
+        m_end = (datetime(m0.year + (m0.month == 12), (m0.month % 12) + 1, 1)
+                 - timedelta(days=1))
+        ws, we = max(m0, start), min(m_end, end)
+        data = _load_l1_window(s, ws, we)
+        if data is not None:
+            c = _const_per_profile(data["time"], kmap, default).astype("float32")
+            beta = (data["rcs"] / c[:, None]) * np.float32(1e6)  # Mm^-1 sr^-1
+            parts.append(sensitivity_over_period(
+                time=data["time"], beta=beta, range_agl=data["range"], cbh=data["cbh"],
+                lat=data["lat"], lon=data["lon"], wavelength=data["wl"]))
+            del data, beta
+        m0 = m_end + timedelta(days=1)
+    res = combine_sens_results(parts)
+    if res is None:
+        return None
+    sdir = OUT / key
+    plot_sensitivity_station(res, itype, sdir / f"{key}_sens.png",
+                             title=f"{s.get('site', key)} ({s['wmo']}) — Sensitivity "
+                                   f"{start:%Y-%m-%d}..{end:%Y-%m-%d}")
+
+    def _fa(v):
+        return "" if (v is None or v != v) else f"{v:.0f}"
+
+    a = res.icao_alt
+    row = dict(date_start=start.strftime("%Y%m%d"), date_end=end.strftime("%Y%m%d"),
+               wavelength=f"{res.wavelength:.1f}",
+               icao_alt_200=_fa(a.get(200.0)), icao_alt_2000=_fa(a.get(2000.0)),
+               icao_alt_4000=_fa(a.get(4000.0)),
+               sigma_night_3000=f"{res.sigma_probe.get(3000, float('nan')):.6e}",
+               n_days_night=res.n_days_night, n_days_day=res.n_days_day)
+    _write_csv_atomic(sdir / f"{key}_sens.csv", SENS_FIELDS, [row])
+    return row
+
+
 # --- One instrument stream --------------------------------------------------
 def _process_stream(payload):
-    s, start, end, methods, hk_only = payload
+    s, start, end, methods, hk_only, do_sens, do_omb, no_cal = payload
     warnings.filterwarnings("ignore")
     logging.getLogger().setLevel(logging.CRITICAL)
     key = _key(s)
@@ -426,32 +608,43 @@ def _process_stream(payload):
         hk.sort(key=lambda r: r["date"])
         _write_csv_atomic(sdir / f"{key}_hk.csv", HK_FIELDS, hk)
 
-    # Backfill / refresh the monitoring CSV only (skip the calibration) -- cheap.
+    # Backfill / refresh the monitoring CSV only (skip everything else) -- cheap.
     if hk_only:
         _write_hk()
         return key, s["type"], 0, 0
 
     rows = []
-    if "rayleigh" in methods and s["type"] in RAYLEIGH_TYPES:
-        rows += _do_rayleigh(s, start, end)
-    if "cloud" in methods and s["type"] in CLOUD_TYPES:
-        rows += _do_cloud(s, start, end)
-    # This stream produced nothing for the processed window (no L1 data these dates): leave its files
-    # untouched (don't even rewrite an identical CSV), so a daily run only "touches" ACTIVE streams and
-    # the dashboard's --changed-only re-renders just those.
-    if not rows:
-        return key, s["type"], 0, 0
-    # keep prior rows outside the processed window (and other methods), so daily/partial runs
-    # accumulate history instead of overwriting the file with just the processed dates
-    rows += _preserve_existing_rows(sdir / f"{key}_cal.csv", methods, start, end)
-    rows.sort(key=lambda r: (r["method"], r["date"]))
+    n_ok = 0
+    # --no-cal reuses the EXISTING calibration + Kalman (for a sens/omb-only pass);
+    # otherwise (re)compute the per-night calibration, Kalman best estimate and HK.
+    if not no_cal:
+        if "rayleigh" in methods and s["type"] in RAYLEIGH_TYPES:
+            rows += _do_rayleigh(s, start, end)
+        if "cloud" in methods and s["type"] in CLOUD_TYPES:
+            rows += _do_cloud(s, start, end)
+        if rows:
+            # keep prior rows outside the processed window (and other methods) so daily/partial
+            # runs accumulate history instead of overwriting with just the processed dates
+            rows += _preserve_existing_rows(sdir / f"{key}_cal.csv", methods, start, end)
+            rows.sort(key=lambda r: (r["method"], r["date"]))
+            _write_csv_atomic(sdir / f"{key}_cal.csv", CSV_FIELDS, rows)
+            _write_csv_atomic(sdir / f"{key}_kalman.csv",
+                              ["method", "date", "kalman", "kalman_std"], _kalman_rows(rows))
+            _write_hk()   # monitoring panel: daily HK means for every processed day
+            n_ok = sum(1 for r in rows if _is_success(r["flag"]))
 
-    _write_csv_atomic(sdir / f"{key}_cal.csv", CSV_FIELDS, rows)
-    _write_csv_atomic(sdir / f"{key}_kalman.csv",
-                      ["method", "date", "kalman", "kalman_std"], _kalman_rows(rows))
-    _write_hk()   # monitoring panel: daily HK means for every processed day
+    # OmB / sensitivity add-ons consume the Kalman C_L: the fresh one if we just
+    # calibrated, else the existing <key>_kalman.csv (the --no-cal reuse path).
+    if do_sens or do_omb:
+        kalman_rows = _kalman_rows(rows) if rows else _read_kalman_csv(sdir / f"{key}_kalman.csv")
+        try:
+            if do_omb:
+                _do_omb(s, start, end, kalman_rows)
+            if do_sens:
+                _do_sens(s, start, end, kalman_rows)
+        except Exception as exc:  # noqa: BLE001 - an add-on failure must not lose the calibration
+            print(f"{key}: sens/omb failed: {type(exc).__name__}: {exc}", flush=True)
 
-    n_ok = sum(1 for r in rows if _is_success(r["flag"]))
     return key, s["type"], len(rows), n_ok
 
 
@@ -500,7 +693,19 @@ def main():
     ap.add_argument("--hk-only", action="store_true",
                     help="only (re)extract the per-day housekeeping <key>_hk.csv (laser/optics/temperature "
                          "daily means) for the dashboard monitoring panel; skip calibration. Cheap backfill.")
+    ap.add_argument("--omb", action="store_true",
+                    help="also produce Observation-minus-Background vs CAMS (<key>_omb.png/.csv): "
+                         "operational + our-calibrated backscatter. Needs a CAMS_Beta file WITH aerosol "
+                         "backscatter for the window's month.")
+    ap.add_argument("--sens", action="store_true",
+                    help="also produce the instrument sensitivity / detection-threshold product "
+                         "(<key>_sens.png/.csv): per-day noise -> ICAO detection altitude.")
+    ap.add_argument("--no-cal", action="store_true",
+                    help="skip (re)calibration and REUSE the existing <key>_kalman.csv for --omb/--sens "
+                         "(the decoupled add-on pass / operational D-1 step). Requires --omb and/or --sens.")
     args = ap.parse_args()
+    if args.no_cal and not (args.omb or args.sens):
+        ap.error("--no-cal requires --omb and/or --sens (nothing to do otherwise)")
 
     start = datetime.strptime(args.start, "%Y%m%d")
     end = datetime.strptime(args.end, "%Y%m%d")
@@ -517,7 +722,8 @@ def main():
         if s is None:
             print(f"stream {args.stream} not in census", flush=True)
             return
-        _process_stream((s, start, end, methods, args.hk_only))
+        _process_stream((s, start, end, methods, args.hk_only,
+                         args.sens, args.omb, args.no_cal))
         return
 
     types = [t.strip() for t in args.types.split(",")]
@@ -527,13 +733,23 @@ def main():
     # --hk-only extracts housekeeping for EVERY instrument type, so keep all selected streams.
     if args.hk_only:
         relevant = set(ITYPE)
+    elif args.no_cal:
+        # sens/omb-only: every calibratable stream (it reuses its existing Kalman)
+        relevant = RAYLEIGH_TYPES | CLOUD_TYPES
     else:
         relevant = (RAYLEIGH_TYPES if "rayleigh" in methods else set()) | (CLOUD_TYPES if "cloud" in methods else set())
     streams = [s for s in streams if s["type"] in relevant]
     OUT.mkdir(parents=True, exist_ok=True)
-    marker = "*_hk.csv" if args.hk_only else "*_cal.csv"
-    done = {p.parent.name for p in OUT.glob(f"*/{marker}")}
-    todo = streams if (args.force or args.hk_only) else [s for s in streams if _key(s) not in done]
+    # Per-run output marker drives resume (skip streams that already produced it). The marker
+    # is the run's PRODUCT regardless of --no-cal, so adding --omb/--sens to a normal run does
+    # not get skipped on a pre-existing _cal.csv. sens before omb: sensitivity has no CAMS
+    # dependency, so its CSV is the reliable "this stream ran" marker when both are requested.
+    out_marker = ("_hk.csv" if args.hk_only else
+                  "_sens.csv" if args.sens else
+                  "_omb.csv" if args.omb else
+                  "_cal.csv")
+    done = {p.parent.name for p in OUT.glob(f"*/*{out_marker}")}
+    todo = streams if (args.force or args.hk_only or args.no_cal) else [s for s in streams if _key(s) not in done]
     print(f"window {args.start}..{args.end} | methods={','.join(sorted(methods))} | "
           f"{len(streams)} streams selected; {len(done)} with output; {len(todo)} to do"
           f"{' (forced)' if args.force else ''}; {args.workers} workers "
@@ -546,13 +762,18 @@ def main():
                "--start", args.start, "--end", args.end, "--methods", args.methods]
         if args.hk_only:
             cmd.append("--hk-only")
+        if args.omb:
+            cmd.append("--omb")
+        if args.sens:
+            cmd.append("--sens")
+        if args.no_cal:
+            cmd.append("--no-cal")
         try:
             subprocess.run(cmd, timeout=STREAM_TIMEOUT, check=False,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except subprocess.TimeoutExpired:
             return key, "TIMEOUT (killed)"
-        marker = f"{key}_hk.csv" if args.hk_only else f"{key}_cal.csv"
-        return key, ("ok" if (OUT / key / marker).exists() else "no-output")
+        return key, ("ok" if (OUT / key / f"{key}{out_marker}").exists() else "no-output")
 
     # The thread pool only SUPERVISES the per-stream subprocesses (the heavy numpy/netCDF
     # work runs in the children). A hung child is killed at the timeout and the run goes on

@@ -59,7 +59,7 @@ from scipy.stats import linregress
 
 
 # Live selectable methods, keyed by E-PROF calibration version.
-METHODS = ("eprof_v1.1", "eprof_v1.2", "eprof_v0.25", "earlinet", "eprof_v2", "bellini")
+METHODS = ("eprof_v1.1", "eprof_v1.2", "eprof_v0.25", "earlinet", "eprof_v2", "eprof_v2p", "bellini")
 
 # Human-readable display labels (figures, reports, tables).
 METHOD_LABELS: Dict[str, str] = {
@@ -68,6 +68,7 @@ METHOD_LABELS: Dict[str, str] = {
     "eprof_v1.2": "E-PROF v1.2 (improved)",
     "eprof_v0.25": "E-PROF v0.25 (MATLAB)",
     "eprof_v2": "E-PROF v2",
+    "eprof_v2p": "E-PROF v2 (purity)",
     "earlinet": "EARLINET/SCC",
     "bellini": "Bellini/ALICENET",
 }
@@ -103,6 +104,16 @@ DEFAULT_PARAMS: Dict[str, Dict[str, Any]] = {
                      max_rel_error=15.0, w_ratio=0.25, w_resid=0.20, w_snr=0.10,
                      w_npts=0.10, w_tvar=0.35, w_rel=0.20,
                      flag_nmad=4.0, flag_min_excess=0.25),
+    # Purity-first variant (Stage-0 pilot for the molecular-window-selection fix): SAME gates as
+    # eprof_v2, but among eligible windows it MINIMISES aerosol (curvature rel_error dominant, then
+    # scattering_ratio) instead of MAXIMISING R2 -- so a tight but aerosol-tainted low window cannot
+    # win on R2 alone. tvar down-weighted (a steady residual layer fools the temporal CV). Weights
+    # are provisional; Stage 1 will optimise them on the network sweep.
+    "eprof_v2p": dict(min_window_start_m=1500.0, min_r2=0.40, max_residual_pct=16.0,
+                      max_scattering_ratio=1.15, max_ratio_std=0.40, max_temporal_cv=0.8,
+                      max_rel_error=15.0, w_ratio=1.0, w_resid=0.5, w_snr=0.1,
+                      w_npts=0.1, w_tvar=0.2, w_rel=2.0,
+                      flag_nmad=4.0, flag_min_excess=0.25, objective="purity"),
     "bellini":  dict(min_window_start_m=3000.0, max_window_end_m=7000.0, min_width_m=600.0,
                      max_width_m=3000.0, max_rel_error=15.0, max_ecl=0.40, border_m=200.0),
 }
@@ -449,7 +460,8 @@ def _select_earlinet(g: WindowGrid, min_window_start_m=2000.0, max_residual_pct=
 def _select_optimal(g: WindowGrid, min_window_start_m=2000.0, min_r2=0.5,
                     max_residual_pct=12.0, max_scattering_ratio=1.1, max_ratio_std=0.30,
                     max_temporal_cv=0.5, max_rel_error=15.0, use_bg=False, w_ratio=0.25,
-                    w_resid=0.20, w_snr=0.10, w_npts=0.10, w_tvar=0.35, w_rel=0.20, **_) -> MethodWindow:
+                    w_resid=0.20, w_snr=0.10, w_npts=0.10, w_tvar=0.35, w_rel=0.20,
+                    objective="score", **_) -> MethodWindow:
     """Best-of: physical gates + TEMPORAL-variability aerosol rejection + composite score.
 
     Molecular scattering is steady in time; aerosol advects and fluctuates. Windows whose
@@ -507,6 +519,20 @@ def _select_optimal(g: WindowGrid, min_window_start_m=2000.0, min_r2=0.5,
         - w_rel * rel_pen
         + w_npts * n_norm
     )
+    if str(objective) == "purity":
+        # PURITY-FIRST objective (the whole point: pick the cleanest MOLECULAR window). R2/SNR are
+        # eligibility FLOORS only; among eligible windows we MINIMISE aerosol indicators instead of
+        # MAXIMISING R2 -- so a tight (high-R2) but aerosol-tainted low window can't win on R2 alone.
+        # Curvature (rel_error) + scattering_ratio are the spatial aerosol signatures (a steady
+        # residual layer fools the temporal CV, so tvar is down-weighted). Lower cost = purer.
+        cost = (w_ratio * np.abs(g.scattering_ratio - 1.0)
+                + w_rel * rel_pen
+                + w_resid * (g.residual_pct / 100.0)
+                + w_tvar * tvar_pen
+                + w_snr * g.ratio_std
+                - w_npts * n_norm)
+        i, j = _argmax2d(np.where(elig, -cost, -np.inf))
+        return _pack(g, i, j, "optimal", elig, "min aerosol-purity cost (R2/SNR as floors)")
     i, j = _argmax2d(np.where(elig, quality, -np.inf))
     msg = "max composite quality (R2+shape+purity+SNR" + ("+temporal)" if have_tvar else ")")
     return _pack(g, i, j, "optimal", elig, msg)
@@ -607,6 +633,7 @@ _SELECTORS = {
     "eprof_v0.25": _select_matlab,
     "earlinet": _select_earlinet,
     "eprof_v2": _select_optimal,
+    "eprof_v2p": _select_optimal,
     "bellini": _select_bellini,
 }
 
@@ -640,7 +667,7 @@ def select_molecular_window(
     # cells (e.g. aerosol only at the start of the night, a cloud only at the end), then fits the
     # molecular window on the time-cleaned mean profile -> it uses the clean part of an
     # otherwise-contaminated night. The other methods use the full night mean.
-    if (method == "eprof_v2" and signal_stack is not None
+    if (method in ("eprof_v2", "eprof_v2p") and signal_stack is not None
             and np.ndim(signal_stack) == 2 and np.shape(signal_stack)[0] >= 5):
         flag = flag_contaminated_cells(
             signal_stack, p_mol, range_alc,

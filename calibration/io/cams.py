@@ -59,12 +59,24 @@ def find_cams_file(cams_folder: _PathLike, date_str: str) -> Optional[Path]:
     return None
 
 
+def _has_backscatter(path: _PathLike) -> bool:
+    """True if the CAMS file carries the aerosol backscatter OmB needs."""
+    try:
+        from netCDF4 import Dataset
+        with Dataset(str(path)) as nc:
+            return ("aerbackscatgnd532" in nc.variables
+                    and "aerbackscatgnd1064" in nc.variables)
+    except Exception:  # noqa: BLE001 — unreadable -> treat as not having it
+        return False
+
+
 def ensure_cams_file(
     cams_folder: _PathLike,
     date_str: str,
     *,
     auto_download: bool = False,
     scope: str = "day",
+    require_backscatter: bool = True,
     log: Optional[logging.Logger] = None,
 ) -> Optional[Path]:
     """Resolve the CAMS file for the night ending on *date_str*, downloading it from
@@ -87,6 +99,12 @@ def ensure_cams_file(
           date whose month is not yet complete.
         * ``'month'`` → ``CAMS_Beta_<YYYYMM>.nc`` for the whole month. Heavy (~GBs) but
           reused by every night that month; only valid once the month is complete.
+    require_backscatter : bool, default True
+        Require the file to carry aerosol backscatter (``aerbackscatgnd532/1064``) so
+        it is usable for OmB. A download then fetches the lean OmB set (aerosol +
+        t/q/z/lnsp); an existing file that lacks backscatter is re-downloaded (when
+        ``auto_download``) or returned with a warning (when not). Set ``False`` to keep
+        the legacy t/q/z/lnsp-only behaviour for a pure molecular/WV run.
 
     Returns
     -------
@@ -98,34 +116,49 @@ def ensure_cams_file(
 
     existing = find_cams_file(cams_folder, date_str)
     if existing is not None:
-        return existing
-    if not auto_download:
-        return None
-
-    folder = Path(cams_folder)
-    folder.mkdir(parents=True, exist_ok=True)
-
-    if scope == "month":
-        out_path = folder / monthly_name(date_str)
-        dates = _month_dates(date_str)
-    elif scope == "day":
-        out_path = folder / daily_name(date_str)
-        dates = _night_dates(date_str)
+        if not require_backscatter or _has_backscatter(existing):
+            return existing
+        if not auto_download:
+            log.warning(
+                "CAMS file %s carries no aerosol backscatter and auto_download is off; "
+                "returning it (OmB unavailable for these dates)", existing.name)
+            return existing
+        # Re-download the SAME file (overwrite) with backscatter. Writing back to the
+        # existing path — not a scope-derived one — avoids a monthly/daily ping-pong
+        # where find_cams_file keeps preferring the lean monthly file.
+        log.warning("CAMS file %s lacks aerosol backscatter; re-downloading with it",
+                    existing.name)
+        out_path = existing
+        is_monthly = len(existing.stem.split("_")[-1]) == 6
+        dates = _month_dates(date_str) if is_monthly else _night_dates(date_str)
     else:
-        raise ValueError(f"Unknown CAMS download scope {scope!r} (expected 'day' or 'month')")
-
-    log.warning(
-        "CAMS file missing for %s; auto-downloading %s (%s..%s) from the ADS",
-        date_str, out_path.name, dates[0], dates[-1],
-    )
+        if not auto_download:
+            return None
+        folder = Path(cams_folder)
+        folder.mkdir(parents=True, exist_ok=True)
+        if scope == "month":
+            out_path = folder / monthly_name(date_str)
+            dates = _month_dates(date_str)
+        elif scope == "day":
+            out_path = folder / daily_name(date_str)
+            dates = _night_dates(date_str)
+        else:
+            raise ValueError(f"Unknown CAMS download scope {scope!r} (expected 'day' or 'month')")
+        log.warning(
+            "CAMS file missing for %s; auto-downloading %s (%s..%s) from the ADS",
+            date_str, out_path.name, dates[0], dates[-1],
+        )
     # Import lazily: cdsapi / cfgrib are only needed for an actual download, so the
     # resolver stays importable (and find_cams_file usable) without them.
-    from .download_cams_beta import download_to_netcdf, CALIBRATION_VARIABLES
+    from .download_cams_beta import (
+        download_to_netcdf, CALIBRATION_VARIABLES, OMB_VARIABLES,
+    )
 
+    # With backscatter required (default) fetch the lean OmB set (aerosol 532/1064 +
+    # t/q/z/lnsp); otherwise just the t/q/z/lnsp the molecular/WV correction needs.
+    variables = OMB_VARIABLES if require_backscatter else CALIBRATION_VARIABLES
     try:
-        # Only the 4 model-level fields the calibration reads (t/q/z/lnsp) — keeps the
-        # request under the ADS cost limit and the daily file small.
-        download_to_netcdf(dates, out_path, variables=CALIBRATION_VARIABLES)
+        download_to_netcdf(dates, out_path, variables=variables)
     except Exception as exc:  # noqa: BLE001 — surface any download/convert failure as a skip
         log.error("CAMS auto-download failed for %s: %s", out_path.name, exc)
         # Remove a partial/corrupt file so a later run can retry cleanly.

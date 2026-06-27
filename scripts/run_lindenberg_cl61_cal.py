@@ -154,7 +154,7 @@ def base_rayleigh_options(apply_wv: bool) -> CalibrationOptions:
     o.folder_root = DATA_ROOT
     o.data_level = DataLevel.RAW
     o.folder_output = OUT
-    o.molecular_method = "improved"
+    o.molecular_method = "eprof_v2"
     o.average_time_s = 60.0
     o.average_range_m = 30.0
     o.molecular_source = "standard"     # US Std 1976 (matches the MATLAB reference)
