@@ -389,9 +389,9 @@ def series_timeseries(g_m: pd.DataFrame, kal_m: pd.DataFrame, method: str,
     if v13_df is not None and len(v13_df):
         vrr = v13_df.sort_values("datetime")
         fig.add_trace(go.Scatter(
-            x=vrr["datetime"], y=vrr["value"], mode="markers", name="v13",
+            x=vrr["datetime"], y=vrr["value"], mode="markers", name="v1.0.2",
             marker=dict(symbol="x", size=7, color="#d62728"), visible="legendonly",
-            hovertemplate="%{x|%Y-%m-%d}<br>v13 Rayleigh=%{y:.3e}<extra></extra>"))
+            hovertemplate="%{x|%Y-%m-%d}<br>v1.0.2 Rayleigh=%{y:.3e}<extra></extra>"))
     if len(ok):
         fig.add_trace(go.Scatter(
             x=ok["datetime"], y=ok["cal_value"], mode="markers",
