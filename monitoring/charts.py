@@ -361,7 +361,8 @@ def cl_median_iqr_by_station(d: pd.DataFrame, itype: str) -> go.Figure:
 
 def series_timeseries(g_m: pd.DataFrame, kal_m: pd.DataFrame, method: str,
                       op_df: pd.DataFrame | None = None,
-                      oldray_df: pd.DataFrame | None = None) -> go.Figure:
+                      oldray_df: pd.DataFrame | None = None,
+                      v13_df: pd.DataFrame | None = None) -> go.Figure:
     """Calibration value over time for ONE method: successes + uncertainty + Kalman best estimate,
     plus (optional) the daily OPERATIONAL calibration constant from the L2 files as a black line,
     and (optional, Rayleigh only) the OLD operational Rayleigh calibration as black 'x' markers.
@@ -383,8 +384,14 @@ def series_timeseries(g_m: pd.DataFrame, kal_m: pd.DataFrame, method: str,
         orr = oldray_df.sort_values("datetime")
         fig.add_trace(go.Scatter(
             x=orr["datetime"], y=orr["value"], mode="markers", name="v1.0",
-            marker=dict(symbol="x", size=7, color="#000000"),
+            marker=dict(symbol="x", size=7, color="#000000"), visible="legendonly",
             hovertemplate="%{x|%Y-%m-%d}<br>old Rayleigh=%{y:.3e}<extra></extra>"))
+    if v13_df is not None and len(v13_df):
+        vrr = v13_df.sort_values("datetime")
+        fig.add_trace(go.Scatter(
+            x=vrr["datetime"], y=vrr["value"], mode="markers", name="v13",
+            marker=dict(symbol="x", size=7, color="#d62728"), visible="legendonly",
+            hovertemplate="%{x|%Y-%m-%d}<br>v13 Rayleigh=%{y:.3e}<extra></extra>"))
     if len(ok):
         fig.add_trace(go.Scatter(
             x=ok["datetime"], y=ok["cal_value"], mode="markers",

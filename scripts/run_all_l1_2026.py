@@ -494,6 +494,42 @@ def _load_l1_window(s, start, end):
     return load_l1_window(paths) if paths else None
 
 
+def _cache_coverage_regression(key, sdir, cache_name, output_name):
+    """Regression guard for the historic per-station sens/omb caches.
+
+    The dashboard panels read the aggregated ``<key>_sens.csv`` / ``<key>_omb.csv``,
+    which are produced by aggregating the incremental ``_sens_cache.npz`` /
+    ``_omb_cache.npz`` over the full 2025-2026 window. Those caches are built offline
+    (chunked monthly jobs). A daily run that processes a SINGLE day would, for a station
+    whose cache is missing, create a brand-new 1-day cache and then aggregate+overwrite
+    the rich historic output with a 1-day value -- silently regressing the panel.
+
+    Return True (=> caller must SKIP, leaving the output untouched and logging a WARNING)
+    only when BOTH hold:
+      * the product cache file does NOT exist (so any update would start a fresh cache), AND
+      * a NON-EMPTY historic output already exists for this station+product.
+    A genuinely new station (neither cache nor output) returns False so it proceeds
+    normally and starts accumulating its cache. Caches that exist already get appended to
+    (de-dup by date) as before, so they also return False. No calibration math is touched.
+    """
+    cache_path = sdir / cache_name
+    if cache_path.exists():
+        return False  # cache present -> normal incremental append, no regression risk
+    out_path = sdir / output_name
+    try:
+        # "non-empty historic output" = at least one data row beyond the CSV header
+        has_history = out_path.exists() and sum(1 for _ in open(out_path, encoding="utf-8")) > 1
+    except OSError:
+        has_history = False
+    if has_history:
+        # Visible on the worker's stdout (logging is forced to CRITICAL in _process_stream).
+        print(f"REGRESSION-GUARD: {key}: missing {cache_name} but {output_name} has history "
+              f"-> SKIP (not overwriting historic output with a partial-window cache)",
+              flush=True)
+        return True
+    return False  # brand-new station (no cache, no output) -> proceed normally
+
+
 def _do_omb(s, start, end, kalman_rows):
     """Observation-minus-Background vs CAMS (operational + our-calibrated). Writes
     <key>_omb.png and a one-row <key>_omb.csv. Returns the summary row or None."""
@@ -502,6 +538,10 @@ def _do_omb(s, start, end, kalman_rows):
     from calibration.omb.omb import compute_omb
     from calibration.omb.figures import plot_omb_station
     key, itype = _key(s), s["type"]
+    # Regression guard: never let a partial-window daily run replace a non-empty historic
+    # OmB output for a station whose cache hasn't been built yet (see helper docstring).
+    if _cache_coverage_regression(key, OUT / key, "_omb_cache.npz", f"{key}_omb.csv"):
+        return None
     method = SENS_OMB_METHOD.get(itype, "rayleigh")
     kmap = _kalman_map(kalman_rows, method)
     if not kmap:
@@ -524,6 +564,9 @@ def _do_omb(s, start, end, kalman_rows):
         cloud_base_height=data["cbh"], abs_cs_lookup_table=str(WV_LUT),
     )
     sdir = OUT / key
+    from calibration.incremental import omb_cache_update, omb_cache_aggregate
+    omb_cache_update(sdir, res)
+    res = omb_cache_aggregate(sdir)
     plot_omb_station(res, itype, sdir / f"{key}_omb.png",
                      title=f"{s.get('site', key)} ({s['wmo']}) — OmB "
                            f"{start:%Y-%m-%d}..{end:%Y-%m-%d}")
@@ -546,6 +589,10 @@ def _do_sens(s, start, end, kalman_rows):
     from calibration.sensitivity.network import (
         sensitivity_over_period, combine_sens_results, plot_sensitivity_station)
     key, itype = _key(s), s["type"]
+    # Regression guard: never let a partial-window daily run replace a non-empty historic
+    # sensitivity output for a station whose cache hasn't been built yet (see helper docstring).
+    if _cache_coverage_regression(key, OUT / key, "_sens_cache.npz", f"{key}_sens.csv"):
+        return None
     method = SENS_OMB_METHOD.get(itype, "rayleigh")
     kmap = _kalman_map(kalman_rows, method)
     if not kmap:
@@ -569,10 +616,14 @@ def _do_sens(s, start, end, kalman_rows):
                 lat=data["lat"], lon=data["lon"], wavelength=data["wl"]))
             del data, beta
         m0 = m_end + timedelta(days=1)
-    res = combine_sens_results(parts)
+    from calibration.incremental import sens_cache_update, sens_cache_aggregate
+    sdir = OUT / key
+    for _p in parts:
+        if _p is not None and getattr(_p, "dates", None) is not None and _p.dates.size:
+            sens_cache_update(sdir, _p)
+    res = sens_cache_aggregate(sdir)
     if res is None:
         return None
-    sdir = OUT / key
     plot_sensitivity_station(res, itype, sdir / f"{key}_sens.png",
                              title=f"{s.get('site', key)} ({s['wmo']}) — Sensitivity "
                                    f"{start:%Y-%m-%d}..{end:%Y-%m-%d}")

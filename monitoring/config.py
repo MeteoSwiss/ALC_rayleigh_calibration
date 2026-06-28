@@ -37,6 +37,15 @@ def _norm_base_url(u: str) -> str:
 # mirrors the site: <base>diag/<key>/<method>_<date>.png, <base>ombsens/<key>/..., <base>flagex/...
 IMG_BASE_URL = _norm_base_url(os.environ.get("ALC_IMG_BASE_URL", ""))
 
+# "Images in bucket" mode: the per-image PNG assets (per-night diagnostics, OmB/sensitivity) are already
+# mirrored in the object-storage bucket pointed at by IMG_BASE_URL, so the local diagnostic PNGs may be
+# deleted to reclaim disk. When ON, the dashboard enumerates the diagnostic/OmB/sens panels from the
+# persistent CSVs instead of the on-disk PNGs (whose existence is no longer required), and emits the
+# bucket URLs -- so a rebuild keeps the full diag history even after the local PNGs are gone. Fresh local
+# PNGs that still exist are staged for publishing as usual; deleted ones are simply not staged. Default
+# OFF -> unchanged behaviour (panels enumerated by scanning the local PNGs).
+IMAGES_IN_BUCKET = os.environ.get("ALC_IMAGES_IN_BUCKET", "").strip() not in ("", "0", "false", "False")
+
 # --- Flag meanings ----------------------------------------------------------
 # MIRROR of calibration/flags.py :: FLAG_MEANINGS (the homogenized cloud/Rayleigh table).
 # Kept local on purpose so the dashboard runs without importing (or installing) the heavy

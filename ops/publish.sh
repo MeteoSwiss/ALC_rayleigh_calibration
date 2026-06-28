@@ -52,13 +52,23 @@ else
   echo "publish: S3 target not configured (need ALC_S3_BUCKET + ALC_S3_REMOTE, or ALC_S3_TOOL=aws) -> skip images"
 fi
 
+# --- 1b. images-in-bucket: prune now-published local diag PNGs to reclaim disk -----------------
+if [ "${ALC_IMAGES_IN_BUCKET:-0}" = "1" ] && [ "${rc:-0}" -eq 0 ] && [ -n "${ALC_FULLCAL_DIR:-}" ]; then
+  n=$(find "$ALC_FULLCAL_DIR" -name '*_diag_compact.png' -type f 2>/dev/null | wc -l)
+  if [ "$n" -gt 0 ]; then
+    echo "publish: images-in-bucket -> pruning $n local diag PNGs already synced to the bucket"
+    find "$ALC_FULLCAL_DIR" -name '*_diag_compact.png' -type f -delete
+    find "$ALC_FULLCAL_DIR" -path '*/plots/*' -type d -empty -delete 2>/dev/null || true
+  fi
+fi
+
 # --- 2. HTML + assets -> web server docroot ------------------------------------------------------
 # Exclude the image trees (they live in the bucket), the SQLite index, and the build dotfiles.
 # --chmod makes files world-readable so nginx (www-data) can serve them regardless of the build umask.
 if [ -n "${ALC_VM_RSYNC_TARGET:-}" ]; then
   echo "publish: rsync HTML/assets -> $ALC_VM_RSYNC_TARGET"
   rsync -az --delete --chmod=D755,F644 -e "$VM_SSH" \
-    --exclude 'diag/' --exclude 'ombsens/' --exclude 'flagex/' \
+    --exclude 'diag/' --exclude 'ombsens/' --exclude 'flagex/' --exclude 'fullcal_l1_2026/' \
     --exclude 'calib_index.sqlite' --exclude '.last_build' \
     --exclude '.processed_days' --exclude '.last_success' --exclude '.git*' \
     "$SITE/" "$ALC_VM_RSYNC_TARGET/" || rc=$?

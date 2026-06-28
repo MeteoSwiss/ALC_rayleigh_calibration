@@ -102,9 +102,24 @@ def fetch_cams(ds: str, retries: int = 3) -> bool:
 def calibrate(ds: str) -> bool:
     cmd = [PY, str(REPO / "scripts" / "run_all_l1_2026.py"),
            "--start", ds, "--end", ds, "--per-type", "0", "--ignore-coverage",
-           "--workers", WORKERS, "--methods", "rayleigh,cloud", "--force"]
+           "--workers", WORKERS, "--methods", "rayleigh,cloud", "--force",
+           "--sens", "--omb"]
     log(f"  calibrate {ds}: {' '.join(cmd[1:])}")
     return subprocess.run(cmd, cwd=str(REPO)).returncode == 0
+
+
+def update_opcoeff(ds: str) -> None:
+    """Append the day's operational L2 calibration_constant_0 to the opcoeff CSV (the
+    dashboard's %-of-operational ratio). Resumable + best-effort -- never fails the run."""
+    if not (L2_DIR and OPCOEFF_CSV):
+        return
+    cmd = [PY, str(REPO / "scripts" / "extract_l2_opcoeff.py"), L2_DIR, OPCOEFF_CSV,
+           "--start", ds, "--end", ds]
+    log(f"  opcoeff {ds}: extract_l2_opcoeff --start {ds} --end {ds}")
+    try:
+        subprocess.run(cmd, cwd=str(REPO), timeout=1800)
+    except Exception as exc:  # noqa: BLE001
+        log(f"  opcoeff {ds}: failed: {type(exc).__name__}: {exc}")
 
 
 def update_dashboard() -> bool:
@@ -160,6 +175,7 @@ def main() -> int:
             cams_failures.append(ds)
             continue
         ok = calibrate(ds)
+        update_opcoeff(ds)
         mark_processed(ds)                       # CAMS was present + we ran; don't redo even if some streams failed
         ran.append(ds)
         log(f"day {ds}: calibration {'ok' if ok else 'completed WITH ERRORS (see per-stream output)'}")

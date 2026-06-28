@@ -284,8 +284,15 @@ def _materialize(src: Path, dst: Path, mode: str) -> None:
 
 def _existing_diag(diag: pd.DataFrame) -> pd.DataFrame:
     """Subset of *diag* whose source PNG still exists on disk (vectorized stat). Shared by the
-    materialize + index steps so the (large) 100k-row table is filtered only once."""
+    materialize + index steps so the (large) 100k-row table is filtered only once.
+
+    In IMAGES_IN_BUCKET mode the local PNGs may have been deleted (they live in the bucket and the
+    site references their bucket URLs), so the existence filter is skipped and the full data-driven
+    diag list is kept. _copy_diagnostics still tries to stage each src and silently skips the ones
+    that are gone, so fresh local PNGs are still published while deleted ones are simply not staged."""
     if not len(diag):
+        return diag
+    if config.IMAGES_IN_BUCKET:
         return diag
     src = diag["src"].astype(str).to_numpy()
     exists = np.fromiter((os.path.exists(s) for s in src), dtype=bool, count=src.shape[0])
@@ -334,7 +341,7 @@ def _copy_diagnostics(diag: pd.DataFrame, cal: pd.DataFrame, out_dir: Path) -> d
     return _diag_index_from(d, cal)
 
 
-def _method_block(key, method, cal, kal, series, diags=None, op_all=None, oldray_all=None):
+def _method_block(key, method, cal, kal, series, diags=None, op_all=None, oldray_all=None, v13_all=None):
     """Figures + aggregates for one method section on a station page."""
     g_m = cal[(cal["key"] == key) & (cal["method"] == method)].sort_values("datetime")
     kal_m = kal[(kal["key"] == key) & (kal["method"] == method)] if len(kal) else kal
@@ -346,10 +353,12 @@ def _method_block(key, method, cal, kal, series, diags=None, op_all=None, oldray
     op_df = _op_station_df(op_all, key, float(ref.median()) if len(ref) else None)
     # Old operational Rayleigh overlay (black x) — Rayleigh series only.
     oldray_df = oldray_all.get(key) if (oldray_all is not None and method == "rayleigh") else None
+    # v13 test Rayleigh overlay (red x) — Rayleigh series only.
+    v13_df = v13_all.get(key) if (v13_all is not None and method == "rayleigh") else None
     return dict(
         method=method, label=config.method_label(method), meta=meta,
         figs={
-            "ts": charts.fig_to_div(charts.series_timeseries(g_m, kal_m, method, op_df, oldray_df), f"fig-ts-{safe}"),
+            "ts": charts.fig_to_div(charts.series_timeseries(g_m, kal_m, method, op_df, oldray_df, v13_df), f"fig-ts-{safe}"),
             "flags": charts.fig_to_div(charts.monthly_flag_bars(g_m, method), f"fig-mf-{safe}"),
             "aux": charts.fig_to_div(charts.aux_timeseries(g_m, method), f"fig-aux-{safe}"),
         },
@@ -410,9 +419,23 @@ def _stage_ombsens_pngs(fullcal_dir, key, out_dir: Path) -> dict:
         return out
     for kind in ("omb", "sens"):
         src = Path(fullcal_dir) / key / f"{key}_{kind}.png"
+        fname = f"{key}_{kind}.png"
+        if config.IMAGES_IN_BUCKET:
+            # Bucket mode: the panel image lives in the bucket, so gate on the persistent
+            # <key>_{kind}.csv (kept) rather than the .png (which may have been deleted). Still try to
+            # stage a local PNG if one is present so a fresh image gets published, but emit the bucket
+            # URL regardless so the panel shows even with the PNG gone.
+            if not (Path(fullcal_dir) / key / f"{key}_{kind}.csv").exists():
+                continue
+            if src.exists():
+                try:
+                    _materialize(src, out_dir / "ombsens" / key / fname, _DIAG_LINK_MODE)
+                except OSError:
+                    pass
+            out[kind] = f"{config.IMG_BASE_URL}ombsens/{key}/{fname}"
+            continue
         if not src.exists():
             continue
-        fname = f"{key}_{kind}.png"
         dst = out_dir / "ombsens" / key / fname
         try:
             _materialize(src, dst, _DIAG_LINK_MODE)
@@ -456,7 +479,7 @@ def _render_one_station(key, ctx) -> str:
     methods = [m for m in config.METHOD_ORDER
                if len(cal[(cal["key"] == key) & (cal["method"] == m)])]
     blocks = [_method_block(key, m, cal, kal, series, ctx.diag_by.get((key, m), []),
-                            ctx.op_all, ctx.oldray_all) for m in methods]
+                            ctx.op_all, ctx.oldray_all, ctx.v13_all) for m in methods]
     overlay = None
     if len(methods) >= 2:
         by_method = {m: cal[(cal["key"] == key) & (cal["method"] == m)] for m in methods}
@@ -483,7 +506,7 @@ def _render_one_station(key, ctx) -> str:
 _WORKER_CTX = None
 
 
-def _render_worker_init(db_path, out_dir, fullcal_dir, opcoeff_csv, oldray_dir, logo, search_json):
+def _render_worker_init(db_path, out_dir, fullcal_dir, opcoeff_csv, oldray_dir, v13_dir, logo, search_json):
     global _WORKER_CTX
     if _WORKER_CTX is not None:
         return  # fork (Linux/CSCS): the worker inherited the parent's ctx -> no reload/re-index
@@ -495,6 +518,7 @@ def _render_worker_init(db_path, out_dir, fullcal_dir, opcoeff_csv, oldray_dir, 
         diag_by=_diag_index(diag, cal),
         op_all=_load_opcoeff(opcoeff_csv or None),
         oldray_all=_load_oldray(oldray_dir or None),
+        v13_all=_load_oldray(v13_dir or None),
         tmpl=_env().get_template("station.html"),
         out_dir=Path(out_dir), fullcal_dir=(fullcal_dir or None),
         all_keys=all_keys, nav_idx={k: i for i, k in enumerate(all_keys)},
@@ -507,7 +531,7 @@ def _render_worker_task(key):
 
 def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
                flagex_dir=None, opcoeff_csv=None, only_keys=None, oldray_dir=None,
-               fullcal_dir=None, workers: int | None = None) -> dict:
+               v13_dir=None, fullcal_dir=None, workers: int | None = None) -> dict:
     out_dir = Path(out_dir)
     (out_dir / "stations").mkdir(parents=True, exist_ok=True)
     logo = _write_assets(out_dir)
@@ -524,6 +548,7 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
     # black line on the time series.
     op_all = _load_opcoeff(opcoeff_csv)
     oldray_all = _load_oldray(oldray_dir)
+    v13_all = _load_oldray(v13_dir)
     keystats = keystats.merge(_opcoeff_ratios(cal, op_all, st), on="key", how="left")
     # OmB-vs-CAMS bias + ICAO detection altitude from the per-stream <key>_omb.csv / <key>_sens.csv
     # one-row summaries (subset run; missing files are skipped). Merged onto keystats so the two new
@@ -611,7 +636,7 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
     nav_idx = {k: i for i, k in enumerate(all_keys)}
     ctx = SimpleNamespace(
         cal=cal, kal=kal, series=series, st=st, diag_by=diag_by, op_all=op_all,
-        oldray_all=oldray_all, tmpl=station_tmpl, out_dir=out_dir, fullcal_dir=fullcal_dir,
+        oldray_all=oldray_all, v13_all=v13_all, tmpl=station_tmpl, out_dir=out_dir, fullcal_dir=fullcal_dir,
         all_keys=all_keys, nav_idx=nav_idx, logo=logo, search_json=search_json)
 
     n_workers = int(workers) if workers else 1
@@ -623,6 +648,7 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
         print(f"  rendering {len(keys)} station pages on {n_workers} workers ...", flush=True)
         initargs = (str(db_path), str(out_dir), str(fullcal_dir) if fullcal_dir else "",
                     str(opcoeff_csv) if opcoeff_csv else "", str(oldray_dir) if oldray_dir else "",
+                    str(v13_dir) if v13_dir else "",
                     logo or "", search_json)
         # Expose the parent's ctx so fork()ed workers (Linux/CSCS) inherit it for free; spawn()ed
         # workers (Windows) ignore this and rebuild from initargs in the initializer.
