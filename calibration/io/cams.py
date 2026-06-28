@@ -30,30 +30,39 @@ _PathLike = Union[str, Path]
 logger = logging.getLogger(__name__)
 
 
-def monthly_name(date_str: str) -> str:
-    """``CAMS_Beta_YYYYMM.nc`` for the month containing *date_str* (YYYYMM[DD])."""
-    return f"CAMS_Beta_{date_str[:6]}.nc"
+def _region_prefix(region: Optional[str]) -> str:
+    """Filename region tag: ``''`` for the default Europe box (legacy un-suffixed name),
+    ``'<region>_'`` for a small regional box (``CAMS_Beta_<region>_<date>.nc``)."""
+    return "" if region in (None, "europe") else f"{region}_"
 
 
-def daily_name(date_str: str) -> str:
-    """``CAMS_Beta_YYYYMMDD.nc`` for the day *date_str* (YYYYMMDD)."""
-    return f"CAMS_Beta_{date_str[:8]}.nc"
+def monthly_name(date_str: str, region: Optional[str] = None) -> str:
+    """``CAMS_Beta_[<region>_]YYYYMM.nc`` for the month containing *date_str* (YYYYMM[DD])."""
+    return f"CAMS_Beta_{_region_prefix(region)}{date_str[:6]}.nc"
 
 
-def candidate_cams_files(cams_folder: _PathLike, date_str: str) -> List[Path]:
+def daily_name(date_str: str, region: Optional[str] = None) -> str:
+    """``CAMS_Beta_[<region>_]YYYYMMDD.nc`` for the day *date_str* (YYYYMMDD)."""
+    return f"CAMS_Beta_{_region_prefix(region)}{date_str[:8]}.nc"
+
+
+def candidate_cams_files(cams_folder: _PathLike, date_str: str,
+                         region: Optional[str] = None) -> List[Path]:
     """Candidate CAMS paths for the night ending on *date_str* (YYYYMMDD), in
-    preference order: monthly first, then daily. Existence is **not** checked here."""
+    preference order: monthly first, then daily. *region* selects the regional box
+    (``None``/``'europe'`` = the default Europe box). Existence is **not** checked here."""
     folder = Path(cams_folder)
-    cands = [folder / monthly_name(date_str)]
+    cands = [folder / monthly_name(date_str, region)]
     if len(date_str) >= 8:
-        cands.append(folder / daily_name(date_str))
+        cands.append(folder / daily_name(date_str, region))
     return cands
 
 
-def find_cams_file(cams_folder: _PathLike, date_str: str) -> Optional[Path]:
+def find_cams_file(cams_folder: _PathLike, date_str: str,
+                   region: Optional[str] = None) -> Optional[Path]:
     """Return the first existing CAMS file (monthly preferred, then daily) for the
-    night ending on *date_str*, or ``None`` if neither exists. Never downloads."""
-    for path in candidate_cams_files(cams_folder, date_str):
+    night ending on *date_str* in *region*, or ``None`` if neither exists. Never downloads."""
+    for path in candidate_cams_files(cams_folder, date_str, region):
         if path.exists():
             return path
     return None
@@ -77,6 +86,9 @@ def ensure_cams_file(
     auto_download: bool = False,
     scope: str = "day",
     require_backscatter: bool = True,
+    region: Optional[str] = None,
+    latitude: Optional[float] = None,
+    longitude: Optional[float] = None,
     log: Optional[logging.Logger] = None,
 ) -> Optional[Path]:
     """Resolve the CAMS file for the night ending on *date_str*, downloading it from
@@ -105,6 +117,15 @@ def ensure_cams_file(
         t/q/z/lnsp); an existing file that lacks backscatter is re-downloaded (when
         ``auto_download``) or returned with a warning (when not). Set ``False`` to keep
         the legacy t/q/z/lnsp-only behaviour for a pure molecular/WV run.
+    region, latitude, longitude :
+        Regional CAMS routing. Most census stations sit in the default Europe box
+        (``region=None``/``'europe'`` → the un-suffixed ``CAMS_Beta_<date>.nc``). A
+        far-flung station outside that box is served by its own small box, written as
+        ``CAMS_Beta_<region>_<date>.nc`` and downloaded over that box's area. Pass an
+        explicit *region* name, or *latitude*/*longitude* to have the region resolved
+        automatically (``download_cams_beta.region_for``). A point that falls in no box
+        resolves to ``None`` (Europe) and is then rejected downstream by the
+        ``cams_point_too_far`` guard, exactly as before.
 
     Returns
     -------
@@ -114,7 +135,13 @@ def ensure_cams_file(
     """
     log = log or logger
 
-    existing = find_cams_file(cams_folder, date_str)
+    # Resolve which regional box serves this station (explicit region wins; else from
+    # lat/lon; else the default Europe box). Done lazily-importably — region_for is pure.
+    if region is None and latitude is not None and longitude is not None:
+        from .download_cams_beta import region_for
+        region = region_for(latitude, longitude)
+
+    existing = find_cams_file(cams_folder, date_str, region)
     if existing is not None:
         if not require_backscatter or _has_backscatter(existing):
             return existing
@@ -137,10 +164,10 @@ def ensure_cams_file(
         folder = Path(cams_folder)
         folder.mkdir(parents=True, exist_ok=True)
         if scope == "month":
-            out_path = folder / monthly_name(date_str)
+            out_path = folder / monthly_name(date_str, region)
             dates = _month_dates(date_str)
         elif scope == "day":
-            out_path = folder / daily_name(date_str)
+            out_path = folder / daily_name(date_str, region)
             dates = _night_dates(date_str)
         else:
             raise ValueError(f"Unknown CAMS download scope {scope!r} (expected 'day' or 'month')")
@@ -151,14 +178,14 @@ def ensure_cams_file(
     # Import lazily: cdsapi / cfgrib are only needed for an actual download, so the
     # resolver stays importable (and find_cams_file usable) without them.
     from .download_cams_beta import (
-        download_to_netcdf, CALIBRATION_VARIABLES, OMB_VARIABLES,
+        download_to_netcdf, CALIBRATION_VARIABLES, OMB_VARIABLES, region_area,
     )
 
     # With backscatter required (default) fetch the lean OmB set (aerosol 532/1064 +
     # t/q/z/lnsp); otherwise just the t/q/z/lnsp the molecular/WV correction needs.
     variables = OMB_VARIABLES if require_backscatter else CALIBRATION_VARIABLES
     try:
-        download_to_netcdf(dates, out_path, variables=variables)
+        download_to_netcdf(dates, out_path, variables=variables, area=region_area(region))
     except Exception as exc:  # noqa: BLE001 — surface any download/convert failure as a skip
         log.error("CAMS auto-download failed for %s: %s", out_path.name, exc)
         # Remove a partial/corrupt file so a later run can retry cleanly.

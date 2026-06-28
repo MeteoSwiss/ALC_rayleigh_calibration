@@ -820,6 +820,7 @@ def compute_wv_transmission(data: CeiloData, config: CloudCalConfig) -> NDArray:
         config.cams_folder, cams_date,
         auto_download=getattr(config, "auto_download_cams", False),
         scope=getattr(config, "cams_download_scope", "day"),
+        latitude=data.station_latitude, longitude=data.station_longitude,
     )
     if cams_path is None:
         raise FileNotFoundError(

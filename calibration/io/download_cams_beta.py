@@ -67,12 +67,60 @@ DATASET = "cams-global-atmospheric-composition-forecasts"
 # time setup: log in at https://ads.atmosphere.copernicus.eu and accept the site licences.
 ADS_URL = "https://ads.atmosphere.copernicus.eu/api"
 OUTPUT_DIR = "."
-# North, West, South, East. Europe + Arctic box covering 421/427 E-PROFILE census
+# North, West, South, East. Europe + Arctic box covering ~427 E-PROFILE census
 # stations at 0.4 deg (the north edge reaches 80 N to include Hopen 76.5 N and
-# Bjornoya 74.5 N). 6 far-flung affiliates (Canada, Bonaire, New Zealand) fall
-# outside this box and are not served by the European CAMS download. Override via
-# the ALC_CAMS_AREA env var ("N,W,S,E") for a different domain.
-AREA = [float(x) for x in os.environ.get("ALC_CAMS_AREA", "80,-30,27,45").split(",")]
+# Bjornoya 74.5 N). Override via the ALC_CAMS_AREA env var ("N,W,S,E") for a
+# different domain. The few affiliates OUTSIDE this box are served by their own
+# small regional boxes below (CAMS_REGIONS) rather than one global download.
+EUROPE_AREA = [float(x) for x in os.environ.get("ALC_CAMS_AREA", "80,-30,27,45").split(",")]
+AREA = EUROPE_AREA   # module default (the CLI and the legacy CAMS_Beta_<date>.nc file)
+
+# Regional CAMS domains for the census stations that fall OUTSIDE the Europe box.
+# A global CAMS download would be ~8.6 GB/day; instead each far-flung cluster gets a
+# small 0.4 deg box (a few MB/day) and each station is routed to the box covering its
+# lat/lon (region_for). The Europe box stays the default ('europe' -> EUROPE_AREA) and
+# keeps the un-suffixed CAMS_Beta_<date>.nc name; every small box writes a SUFFIXED file
+# CAMS_Beta_<region>_<date>.nc. Areas are [North, West, South, East]. To add a station
+# outside all boxes, add a region here (and it is picked up automatically by the prefetch
+# cron + the calibration routing). Boxes are padded ~1.5 deg around the cluster so the
+# nearest-grid-point lookup (water_vapor.cams_point_too_far) stays well inside the domain.
+CAMS_REGIONS = {
+    # name           : [N,      W,       S,      E]
+    "namerica_west":   [55.5,  -116.5,  51.5,  -112.0],   # Edmonton CL51/CL61   (53.55, -114.10)
+    "ontario":         [44.5,  -83.0,   41.5,  -79.5],    # Western/London ON CHM15k (43.01, -81.27)
+    "caribbean":       [14.0,  -70.5,   10.5,  -66.5],    # Bonaire CHM15k       (12.13, -68.28)
+    "newzealand":      [-35.0,  168.0, -46.5,  176.5],    # Lauder CL61 (-45.04,169.68) + Auckland CL31 (-36.85,174.77)
+}
+
+
+def region_area(region):
+    """Area [N,W,S,E] for *region*; ``None``/``'europe'`` -> the default Europe box."""
+    if region in (None, "europe"):
+        return list(EUROPE_AREA)
+    try:
+        return list(CAMS_REGIONS[region])
+    except KeyError:
+        raise ValueError(f"Unknown CAMS region {region!r} (known: {', '.join(CAMS_REGIONS)})")
+
+
+def region_for(latitude, longitude):
+    """Return the CAMS region serving (*latitude*, *longitude*): the SMALLEST small-box
+    that contains the point (small boxes are more specific than the continental Europe
+    box), else ``'europe'`` if inside the Europe box, else ``None`` (no domain — the
+    station cannot be calibrated until a box is added for it)."""
+    best = None
+    best_area = None
+    for name, (N, W, S, E) in CAMS_REGIONS.items():
+        if S <= latitude <= N and W <= longitude <= E:
+            a = (N - S) * (E - W)
+            if best is None or a < best_area:
+                best, best_area = name, a
+    if best is not None:
+        return best
+    N, W, S, E = EUROPE_AREA
+    if S <= latitude <= N and W <= longitude <= E:
+        return "europe"
+    return None
 RUN_TIME = ["00:00"]
 LEADTIME = ["3", "6", "9", "12", "15", "18", "21", "24"]
 MODEL_LEVELS = ["1"] + [str(k) for k in range(38, 138)]   # 1 (for z) + 38..137
@@ -241,12 +289,15 @@ def _request_too_large(exc) -> bool:
     return ("cost limit" in s) or ("too large" in s) or ("reduce your selection" in s)
 
 
-def _retrieve_day(client, day, variables, out_handle, grib_path):
+def _retrieve_day(client, day, variables, out_handle, grib_path, area=None):
     """Retrieve one day's model-level GRIB and append it to *out_handle*. The ADS caps the
     cost of a single request (~ variables x levels x steps); if a day is rejected as too
     large, split the variable list in half and recurse — adapting to the limit without
     hard-coding it. GRIB messages are self-describing, so appended parts form one valid
-    multi-message file that cfgrib / grib_to_netcdf read as a whole."""
+    multi-message file that cfgrib / grib_to_netcdf read as a whole. *area* ([N,W,S,E])
+    defaults to the module Europe box; a regional download passes its own small box."""
+    if area is None:
+        area = AREA
     part = f"{grib_path}.{day}.{len(variables)}.part"
     try:
         client.retrieve(
@@ -258,7 +309,7 @@ def _retrieve_day(client, day, variables, out_handle, grib_path):
                 "type": ["forecast"],
                 "variable": variables,
                 "model_level": MODEL_LEVELS,
-                "area": AREA,
+                "area": area,
                 "data_format": "grib",
                 "download_format": "unarchived",
             },
@@ -268,8 +319,8 @@ def _retrieve_day(client, day, variables, out_handle, grib_path):
         if _request_too_large(exc) and len(variables) > 1:
             mid = len(variables) // 2
             print(f"[download]   {day}: request too large; splitting {len(variables)} vars")
-            _retrieve_day(client, day, variables[:mid], out_handle, grib_path)
-            _retrieve_day(client, day, variables[mid:], out_handle, grib_path)
+            _retrieve_day(client, day, variables[:mid], out_handle, grib_path, area)
+            _retrieve_day(client, day, variables[mid:], out_handle, grib_path, area)
             return
         raise
     with open(part, "rb") as f:
@@ -277,22 +328,25 @@ def _retrieve_day(client, day, variables, out_handle, grib_path):
     os.remove(part)
 
 
-def download(dates, grib_path, variables=None):
+def download(dates, grib_path, variables=None, area=None):
     """Retrieve the model-level GRIB for *dates* into *grib_path*.
 
     Chunked by day (one ADS request per date) to stay under the ADS per-request cost
     limit, with an automatic variable-split fallback for any day that is still too large.
     *variables* defaults to the full archive set; the calibration auto-download passes the
-    smaller ``CALIBRATION_VARIABLES`` (t/q/z/lnsp) it actually needs.
+    smaller ``CALIBRATION_VARIABLES`` (t/q/z/lnsp) it actually needs. *area* ([N,W,S,E])
+    defaults to the Europe box; pass a regional box for a far-flung station cluster.
     """
     if variables is None:
         variables = VARIABLES
-    print(f"[download] {len(dates)} day(s) x {len(variables)} var(s): {dates[0]} .. {dates[-1]}")
+    if area is None:
+        area = AREA
+    print(f"[download] {len(dates)} day(s) x {len(variables)} var(s) over {area}: {dates[0]} .. {dates[-1]}")
     c = _ads_client()
     with open(grib_path, "wb") as out:
         for d in dates:
             print(f"[download]   {d}")
-            _retrieve_day(c, d, list(variables), out, grib_path)
+            _retrieve_day(c, d, list(variables), out, grib_path, area)
 
 
 def grib_to_netcdf(grib_path, nc_path):
@@ -487,14 +541,16 @@ def build_output(ds, out_path):
 
 
 # ----------------------------------------------------------------------------
-def download_to_netcdf(dates, out_path, variables=None, keep_intermediate=KEEP_INTERMEDIATE):
+def download_to_netcdf(dates, out_path, variables=None, keep_intermediate=KEEP_INTERMEDIATE,
+                       area=None):
     """Download *dates* from the ADS and write the calibration-ready CAMS_Beta netCDF.
 
     This is the importable core of the CLI (and what the calibration's CAMS auto-download
     calls): ADS retrieve -> GRIB->netCDF (cfgrib or the eccodes CLI) -> build_output.
     *dates* is a list of "YYYY-MM-DD" strings (as produced by parse_args). *variables*
     defaults to the full archive set; pass ``CALIBRATION_VARIABLES`` for the lean t/q/z/lnsp
-    file the calibration needs. Returns *out_path*.
+    file the calibration needs. *area* ([N,W,S,E]) defaults to the Europe box; pass a
+    regional box (``region_area(name)``) to fetch a far-flung station cluster. Returns *out_path*.
     """
     out_path = str(out_path)
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
@@ -502,7 +558,7 @@ def download_to_netcdf(dates, out_path, variables=None, keep_intermediate=KEEP_I
     grib_path = os.path.join(workdir, "cams.grib")
     raw_nc = os.path.join(workdir, "cams_raw.nc")
 
-    download(dates, grib_path, variables=variables)
+    download(dates, grib_path, variables=variables, area=area)
     grib_to_netcdf(grib_path, raw_nc)
 
     with xr.open_dataset(raw_nc) as ds:

@@ -439,6 +439,7 @@ def calibrate_rayleigh(
             options.cams_folder, date_str,
             auto_download=getattr(options, "auto_download_cams", False),
             scope=getattr(options, "cams_download_scope", "day"),
+            latitude=info.latitude, longitude=info.longitude,
             log=logger,
         )
         if cams_mol_file is None:
@@ -497,6 +498,7 @@ def calibrate_rayleigh(
             options.cams_folder, date_str,
             auto_download=getattr(options, "auto_download_cams", False),
             scope=getattr(options, "cams_download_scope", "day"),
+            latitude=info.latitude, longitude=info.longitude,
             log=logger,
         )
         if cams_file is None:
