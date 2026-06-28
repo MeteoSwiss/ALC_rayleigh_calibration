@@ -64,6 +64,19 @@ def log(msg: str) -> None:
     print(f"[{datetime.now(timezone.utc):%Y-%m-%d %H:%M:%S}Z] {msg}", flush=True)
 
 
+def refresh_census() -> None:
+    """Refresh the station census from the live L1 archive BEFORE calibrating, so a
+    newly-installed station is picked up the same day (scripts/refresh_census.py merges
+    new streams in place, never dropping existing ones). Best-effort: a failure here is
+    logged but must not block the daily calibration (the previous census is still valid)."""
+    cmd = [PY, str(REPO / "scripts" / "refresh_census.py")]
+    log(f"  census: refresh_census.py (scan {os.environ.get('ALC_L1_ROOT', '?')})")
+    try:
+        subprocess.run(cmd, cwd=str(REPO), timeout=1800)
+    except Exception as exc:  # noqa: BLE001 - census refresh must never fail the run
+        log(f"  census: refresh failed: {type(exc).__name__}: {exc}")
+
+
 def load_processed() -> set:
     try:
         return set(PROCESSED.read_text(encoding="utf-8").split())
@@ -153,6 +166,10 @@ def main() -> int:
     args = ap.parse_args()
 
     log(f"ALC daily pipeline starting | CAMS={CAMS_DIR} | fullcal={FULLCAL_DIR} | dashboard={DASHBOARD_DIR}")
+
+    # Refresh the census from the live L1 archive first, so any station installed since the
+    # last run is calibrated today (new streams merged in place; existing ones never dropped).
+    refresh_census()
 
     if args.day:
         days = [args.day]
