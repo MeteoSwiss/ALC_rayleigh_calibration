@@ -31,27 +31,30 @@ def plot_omb_station(res: OmBResult, instrument: str, save_path, *, title: str =
     fig = plt.figure(figsize=(16, 9))
     gs = fig.add_gridspec(2, 3)
 
-    # (0,0:2) observation pcolor -- ALL data, with a flagged-data mask + cloud detections
+    # (0,0:2) observation pcolor -- ALL data in greyscale; only the KEPT (un-flagged) gates
+    # are redrawn in colour on top, so the data actually used in the O-B clearly stands out
+    # against everything that was flagged (cloud / SNR / morphology), which stays grey.
     ax = fig.add_subplot(gs[0, 0:2])
     full = res.obs_full.get("ours") if getattr(res, "obs_full", None) else None
     scr = res.obs_mean["ours"]
     base = full if full is not None else scr                    # (n_cams, n_r)
     obs = base.T * unit
-    pcm = ax.pcolormesh(t, res.range_mean, np.log10(np.clip(obs, 1e-2, None)),
-                        cmap="jet", vmin=-2, vmax=2, shading="auto")
+    logobs = np.log10(np.clip(obs, 1e-2, None))
     if full is not None:
-        # where data is present but was flagged out of the comparison (cloud / SNR /
-        # morphology) -> translucent grey wash so the kept (coloured) data stands out.
-        wash = np.where((np.isfinite(full) & ~np.isfinite(scr)).T, 1.0, np.nan)
-        ax.pcolormesh(t, res.range_mean, wash, shading="auto", alpha=0.45,
-                      cmap=mcolors.ListedColormap(["#555555"]), vmin=0, vmax=1)
+        ax.pcolormesh(t, res.range_mean, logobs, cmap="gray_r",  # all data -> greyscale
+                      vmin=-2.5, vmax=2.0, shading="auto")
+        kept = np.where(np.isfinite(scr.T), obs, np.nan)         # only un-flagged gates
+        pcm = ax.pcolormesh(t, res.range_mean, np.log10(np.clip(kept, 1e-2, None)),
+                            cmap="jet", vmin=-2, vmax=2, shading="auto")
+    else:
+        pcm = ax.pcolormesh(t, res.range_mean, logobs, cmap="jet", vmin=-2, vmax=2, shading="auto")
     cb = getattr(res, "cloud_base", None)
     if cb is not None and np.size(cb) and np.any(np.isfinite(np.asarray(cb, dtype=float))):
         ax.scatter(t, np.asarray(cb, dtype=float), s=9, marker="v", facecolors="white",
                    edgecolors="black", linewidths=0.4, zorder=5, label="cloud base")
         ax.legend(loc="upper right", fontsize=7, framealpha=0.6)
     ax.set_ylim(0, range_top); ax.set_ylabel("Range AGL [m]")
-    ax.set_title(f"{instrument} obs (v2 C_L; grey = flagged), {res.wavelength:.0f} nm")
+    ax.set_title(f"{instrument} obs ({res.wavelength:.0f} nm) - colour = used in O-B, grey = flagged")
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%d-%b"))
     fig.colorbar(pcm, ax=ax, label=r"log$_{10}\beta_{att}$ [Mm$^{-1}$sr$^{-1}$]")
 
@@ -100,6 +103,11 @@ def plot_omb_station(res: OmBResult, instrument: str, save_path, *, title: str =
     ax.set_ylabel("Altitude ASL [m]"); ax.set_title("Bias profile"); ax.grid(alpha=0.3)
     ax.legend(fontsize=8)
 
+    # the caller labels the title with the last run's month; show the ACTUAL cached span
+    if title and np.size(res.time_cams):
+        import re
+        span = f"{str(res.time_cams.min())[:10]} .. {str(res.time_cams.max())[:10]}"
+        title = re.sub(r"\d{4}-\d{2}-\d{2}\s*\.\.\s*\d{4}-\d{2}-\d{2}", span, title)
     fig.suptitle(title or f"OmB - {instrument}", fontsize=14, fontweight="bold")
     fig.tight_layout(rect=(0, 0, 1, 0.97))
     Path(save_path).parent.mkdir(parents=True, exist_ok=True)
