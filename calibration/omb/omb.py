@@ -1,20 +1,25 @@
 """Core Observation-minus-Background computation against CAMS.
 
-Python port of the per-station O-B logic in ``E_PROFILE_ALC_Monthly_OB.m``:
+Python port of the per-station O-B logic in ``E_PROFILE_ALC_Monthly_OB.m``,
+updated to the E-PROFILE aerosol-processing recommendation (2026-06):
 
-1. average the (already calibrated) attenuated backscatter to the CAMS temporal
-   resolution (default 3 h) and a coarse vertical grid (default 150 m),
-2. screen clouds (mask the gates around/above the cloud base, drop low-cloud
-   profiles),
-3. at 910 nm, divide the observation by the two-way water-vapour transmission
+1. cloud-screen each native profile (drop low-cloud profiles, mask gates at/above
+   the cloud base) -- O-B is a clear-sky comparison,
+2. pre-average the (already calibrated) attenuated backscatter to a 5 min grid
+   (reproducing the L2 cadence),
+3. per 5 min profile, estimate the noise floor from the top ``noise_top_m`` of the
+   de-range-corrected signal and drop gates below ``snr_min`` * sigma (SNR screen),
+4. for each CAMS step, average the valid 5 min profiles within +/- ``agg_halfwin_min``
+   onto a coarse vertical grid (default 150 m),
+5. at 910 nm, divide the observation by the two-way water-vapour transmission
    (reusing :func:`calibration.cloud.calibration.compute_wv_transmission`),
-4. read the CAMS aerosol backscatter at the instrument wavelength,
-5. interpolate the observation onto the CAMS height grid (ASL) at each matching
-   time step and form the bias = observation - background.
+6. read the CAMS aerosol backscatter at the instrument wavelength, interpolate the
+   observation onto the CAMS height grid (ASL) and form bias = observation - background,
+7. for the period statistics, drop altitudes valid in < ``valid_frac_min`` of steps.
 
 One or more observation *sources* can be passed at once (e.g. the operational
-L2 constant and our Kalman best-estimate C_L), all sharing a single CAMS read
-and water-vapour correction.
+L2 constant and our Kalman best-estimate C_L), all sharing a single CAMS read,
+SNR screen (scale-invariant) and water-vapour correction.
 """
 
 from __future__ import annotations
@@ -56,6 +61,8 @@ class OmBResult:
     bias: Dict[str, NDArray] = field(default_factory=dict)        # src -> (n_lev, n_cams)
     prof: Dict[str, dict] = field(default_factory=dict)           # src -> profile stats
     scalar: Dict[str, dict] = field(default_factory=dict)         # src -> {mean,median,rms,n}
+    obs_full: Dict[str, NDArray] = field(default_factory=dict)    # src -> (n_cams, n_r) UNSCREENED obs (pcolor)
+    cloud_base: NDArray = field(default_factory=lambda: np.empty(0))  # (n_cams,) cloud base AGL [m], NaN=clear
 
 
 def _datenum_to_dt64(datenum: NDArray) -> NDArray:
@@ -65,17 +72,27 @@ def _datenum_to_dt64(datenum: NDArray) -> NDArray:
     )
 
 
-def _interp_nan(x: NDArray, y: NDArray, xnew: NDArray) -> NDArray:
+def _interp_nan(x: NDArray, y: NDArray, xnew: NDArray,
+                max_gap: float | None = None) -> NDArray:
     """Linear interp with NaN handling; NaN outside the data range. ``x`` need
-    not be sorted (sorted internally)."""
+    not be sorted (sorted internally). If ``max_gap`` is given, any interpolated
+    point farther than ``max_gap`` from the nearest finite source sample is set to
+    NaN, so large flagged gaps are NOT bridged (keeps availability + bias honest)."""
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
+    xnew = np.asarray(xnew, dtype=float)
     ok = np.isfinite(x) & np.isfinite(y)
     if ok.sum() < 2:
         return np.full(np.shape(xnew), np.nan)
     xs, ys = x[ok], y[ok]
     order = np.argsort(xs)
-    return np.interp(xnew, xs[order], ys[order], left=np.nan, right=np.nan)
+    xs, ys = xs[order], ys[order]
+    out = np.interp(xnew, xs, ys, left=np.nan, right=np.nan)
+    if max_gap is not None:
+        j = np.clip(np.searchsorted(xs, xnew), 1, len(xs) - 1)
+        dist = np.minimum(np.abs(xnew - xs[j]), np.abs(xnew - xs[j - 1]))
+        out = np.where(dist <= max_gap, out, np.nan)
+    return out
 
 
 def _bin_to_grid(values: NDArray, gate_bin: NDArray, n_bins: int) -> NDArray:
@@ -91,22 +108,63 @@ def _bin_to_grid(values: NDArray, gate_bin: NDArray, n_bins: int) -> NDArray:
     return out
 
 
-def _noise_keep_mask(prof: NDArray, r: NDArray, band: tuple, snr: float) -> NDArray:
-    """Keep gates whose averaged signal exceeds ``snr`` * sigma, with sigma the
-    high-altitude noise floor estimated over ``band`` [m AGL].
+def _preaverage_5min(time: NDArray, beta_scr: Dict[str, NDArray],
+                     preavg_min: float):
+    """Average native profiles into ``preavg_min``-minute bins (reproducing the L2
+    cadence). Returns ``(t5, {src: (n5, n_range)})`` with ``t5`` the bin centres."""
+    t = np.asarray(time)
+    t0 = t.min()
+    binw = np.timedelta64(int(round(preavg_min * 60)), "s")
+    idx = ((t - t0) // binw).astype("int64")
+    uniq = np.unique(idx)
+    t5 = t0 + uniq * binw + binw // 2
+    out: Dict[str, NDArray] = {}
+    with np.errstate(invalid="ignore"):
+        for k, v in beta_scr.items():
+            arr = np.full((uniq.size, v.shape[1]), np.nan)
+            for j, u in enumerate(uniq):
+                sel = idx == u
+                if np.any(sel):
+                    arr[j, :] = np.nanmean(v[sel, :], axis=0)
+            out[k] = arr
+    return t5, out
 
-    Equivalent of the MATLAB ``remove_noise`` SNR gate (drop averaged gates below
-    n_sigma * sigma). The 3 sigma floor from a clean high band suppresses the
-    aloft detector noise that would otherwise dominate the O-B bias/RMS where the
-    CAMS aerosol backscatter is ~0. Returns all-True if sigma cannot be estimated.
-    """
-    sel = (r >= band[0]) & (r <= band[1]) & np.isfinite(prof)
-    if np.count_nonzero(sel) < 3:
-        return np.ones(prof.shape, dtype=bool)
-    sigma = np.nanstd(prof[sel])
-    if not (sigma > 0):
-        return np.ones(prof.shape, dtype=bool)
-    return prof >= snr * sigma
+
+def _snr_screen(beta5: Dict[str, NDArray], range_agl: NDArray, ref_key: str,
+                noise_top_m: float, snr_min: float, morph_open: bool = True) -> None:
+    """In-place SNR screen on the 5 min profiles. For each profile sigma is a robust
+    (1.4826 * MAD) noise floor of the de-range-corrected signal (``beta/r**2`` ~ raw
+    signal, C_L-invariant) over the top ``noise_top_m`` of the finite gates; gates with
+    signal < ``snr_min`` * sigma are dropped. That keep-rule is one-sided, so on its own
+    it admits only the *positive* noise tail at sub-noise altitudes (biasing O-B high);
+    therefore when ``morph_open`` the 2-D (5min-time x range) keep mask is morphologically
+    OPENED (binary opening, cross element) to delete isolated/transient survivors -- only
+    signal coherent in BOTH time and range is kept. The mask is taken from ``ref_key`` and
+    applied to every source (scale-invariant -> identical gates)."""
+    r = np.asarray(range_agl, dtype=float)
+    r2 = np.where(r > 0, r ** 2, np.nan)
+    ref = beta5[ref_key]
+    keep = np.zeros(ref.shape, dtype=bool)
+    for i in range(ref.shape[0]):
+        s = ref[i, :] / r2                          # de-range-corrected (raw-equivalent)
+        fin = np.isfinite(s)
+        if fin.sum() < 5:
+            keep[i, :] = fin                        # too little to estimate noise -> don't filter
+            continue
+        top = fin & (r >= r[fin].max() - noise_top_m)
+        if top.sum() < 5:
+            top = fin
+        v = s[top]
+        sigma = 1.4826 * np.nanmedian(np.abs(v - np.nanmedian(v)))   # robust sigma (MAD)
+        if not (sigma > 0):
+            keep[i, :] = fin
+            continue
+        keep[i, :] = fin & (s >= snr_min * sigma)   # keep only signal >= snr_min * sigma
+    if morph_open and keep.any():
+        from scipy.ndimage import binary_opening
+        keep = binary_opening(keep)                 # drop points isolated in time/range (speckle)
+    for vv in beta5.values():
+        vv[~keep] = np.nan
 
 
 def compute_omb(
@@ -127,9 +185,13 @@ def compute_omb(
     remove_lowclouds: bool = True,
     lowcloud_height: float = 1800.0,
     cbh_guard: float = 500.0,
-    do_remove_noise: bool = False,
-    noise_band: tuple = (6000.0, 8000.0),
-    snr_noise: float = 3.0,
+    preavg_min: float = 5.0,
+    agg_halfwin_min: float = 15.0,
+    snr_min: float = 3.0,
+    noise_top_m: float = 2000.0,
+    valid_frac_min: float = 0.25,
+    morph_open: bool = True,
+    interp_max_gap_m: float = 300.0,
     apply_wv: Optional[bool] = None,
     abs_cs_lookup_table: str = "",
 ) -> OmBResult:
@@ -177,7 +239,6 @@ def compute_omb(
 
     cbh = None if cloud_base_height is None else np.asarray(cloud_base_height, dtype=float)
     ref_key = next(iter(beta_sources))
-    win = np.timedelta64(int(round(hourly_resolution * 3600)), "s")
 
     # --- cloud screening PER NATIVE PROFILE --------------------------------
     # The MATLAB script screens the 3 h-averaged bin on the bin-minimum CBH
@@ -200,29 +261,39 @@ def compute_omb(
                 for v in beta_scr.values():
                     v[i, mask] = np.nan
 
-    # --- average over the forward 3 h CAMS bin -----------------------------
-    # remove_noise (drop averaged gates below snr*sigma) is available but OFF by
-    # default: as a signal threshold it KEEPS only high-obs gates, which biases
-    # the O-B high (it conditions the comparison on the observation detecting
-    # aerosol). The MATLAB applies it on L3 data, but for an unbiased O-B we rely
-    # on the median + the min-obs altitude filter to handle aloft noise instead.
-    # When enabled, the SAME mask (reference source, scale-invariant) is applied
-    # to every source so op-vs-ours stay on identical gates.
-    obs_mean = {k: np.full((n_cams, n_r), np.nan) for k in beta_scr}
-    for i in range(n_cams):
-        sel = (time >= cams_t[i]) & (time < cams_t[i] + win)
-        if not np.any(sel):
-            continue
-        prof_now = {
-            k: _bin_to_grid(np.nanmean(v[sel, :], axis=0), gate_bin, n_r)
-            for k, v in beta_scr.items()
-        }
-        drop = np.zeros(n_r, dtype=bool)
-        if do_remove_noise:
-            drop |= ~_noise_keep_mask(prof_now[ref_key], range_mean, noise_band, snr_noise)
-        for k, p in prof_now.items():
-            p[drop] = np.nan
-            obs_mean[k][i, :] = p
+    # --- 5 min pre-average + per-profile SNR screen (top-2km noise floor) ----
+    # Reproduce the L2 5 min cadence, then keep only gates with genuine signal
+    # (>= snr_min * sigma): the noise floor is a robust std of the de-range-corrected
+    # signal over the top noise_top_m, so the long-period average cannot accumulate
+    # sub-noise electronic distortion. The screen is scale-invariant (identical gates
+    # for every source).
+    t5, beta5 = _preaverage_5min(time, beta_scr, preavg_min)
+    # unscreened 5 min field of the DISPLAYED source ('ours') -- cloud + SNR screens NOT
+    # applied -- kept for the "all data" observation pcolor + its flagged-data overlay.
+    disp_key = "ours" if "ours" in beta_sources else ref_key
+    _, beta5_full = _preaverage_5min(
+        time, {disp_key: np.asarray(beta_sources[disp_key], dtype=float)}, preavg_min)
+    _snr_screen(beta5, range_agl, ref_key, noise_top_m, snr_min, morph_open=morph_open)
+
+    # --- aggregate the valid 5 min profiles within +/- agg_halfwin of each CAMS step
+    agg = np.timedelta64(int(round(agg_halfwin_min * 60)), "s")
+    obs_mean = {k: np.full((n_cams, n_r), np.nan) for k in beta5}
+    obs_full = {disp_key: np.full((n_cams, n_r), np.nan)}  # all data (unscreened) for the pcolor
+    cloud_base = np.full(n_cams, np.nan)                    # representative cloud base per step
+    with np.errstate(invalid="ignore"):
+        for i in range(n_cams):
+            sel = (t5 >= cams_t[i] - agg) & (t5 <= cams_t[i] + agg)
+            if np.any(sel):
+                for k, v in beta5.items():
+                    obs_mean[k][i, :] = _bin_to_grid(
+                        np.nanmean(v[sel, :], axis=0), gate_bin, n_r)
+                obs_full[disp_key][i, :] = _bin_to_grid(
+                    np.nanmean(beta5_full[disp_key][sel, :], axis=0), gate_bin, n_r)
+            if cbh is not None:                            # cloud detections in the window (incl. Vaisala vis)
+                cw = cbh[(time >= cams_t[i] - agg) & (time <= cams_t[i] + agg)]
+                cw = cw[np.isfinite(cw)]
+                if cw.size:
+                    cloud_base[i] = float(np.median(cw))
 
     # --- water-vapour correction (910 nm): divide observation by trans2 ----
     sources = dict(obs_mean)
@@ -257,28 +328,32 @@ def compute_omb(
     bias: Dict[str, NDArray] = {}
     prof: Dict[str, dict] = {}
     scalar: Dict[str, dict] = {}
-    # MATLAB rule: drop altitudes with < 3 days of data (nb_obs < 24/hourly_res*3),
-    # capped at half the available steps so short windows still yield statistics.
-    min_obs = max(3, min(int(round(3 * 24 / hourly_resolution)), n_cams // 2))
+    # period filter: keep altitudes valid in >= valid_frac_min of the CAMS steps
+    # (replaces the old absolute min-obs rule). valid_frac is returned so the figure
+    # can show data availability vs altitude on a second x-axis.
     for k, om in sources.items():
         oi = np.full((z_cams.shape[0], n_cams), np.nan)
         for i in range(n_cams):
-            oi[:, i] = _interp_nan(z_obs_asl, om[i, :], z_cams[:, i])
+            oi[:, i] = _interp_nan(z_obs_asl, om[i, :], z_cams[:, i],
+                                   max_gap=interp_max_gap_m)
         b = oi - cams_beta
-        # keep only altitudes with enough observations across time
-        keep = np.sum(np.isfinite(b), axis=1) >= min_obs
+        valid_frac = (np.sum(np.isfinite(b), axis=1) / n_cams
+                      if n_cams else np.zeros(b.shape[0]))
+        keep = valid_frac >= valid_frac_min
         b_filt = np.where(keep[:, None], b, np.nan)
+        oi_filt = np.where(keep[:, None], oi, np.nan)
         with np.errstate(invalid="ignore"):
             rms_profile = np.sqrt(np.nanmean(b_filt**2, axis=1))
         obs_interp[k] = oi
         bias[k] = b
         prof[k] = {
-            "obs_med": np.nanmedian(oi, axis=1),
-            "obs_p25": np.nanpercentile(oi, 25, axis=1),
-            "obs_p75": np.nanpercentile(oi, 75, axis=1),
+            "obs_med": np.nanmedian(oi_filt, axis=1),
+            "obs_p25": np.nanpercentile(oi_filt, 25, axis=1),
+            "obs_p75": np.nanpercentile(oi_filt, 75, axis=1),
             "bias_med": np.nanmedian(b_filt, axis=1),
             "bias_p25": np.nanpercentile(b_filt, 25, axis=1),
             "bias_p75": np.nanpercentile(b_filt, 75, axis=1),
+            "valid_frac": valid_frac,
         }
         scalar[k] = {
             "mean_bias": float(np.nanmean(b_filt)),
@@ -299,4 +374,6 @@ def compute_omb(
         bias=bias,
         prof=prof,
         scalar=scalar,
+        obs_full=obs_full,
+        cloud_base=cloud_base,
     )

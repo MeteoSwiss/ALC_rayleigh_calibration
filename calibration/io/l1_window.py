@@ -67,13 +67,25 @@ def load_l1_window(paths: Iterable[str]) -> Optional[dict]:
 
 
 def _lowest_cbh(ds: netCDF4.Dataset) -> NDArray:
-    """Lowest cloud base height per profile [m AGL], NaN where clear/none."""
-    if "cloud_base_height" not in ds.variables:
-        nt = ds.variables["rcs_0"].shape[0]
-        return np.full(nt, np.nan)
-    cb = np.asarray(ds.variables["cloud_base_height"][:], dtype="float64")
-    cb = np.where(cb > 0, cb, np.nan)
-    if cb.ndim == 2:
+    """Lowest cloud base height per profile [m AGL], NaN where clear/none.
+
+    For Vaisala ceilometers (CL31/CL51/CL61) a reported ``vertical_visibility``
+    (fog or strong precipitation, when the sky is obscured and no cloud base is
+    returned) must be treated as a low cloud base so those profiles are screened
+    out of the clear-sky OmB. CHM15k/Mini-MPL do not report it (CHM15k's ``vor``
+    is a different quantity), so the ``vertical_visibility`` variable name keys
+    exactly the Vaisala instruments."""
+    nt = ds.variables["rcs_0"].shape[0]
+    if "cloud_base_height" in ds.variables:
+        cb = np.asarray(ds.variables["cloud_base_height"][:], dtype="float64")
+        cb = np.where(cb > 0, cb, np.nan)
         with np.errstate(invalid="ignore"):
-            return np.nanmin(cb, axis=1)
-    return cb
+            cbh = np.nanmin(cb, axis=1) if cb.ndim == 2 else cb
+    else:
+        cbh = np.full(nt, np.nan)
+    if "vertical_visibility" in ds.variables:        # Vaisala fog/precip -> low cloud base
+        vis = np.asarray(ds.variables["vertical_visibility"][:], dtype="float64").reshape(-1)
+        vis = np.where(vis > 0, vis, np.nan)
+        if vis.size == cbh.size:
+            cbh = np.fmin(cbh, vis)                   # fmin ignores NaN: vis where clear, min where both
+    return cbh

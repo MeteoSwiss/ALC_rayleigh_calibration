@@ -104,6 +104,11 @@ def _omb_part_from_result(res) -> dict:
     # variants ('op_wv','ours_wv') exist for bias/obs_interp/prof/scalar but not
     # for obs_mean -- so key the obsmean columns by obs_mean's own keys.
     mean_srcs = list(res.obs_mean.keys())
+    full_srcs = list(getattr(res, "obs_full", {}).keys())            # unscreened obs for the pcolor
+    n = len(np.asarray(res.time_cams))
+    cloud_base = np.asarray(getattr(res, "cloud_base", np.full(n, np.nan)), dtype="float32")
+    if cloud_base.size != n:
+        cloud_base = np.full(n, np.nan, dtype="float32")
     return dict(
         wavelength=float(res.wavelength),
         time_cams=np.asarray(res.time_cams),
@@ -112,9 +117,12 @@ def _omb_part_from_result(res) -> dict:
         cams_beta=np.asarray(res.cams_beta, dtype="float32"),         # (n_lev, n_cams)
         srcs=np.array(srcs),
         mean_srcs=np.array(mean_srcs),
+        full_srcs=np.array(full_srcs),
+        cloud_base=cloud_base,                                        # (n_cams,) cloud base AGL [m]
         **{f"bias__{k}": np.asarray(res.bias[k], dtype="float32") for k in srcs},
         **{f"obsint__{k}": np.asarray(res.obs_interp[k], dtype="float32") for k in srcs},
         **{f"obsmean__{k}": np.asarray(res.obs_mean[k], dtype="float32") for k in mean_srcs},
+        **{f"obsfull__{k}": np.asarray(res.obs_full[k], dtype="float32") for k in full_srcs},
     )
 
 
@@ -139,6 +147,11 @@ def omb_cache_update(key_dir: Path, res) -> None:
                 part[f"obsint__{k}"] = np.concatenate([c[f"obsint__{k}"][:, keep], part[f"obsint__{k}"]], axis=1)
             for k in list(part["mean_srcs"]):
                 part[f"obsmean__{k}"] = np.concatenate([c[f"obsmean__{k}"][keep], part[f"obsmean__{k}"]], axis=0)
+            for k in list(part.get("full_srcs", [])):
+                if f"obsfull__{k}" in c:
+                    part[f"obsfull__{k}"] = np.concatenate([c[f"obsfull__{k}"][keep], part[f"obsfull__{k}"]], axis=0)
+            if "cloud_base" in c and "cloud_base" in part:
+                part["cloud_base"] = np.concatenate([c["cloud_base"][keep], part["cloud_base"]])
     order = np.argsort(part["time_cams"])
     part["time_cams"] = part["time_cams"][order]
     part["cams_beta"] = part["cams_beta"][:, order]
@@ -147,6 +160,10 @@ def omb_cache_update(key_dir: Path, res) -> None:
         part[f"obsint__{k}"] = part[f"obsint__{k}"][:, order]
     for k in list(part["mean_srcs"]):
         part[f"obsmean__{k}"] = part[f"obsmean__{k}"][order]
+    for k in list(part.get("full_srcs", [])):
+        part[f"obsfull__{k}"] = part[f"obsfull__{k}"][order]
+    if "cloud_base" in part:
+        part["cloud_base"] = part["cloud_base"][order]
     Path(key_dir).mkdir(parents=True, exist_ok=True)
     np.savez(p, **part)
 
@@ -169,17 +186,22 @@ def omb_cache_aggregate(key_dir: Path):
         b = c[f"bias__{k}"].astype("float64")
         oi = c[f"obsint__{k}"].astype("float64")
         n_cams = b.shape[1]
-        min_obs = max(3, min(int(round(3 * 24 / 3.0)), n_cams // 2))   # same gate as compute_omb (hourly_res=3)
-        keep = np.sum(np.isfinite(b), axis=1) >= min_obs
+        # period filter: keep altitudes valid in >= 25% of the CAMS steps (matches compute_omb
+        # valid_frac_min default). valid_frac is returned for the figure's second x-axis.
+        valid_frac = (np.sum(np.isfinite(b), axis=1) / n_cams
+                      if n_cams else np.zeros(b.shape[0]))
+        keep = valid_frac >= 0.25
         b_filt = np.where(keep[:, None], b, np.nan)
+        oi_filt = np.where(keep[:, None], oi, np.nan)
         with np.errstate(invalid="ignore"):
             rms_profile = np.sqrt(np.nanmean(b_filt**2, axis=1))
-            prof[k] = dict(obs_med=np.nanmedian(oi, axis=1),
-                           obs_p25=np.nanpercentile(oi, 25, axis=1),
-                           obs_p75=np.nanpercentile(oi, 75, axis=1),
+            prof[k] = dict(obs_med=np.nanmedian(oi_filt, axis=1),
+                           obs_p25=np.nanpercentile(oi_filt, 25, axis=1),
+                           obs_p75=np.nanpercentile(oi_filt, 75, axis=1),
                            bias_med=np.nanmedian(b_filt, axis=1),
                            bias_p25=np.nanpercentile(b_filt, 25, axis=1),
-                           bias_p75=np.nanpercentile(b_filt, 75, axis=1))
+                           bias_p75=np.nanpercentile(b_filt, 75, axis=1),
+                           valid_frac=valid_frac)
             scalar[k] = dict(mean_bias=float(np.nanmean(b_filt)),
                              median_bias=float(np.nanmedian(b_filt)),
                              rms=float(np.nanmean(rms_profile)),
@@ -188,9 +210,14 @@ def omb_cache_aggregate(key_dir: Path):
         bias[k] = b
     for k in mean_srcs:
         obs_mean[k] = c[f"obsmean__{k}"].astype("float64")
+    obs_full = {k: c[f"obsfull__{k}"].astype("float64")
+                for k in list(c.get("full_srcs", [])) if f"obsfull__{k}" in c}
+    cloud_base = (c["cloud_base"].astype("float64") if "cloud_base" in c
+                  else np.full(c["time_cams"].size, np.nan))
     with np.errstate(invalid="ignore"):
         cams_med = np.nanmedian(cams_beta, axis=1)
     return OmBResult(wavelength=float(c["wavelength"]) if "wavelength" in c else float("nan"),
                      range_mean=c["range_mean"], z_cams=c["z_cams"], time_cams=c["time_cams"],
                      cams_beta=cams_beta, cams_med=cams_med, obs_mean=obs_mean,
-                     obs_interp=obs_interp, bias=bias, prof=prof, scalar=scalar)
+                     obs_interp=obs_interp, bias=bias, prof=prof, scalar=scalar,
+                     obs_full=obs_full, cloud_base=cloud_base)

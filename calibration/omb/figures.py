@@ -12,6 +12,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.dates as mdates  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.colors as mcolors  # noqa: E402
 import numpy as np  # noqa: E402
 
 from .omb import OmBResult  # noqa: E402
@@ -30,14 +31,28 @@ def plot_omb_station(res: OmBResult, instrument: str, save_path, *, title: str =
     fig = plt.figure(figsize=(16, 9))
     gs = fig.add_gridspec(2, 3)
 
-    # (0,0:2) observation pcolor (our-calibrated), log10
+    # (0,0:2) observation pcolor -- ALL data, with a flagged-data mask + cloud detections
     ax = fig.add_subplot(gs[0, 0:2])
-    obs = res.obs_mean["ours"].T * unit
+    full = res.obs_full.get("ours") if getattr(res, "obs_full", None) else None
+    scr = res.obs_mean["ours"]
+    base = full if full is not None else scr                    # (n_cams, n_r)
+    obs = base.T * unit
     pcm = ax.pcolormesh(t, res.range_mean, np.log10(np.clip(obs, 1e-2, None)),
                         cmap="jet", vmin=-2, vmax=2, shading="auto")
+    if full is not None:
+        # where data is present but was flagged out of the comparison (cloud / SNR /
+        # morphology) -> translucent grey wash so the kept (coloured) data stands out.
+        wash = np.where((np.isfinite(full) & ~np.isfinite(scr)).T, 1.0, np.nan)
+        ax.pcolormesh(t, res.range_mean, wash, shading="auto", alpha=0.45,
+                      cmap=mcolors.ListedColormap(["#555555"]), vmin=0, vmax=1)
+    cb = getattr(res, "cloud_base", None)
+    if cb is not None and np.size(cb) and np.any(np.isfinite(np.asarray(cb, dtype=float))):
+        ax.scatter(t, np.asarray(cb, dtype=float), s=9, marker="v", facecolors="white",
+                   edgecolors="black", linewidths=0.4, zorder=5, label="cloud base")
+        ax.legend(loc="upper right", fontsize=7, framealpha=0.6)
     ax.set_ylim(0, range_top); ax.set_ylabel("Range AGL [m]")
-    ax.set_title(f"{instrument} observation (v2 C_L), {res.wavelength:.0f} nm")
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%d"))
+    ax.set_title(f"{instrument} obs (v2 C_L; grey = flagged), {res.wavelength:.0f} nm")
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%d-%b"))
     fig.colorbar(pcm, ax=ax, label=r"log$_{10}\beta_{att}$ [Mm$^{-1}$sr$^{-1}$]")
 
     # (0,2) median profiles
@@ -52,15 +67,23 @@ def plot_omb_station(res: OmBResult, instrument: str, save_path, *, title: str =
     ax.plot(res.cams_med * unit, z, "-", color=_COL["cams"], lw=2, label="CAMS")
     ax.set_ylim(0, range_top); ax.set_xlim(left=0)
     ax.set_xlabel(r"$\beta_{att}$ [Mm$^{-1}$sr$^{-1}$]"); ax.set_ylabel("Altitude ASL [m]")
-    ax.set_title("Median profiles"); ax.grid(alpha=0.3); ax.legend(fontsize=8)
+    ax.set_title("Median profiles"); ax.grid(alpha=0.3); ax.legend(fontsize=8, loc="upper right")
+    # second x-axis (top): % valid data vs altitude (availability after SNR + cloud screen)
+    vf = res.prof.get("ours", {}).get("valid_frac")
+    if vf is not None:
+        axv = ax.twiny()
+        axv.plot(np.asarray(vf) * 100.0, z, color="0.45", lw=1.1, ls=":", label="% valid")
+        axv.set_xlim(0, 100); axv.set_ylim(0, range_top)
+        axv.set_xlabel("% valid data", color="0.4"); axv.tick_params(axis="x", colors="0.4")
+        axv.axvline(25, color="0.7", lw=0.7, ls="--")  # 25% keep threshold
 
     # (1,0:2) CAMS pcolor
     ax = fig.add_subplot(gs[1, 0:2])
     pcm = ax.pcolormesh(t, z, np.log10(np.clip(res.cams_beta * unit, 1e-2, None)),
                         cmap="jet", vmin=-2, vmax=2, shading="auto")
-    ax.set_ylim(0, range_top); ax.set_ylabel("Altitude ASL [m]"); ax.set_xlabel("Day of month")
+    ax.set_ylim(0, range_top); ax.set_ylabel("Altitude ASL [m]"); ax.set_xlabel("Date")
     ax.set_title(f"CAMS aerosol backscatter at {res.wavelength:.0f} nm")
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%d"))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%d-%b"))
     fig.colorbar(pcm, ax=ax, label=r"log$_{10}\beta_{att}$ [Mm$^{-1}$sr$^{-1}$]")
 
     # (1,2) bias profiles
