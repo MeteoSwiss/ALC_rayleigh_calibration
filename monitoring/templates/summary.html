@@ -1,6 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Calibration monitor — summary{% endblock %}
 {% block headerextra %}
+  {% if periods %}<select id="period-nav" class="navfilter" title="Time period — switch the whole summary to this window">
+    {% for p in periods %}<option value="{{ 'index.html' if p.key == 'all' else 'index_' + p.key + '.html' }}"{% if p.key == current_period %} selected{% endif %}>{{ p.label }}</option>{% endfor %}
+  </select>{% endif %}
   <select id="f-country" class="navfilter" title="Filter by country">
     <option value="">All countries</option>
     {% for c in countries %}<option value="{{ c }}">{{ c }}</option>{% endfor %}

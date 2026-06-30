@@ -10,6 +10,7 @@
 // come from #station-nav (data-prev / data-next).
 (function () {
   var active = null;  // viewer that the arrow keys control (last interacted with)
+  var calendars = [];  // every calendar's controller, so the period selector can window them all
 
   function pad(n) { return (n < 10 ? "0" : "") + n; }
 
@@ -44,6 +45,7 @@
     });
     var start = Math.max(0, months.length - CAL_WIN);   // default: the latest 3 months
     var ctl = { selDate: null };
+    var pstart = null, pend = null;   // active period window (YYYYMMDD); set by the header selector
 
     function monthHtml(ym) {
       var yy = +ym.slice(0, 4), mm = +ym.slice(4, 6) - 1;
@@ -56,6 +58,7 @@
       for (var dd = 1; dd <= nd; dd++) {
         var ds = "" + yy + pad(mm + 1) + pad(dd);
         var cls = (ds in info) ? ("avail " + (info[ds] ? "good" : "rejected")) : "none";
+        if ((pstart && ds < pstart) || (pend && ds > pend)) cls += " pout";   // outside the period window
         h += '<div class="cal-day ' + cls + '" data-date="' + ds + '">' + dd + "</div>";
       }
       return h + "</div></div>";
@@ -87,6 +90,12 @@
       }
       render();
     };
+    ctl.setWindow = function (s, e) {   // dim days outside [s,e] and scroll to the period's end month
+      pstart = s || null; pend = e || null;
+      if (pend) { var mi = months.indexOf(pend.slice(0, 6)); if (mi >= 0) start = Math.max(0, mi - (CAL_WIN - 1)); }
+      render();
+    };
+    calendars.push(ctl);
     render();
     return ctl;
   }
@@ -221,6 +230,11 @@
     else if (e.key === "2") { active.quickFlag(1); e.preventDefault(); }          // cloud contamination
     else if (e.key === "3") { active.quickFlag(2); e.preventDefault(); }          // low signal (condensation?)
   });
+
+  // Let the header period selector (rangesync.js) window every calendar at once.
+  window.__diagSetWindow = function (s, e) {
+    calendars.forEach(function (c) { try { c.setWindow(s, e); } catch (err) {} });
+  };
 
   Array.prototype.forEach.call(document.querySelectorAll(".diag"), buildViewer);
 })();

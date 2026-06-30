@@ -41,10 +41,13 @@
   <script src="{{ base }}assets/table-sort.js?v={{ asset_v }}"></script>
   <script src="{{ base }}assets/paginate.js?v={{ asset_v }}"></script>
   {% if search_json %}<script type="application/json" id="search-index">{{ search_json | safe }}</script>{% endif %}
+  {% if periods_json %}<script type="application/json" id="period-index">{{ periods_json | safe }}</script>{% endif %}
   <script src="{{ base }}assets/filter.js?v={{ asset_v }}"></script>
   <script src="{{ base }}assets/qcflag.js?v={{ asset_v }}"></script>
   <script src="{{ base }}assets/diag.js?v={{ asset_v }}"></script>
   <script src="{{ base }}assets/histlink.js?v={{ asset_v }}"></script>
   <script src="{{ base }}assets/search.js?v={{ asset_v }}"></script>
+  <!-- Period selector: loads last so paginate (_repaginate) + diag (calendar hook) are ready. -->
+  <script src="{{ base }}assets/rangesync.js?v={{ asset_v }}"></script>
 </body>
 </html>

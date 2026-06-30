@@ -2,7 +2,10 @@
 {% block title %}{{ key }} — calibration{% endblock %}
 {% block headerextra %}<a class="back" href="{{ base }}index.html">&larr; summary</a>
 {% if prev_station %}<a class="back" href="{{ prev_station }}" title="Previous station (Up arrow)">&uarr; prev station</a>{% endif %}
-{% if next_station %}<a class="back" href="{{ next_station }}" title="Next station (Down arrow)">&darr; next station</a>{% endif %}{% endblock %}
+{% if next_station %}<a class="back" href="{{ next_station }}" title="Next station (Down arrow)">&darr; next station</a>{% endif %}
+{% if periods %}<select id="period-sel" class="navfilter" title="Time window — zooms every chart, the calibration list and the OmB/sensitivity panels">
+  {% for p in periods %}<option value="{{ p.key }}"{% if p.key == 'all' %} selected{% endif %}>{{ p.label }}</option>{% endfor %}
+</select>{% endif %}{% endblock %}
 
 {% block content %}
 <div id="station-nav" data-prev="{{ prev_station }}" data-next="{{ next_station }}" hidden></div>
@@ -67,7 +70,7 @@
     <thead><tr><th>Date</th><th>Flag</th><th>C_L</th><th>Uncertainty</th><th>Extra</th><th>Message</th></tr></thead>
     <tbody>
     {% for r in b.recent %}
-      <tr>
+      <tr data-date="{{ r.date }}">
         <td>{% if r.date in b.diag_dates %}<a class="diaglink" data-date="{{ r.date }}" href="#diag-{{ b.method }}">{{ r.date }}</a>{% else %}{{ r.date }}{% endif %}</td>
         <td><span class="dot" style="background:{{ flag_color(r.flag) }}"></span>
             <a class="flaglink" href="{{ base }}flags.html#flag-{{ flag_anchor(r.flag) }}">{{ r.flag }}</a>
@@ -92,15 +95,21 @@
 
 {% if ombsens and ombsens.omb %}
 <section class="card">
-  <h2>Observation &#8722; Background (CAMS) <span class="muted">— calibrated backscatter vs CAMS model over the period</span></h2>
-  <a href="{{ ombsens.omb }}" target="_blank" rel="noopener"><img class="diag-img" src="{{ ombsens.omb }}" alt="Observation minus background (CAMS) diagnostic" style="max-width:100%;height:auto;"></a>
+  <h2>Observation &#8722; Background (CAMS) <span class="muted">— calibrated backscatter vs CAMS model over the selected window</span></h2>
+  <a href="{{ ombsens.omb }}" target="_blank" rel="noopener"><img class="diag-img" data-period-img
+       src="{{ ombsens.omb }}" data-src-all="{{ ombsens.omb }}"
+       {%- if ombsens.omb_periods %}{% for pk, url in ombsens.omb_periods.items() %} data-src-{{ pk }}="{{ url }}"{% endfor %}{% endif %}
+       alt="Observation minus background (CAMS) diagnostic" style="max-width:100%;height:auto;"></a>
 </section>
 {% endif %}
 
 {% if ombsens and ombsens.sens %}
 <section class="card">
   <h2>Instrument sensitivity / detection limit <span class="muted">— ICAO detection altitude &amp; nighttime noise floor</span></h2>
-  <a href="{{ ombsens.sens }}" target="_blank" rel="noopener"><img class="diag-img" src="{{ ombsens.sens }}" alt="Instrument sensitivity / detection limit diagnostic" style="max-width:100%;height:auto;"></a>
+  <a href="{{ ombsens.sens }}" target="_blank" rel="noopener"><img class="diag-img" data-period-img
+       src="{{ ombsens.sens }}" data-src-all="{{ ombsens.sens }}"
+       {%- if ombsens.sens_periods %}{% for pk, url in ombsens.sens_periods.items() %} data-src-{{ pk }}="{{ url }}"{% endfor %}{% endif %}
+       alt="Instrument sensitivity / detection limit diagnostic" style="max-width:100%;height:auto;"></a>
 </section>
 {% endif %}
 {% endblock %}

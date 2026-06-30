@@ -19,7 +19,7 @@ import pandas as pd
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from plotly.offline import get_plotlyjs
 
-from monitoring import charts, config, metrics
+from monitoring import charts, config, index, metrics, periods as periods_mod
 
 _TEMPLATES = Path(__file__).parent / "templates"
 _STATIC = Path(__file__).parent / "static"
@@ -27,7 +27,7 @@ _STATIC = Path(__file__).parent / "static"
 # Project JS/CSS that get a cache-busting ?v=<hash> so browsers always pick up changes (Plotly is
 # stable + large -> left unversioned). Same list is used to copy them into the site.
 _VERSIONED_ASSETS = ("style.css", "table-sort.js", "paginate.js", "filter.js", "qcflag.js",
-                     "diag.js", "histlink.js", "search.js")
+                     "diag.js", "histlink.js", "search.js", "rangesync.js")
 
 
 def _asset_version() -> str:
@@ -368,10 +368,27 @@ def _method_block(key, method, cal, kal, series, diags=None, op_all=None, oldray
     )
 
 
-def _ombsens_keystats(fullcal_dir) -> pd.DataFrame:
-    """Scan the fullcal dir for the per-stream OmB / sensitivity one-row summaries written by the
-    runner and roll them up into a per-key table for the two new summary maps. Only a subset of
-    streams have these files (a subset run is still populating them), so missing files are skipped.
+def _period_row(df: pd.DataFrame, period: str):
+    """Pick the summary row matching *period* from a (possibly period-keyed) OmB/sens CSV.
+
+    Part 3 writes one row per period (a ``period`` column = 'all'/'y2025'/'last90'/…); older single-row
+    CSVs have no ``period`` column → the lone row is used for every window (full-archive fallback). When
+    a period has no dedicated row, fall back to the 'all' row, then to the first row."""
+    if "period" not in df.columns:
+        return df.iloc[0]
+    pcol = df["period"].astype(str)
+    for want in (str(period), "all"):
+        m = df[pcol == want]
+        if len(m):
+            return m.iloc[0]
+    return df.iloc[0]
+
+
+def _ombsens_keystats(fullcal_dir, period: str = "all") -> pd.DataFrame:
+    """Scan the fullcal dir for the per-stream OmB / sensitivity summaries written by the runner and
+    roll them up into a per-key table for the two summary maps. Only a subset of streams have these
+    files (a subset run is still populating them), so missing files are skipped. ``period`` selects the
+    matching row from the period-keyed CSVs (full-archive fallback for legacy single-row files).
 
       <key>_omb.csv  -> omb_bias = median_bias_ours * 1e6   [Mm^-1 sr^-1]
       <key>_sens.csv -> icao_alt = icao_alt_200             [m] (blank when never detected)
@@ -391,7 +408,7 @@ def _ombsens_keystats(fullcal_dir) -> pd.DataFrame:
             continue
         if not len(df):
             continue
-        v = pd.to_numeric(df.iloc[0].get("median_bias_ours"), errors="coerce")
+        v = pd.to_numeric(_period_row(df, period).get("median_bias_ours"), errors="coerce")
         rows.setdefault(key, {})["omb_bias"] = (float(v) * 1e6) if np.isfinite(v) else np.nan
     for sens in root.glob("*/*_sens.csv"):
         key = sens.parent.name
@@ -401,7 +418,7 @@ def _ombsens_keystats(fullcal_dir) -> pd.DataFrame:
             continue
         if not len(df):
             continue
-        v = pd.to_numeric(df.iloc[0].get("icao_alt_200"), errors="coerce")
+        v = pd.to_numeric(_period_row(df, period).get("icao_alt_200"), errors="coerce")
         rows.setdefault(key, {})["icao_alt"] = float(v) if np.isfinite(v) else np.nan
     if not rows:
         return pd.DataFrame(columns=["key", "omb_bias", "icao_alt"])
@@ -417,32 +434,59 @@ def _stage_ombsens_pngs(fullcal_dir, key, out_dir: Path) -> dict:
     out: dict = {}
     if not fullcal_dir:
         return out
+    base = Path(fullcal_dir) / key
+
+    def _url_for(fname):
+        return (f"{config.IMG_BASE_URL}ombsens/{key}/{fname}" if config.IMG_BASE_URL
+                else f"../ombsens/{key}/{fname}")
+
+    def _stage(fname):
+        """Stage a local PNG if present and return its URL. In bucket mode the URL is emitted even when
+        the local PNG is gone (it lives in the bucket); otherwise the file must exist on disk."""
+        src = base / fname
+        if src.exists():
+            try:
+                _materialize(src, out_dir / "ombsens" / key / fname, _DIAG_LINK_MODE)
+            except OSError:
+                if not config.IMAGES_IN_BUCKET:
+                    return None
+        elif not config.IMAGES_IN_BUCKET:
+            return None
+        return _url_for(fname)
+
     for kind in ("omb", "sens"):
-        src = Path(fullcal_dir) / key / f"{key}_{kind}.png"
-        fname = f"{key}_{kind}.png"
-        if config.IMAGES_IN_BUCKET:
-            # Bucket mode: the panel image lives in the bucket, so gate on the persistent
-            # <key>_{kind}.csv (kept) rather than the .png (which may have been deleted). Still try to
-            # stage a local PNG if one is present so a fresh image gets published, but emit the bucket
-            # URL regardless so the panel shows even with the PNG gone.
-            if not (Path(fullcal_dir) / key / f"{key}_{kind}.csv").exists():
-                continue
-            if src.exists():
-                try:
-                    _materialize(src, out_dir / "ombsens" / key / fname, _DIAG_LINK_MODE)
-                except OSError:
-                    pass
-            out[kind] = f"{config.IMG_BASE_URL}ombsens/{key}/{fname}"
+        # Bucket mode gates on the persistent CSV (PNGs may have been pruned); else gate on the PNG.
+        csv_path = base / f"{key}_{kind}.csv"
+        if config.IMAGES_IN_BUCKET and not csv_path.exists():
             continue
-        if not src.exists():
-            continue
-        dst = out_dir / "ombsens" / key / fname
-        try:
-            _materialize(src, dst, _DIAG_LINK_MODE)
-        except OSError:
-            continue
-        out[kind] = (f"{config.IMG_BASE_URL}ombsens/{key}/{fname}" if config.IMG_BASE_URL
-                     else f"../ombsens/{key}/{fname}")
+        all_url = _stage(f"{key}_{kind}.png")          # all-time keeps the legacy <key>_<kind>.png name
+        if all_url:
+            out[kind] = all_url
+        # Per-period panels: <key>_<kind>_<period>.png. In bucket mode the period list comes from the CSV
+        # (PNGs may be gone); on a local site it comes from globbing the staged PNGs.
+        per: dict = {}
+        if config.IMAGES_IN_BUCKET and csv_path.exists():
+            try:
+                with open(csv_path, newline="", encoding="utf-8") as f:
+                    import csv as _csv
+                    for r in _csv.DictReader(f):
+                        pk = (r.get("period") or "").strip()
+                        if pk and pk != "all":
+                            u = _stage(f"{key}_{kind}_{pk}.png")
+                            if u:
+                                per[pk] = u
+            except OSError:
+                pass
+        else:
+            prefix = f"{key}_{kind}_"
+            for png in sorted(base.glob(f"{prefix}*.png")):
+                pk = png.name[len(prefix):-4]          # strip the '<key>_<kind>_' prefix and '.png'
+                if pk and pk != "all":
+                    u = _stage(png.name)
+                    if u:
+                        per[pk] = u
+        if per:
+            out[f"{kind}_periods"] = per
     return out
 
 
@@ -494,7 +538,9 @@ def _render_one_station(key, ctx) -> str:
     html = ctx.tmpl.render(base="../", logo=ctx.logo, key=key, meta=meta,
                            blocks=blocks, overlay=overlay, search_json=ctx.search_json,
                            prev_station=prev_station, next_station=next_station,
-                           monitoring=monitoring, ombsens=ombsens)
+                           monitoring=monitoring, ombsens=ombsens,
+                           periods=getattr(ctx, "periods", None),
+                           periods_json=getattr(ctx, "periods_json", None))
     (ctx.out_dir / "stations" / f"{key}.html").write_text(html, encoding="utf-8")
     return key
 
@@ -506,7 +552,8 @@ def _render_one_station(key, ctx) -> str:
 _WORKER_CTX = None
 
 
-def _render_worker_init(db_path, out_dir, fullcal_dir, opcoeff_csv, oldray_dir, v13_dir, logo, search_json):
+def _render_worker_init(db_path, out_dir, fullcal_dir, opcoeff_csv, oldray_dir, v13_dir, logo,
+                        search_json, periods_json):
     global _WORKER_CTX
     if _WORKER_CTX is not None:
         return  # fork (Linux/CSCS): the worker inherited the parent's ctx -> no reload/re-index
@@ -522,38 +569,30 @@ def _render_worker_init(db_path, out_dir, fullcal_dir, opcoeff_csv, oldray_dir, 
         tmpl=_env().get_template("station.html"),
         out_dir=Path(out_dir), fullcal_dir=(fullcal_dir or None),
         all_keys=all_keys, nav_idx={k: i for i, k in enumerate(all_keys)},
-        logo=(logo or None), search_json=search_json)
+        logo=(logo or None), search_json=search_json,
+        periods=(json.loads(periods_json) if periods_json else None),
+        periods_json=(periods_json or None))
 
 
 def _render_worker_task(key):
     return _render_one_station(key, _WORKER_CTX)
 
 
-def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
-               flagex_dir=None, opcoeff_csv=None, only_keys=None, oldray_dir=None,
-               v13_dir=None, fullcal_dir=None, workers: int | None = None) -> dict:
-    out_dir = Path(out_dir)
-    (out_dir / "stations").mkdir(parents=True, exist_ok=True)
-    logo = _write_assets(out_dir)
-    env = _env()
-
-    cal, series, st, kal, diag = metrics.load_frames(db_path)
-    summary = metrics.network_summary(cal, series, st)
-    flags = metrics.flag_distribution(cal)
-    watch = metrics.watchlist(cal, st)
-    keystats = _keystats(series, st)
-    diag_by = _copy_diagnostics(diag, cal, out_dir)
-
-    # Operational calibration constant from the L2 files (optional): two ratio maps + per-station
-    # black line on the time series.
-    op_all = _load_opcoeff(opcoeff_csv)
-    oldray_all = _load_oldray(oldray_dir)
-    v13_all = _load_oldray(v13_dir)
-    keystats = keystats.merge(_opcoeff_ratios(cal, op_all, st), on="key", how="left")
-    # OmB-vs-CAMS bias + ICAO detection altitude from the per-stream <key>_omb.csv / <key>_sens.csv
-    # one-row summaries (subset run; missing files are skipped). Merged onto keystats so the two new
-    # maps reuse the network_map/ratio_map customdata + per-type-symbol machinery.
-    keystats = keystats.merge(_ombsens_keystats(fullcal_dir), on="key", how="left")
+def _render_summary_page(env, logo, cal_w, st, fullcal_dir, op_all, search_json,
+                         countries, types, periods, periods_json, current_key, out_path):
+    """Render ONE summary page (index.html or index_<period>.html) from a date-windowed
+    ``calibrations`` frame ``cal_w``. Every aggregate (KPIs, maps, success-by-type, flag distribution,
+    C_L boxes, per-station IQR, watchlist, series table) is recomputed over the window. The per-station
+    ``series`` aggregates are rebuilt in-memory from ``cal_w`` (not read from the prebuilt table) so the
+    window is honoured. The OmB-bias / ICAO maps read the row matching ``current_key`` (period-keyed once
+    the runner emits per-period summaries; full-archive fallback otherwise). Returns its summary dict."""
+    series_w = index._series_aggregates(cal_w).merge(st[["key", "itype"]], on="key", how="left")
+    summary = metrics.network_summary(cal_w, series_w, st)
+    flags = metrics.flag_distribution(cal_w)
+    watch = metrics.watchlist(cal_w, st)
+    keystats = _keystats(series_w, st)
+    keystats = keystats.merge(_opcoeff_ratios(cal_w, op_all, st), on="key", how="left")
+    keystats = keystats.merge(_ombsens_keystats(fullcal_dir, period=current_key), on="key", how="left")
 
     summary_figs = {
         "map_theo": charts.fig_to_div(charts.ratio_map(
@@ -568,24 +607,51 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
         "success_type": charts.fig_to_div(charts.success_by_type_method(summary["by_type_method"]), "fig-stype"),
         "flag_dist_rayleigh": charts.fig_to_div(charts.flag_distribution_bar(flags, "rayleigh"), "fig-flags-r"),
         "flag_dist_cloud": charts.fig_to_div(charts.flag_distribution_bar(flags, "cloud"), "fig-flags-c"),
-        "cl_type_abs": charts.fig_to_div(charts.value_by_type_method_box(series), "fig-cltype"),
-        "cl_type_pct": charts.fig_to_div(charts.value_pct_theoretical_box(series), "fig-cltype-pct"),
+        "cl_type_abs": charts.fig_to_div(charts.value_by_type_method_box(series_w), "fig-cltype"),
+        "cl_type_pct": charts.fig_to_div(charts.value_pct_theoretical_box(series_w), "fig-cltype-pct"),
     }
     # Per-station median C_L with IQR (Q1..Q3 of that station's successful daily values), one ranked
     # plot per instrument type. Pools both methods per station -- C_L is the same physical quantity.
     key_itype = dict(zip(st["key"], st["itype"]))
-    okc = cal[(cal["success"] == 1) & (cal["cal_value"] > 0)].copy()
+    okc = cal_w[(cal_w["success"] == 1) & (cal_w["cal_value"] > 0)].copy()
     okc["itype"] = okc["key"].map(key_itype)
     okc = okc.dropna(subset=["itype"])
     gb = okc.groupby(["itype", "key"])["cal_value"]
     sta_iqr = pd.DataFrame({"med": gb.median(), "q1": gb.quantile(0.25),
                             "q3": gb.quantile(0.75), "n": gb.size()}).reset_index()
-    # carry each station's country so the nav country-filter can subset the bars client-side
     sta_iqr["country"] = sta_iqr["key"].map(
         dict(zip(st["key"], st["country"])) if "country" in st.columns else {}).fillna("")
     cl_iqr_figs = [(t, charts.fig_to_div(charts.cl_median_iqr_by_station(sta_iqr[sta_iqr["itype"] == t], t),
                                          f"fig-cliqr-{t}"))
                    for t in config.TYPE_ORDER if (sta_iqr["itype"] == t).any()]
+
+    html = env.get_template("summary.html").render(
+        base="", logo=logo, summary=summary, figs=summary_figs, cl_iqr=cl_iqr_figs,
+        watch=watch.to_dict("records"), rows=_series_table_rows(cal_w, series_w, st),
+        countries=countries, types=types, search_json=search_json,
+        periods=periods, periods_json=periods_json, current_period=current_key)
+    out_path.write_text(html, encoding="utf-8")
+    return summary
+
+
+def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
+               flagex_dir=None, opcoeff_csv=None, only_keys=None, oldray_dir=None,
+               v13_dir=None, fullcal_dir=None, workers: int | None = None) -> dict:
+    out_dir = Path(out_dir)
+    (out_dir / "stations").mkdir(parents=True, exist_ok=True)
+    logo = _write_assets(out_dir)
+    env = _env()
+
+    cal, series, st, kal, diag = metrics.load_frames(db_path)
+    diag_by = _copy_diagnostics(diag, cal, out_dir)
+
+    # Operational calibration constant from the L2 files (optional): two ratio maps + per-station
+    # black line on the time series. Loaded once; reused by every per-period summary page below.
+    op_all = _load_opcoeff(opcoeff_csv)
+    oldray_all = _load_oldray(oldray_dir)
+    v13_all = _load_oldray(v13_dir)
+    # NB: the summary aggregates + figures (KPIs, maps, boxes, IQR, watchlist, series table) are now
+    # built per time-period in _render_summary_page(), so the page set can re-window cheaply.
 
     # Search index for the nav-bar station search (name + WIGOS id + key, all matchable).
     search_records = []
@@ -605,12 +671,35 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
     types = [t for t in config.TYPE_ORDER if t in set(st["itype"])] + \
             sorted(set(st["itype"]) - set(config.TYPE_ORDER) - {"Unknown"}) + \
             (["Unknown"] if "Unknown" in set(st["itype"]) else [])
-    summary_html = env.get_template("summary.html").render(
-        base="", logo=logo, summary=summary, figs=summary_figs, cl_iqr=cl_iqr_figs,
-        watch=watch.to_dict("records"), rows=_series_table_rows(cal, series, st),
-        countries=countries, types=types, search_json=search_json,
-    )
-    (out_dir / "index.html").write_text(summary_html, encoding="utf-8")
+    # --- Time-period set (auto-derived years; active vs frozen) ----------------
+    # All-time + each calendar year (first..current) + rolling last-N-day windows. The current year,
+    # the rolling windows and all-time are rebuilt every run; a past complete year is built ONCE and
+    # then skipped (its data can no longer change once the backfill window has passed). See periods.py.
+    as_of = str(cal["date"].max()) if len(cal) else None
+    date_min = str(cal["date"].min()) if len(cal) else None
+    backfill = int(os.environ.get("ALC_BACKFILL_DAYS", "5") or "5")
+    period_objs = periods_mod.build_periods(date_min, as_of, backfill_days=backfill)
+    period_list = periods_mod.periods_to_json(period_objs)
+    periods_json = json.dumps(period_list, ensure_ascii=False)
+
+    summary = None
+    n_built = 0
+    for p in period_objs:
+        out_name = "index.html" if p.key == "all" else f"index_{p.key}.html"
+        out_path = out_dir / out_name
+        if not p.active and out_path.exists():
+            continue  # frozen past year, already built -> never recomputed in real time
+        cal_w = periods_mod.filter_window(cal, p.start, p.end)
+        s = _render_summary_page(env, logo, cal_w, st, fullcal_dir, op_all, search_json,
+                                 countries, types, period_list, periods_json, p.key, out_path)
+        n_built += 1
+        if p.key == "all":
+            summary = s
+    print(f"  summary pages: {n_built} built / {len(period_objs)} periods "
+          f"({sum(1 for p in period_objs if not p.active)} frozen)", flush=True)
+    if summary is None:   # 'all' is always active, but guard against an empty period set
+        sa = index._series_aggregates(cal).merge(st[["key", "itype"]], on="key", how="left")
+        summary = metrics.network_summary(cal, sa, st)
 
     # --- Flag explanation page (flags.html) ----------------------------------
     flag_examples = _copy_flag_examples(flagex_dir, out_dir)
@@ -637,7 +726,8 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
     ctx = SimpleNamespace(
         cal=cal, kal=kal, series=series, st=st, diag_by=diag_by, op_all=op_all,
         oldray_all=oldray_all, v13_all=v13_all, tmpl=station_tmpl, out_dir=out_dir, fullcal_dir=fullcal_dir,
-        all_keys=all_keys, nav_idx=nav_idx, logo=logo, search_json=search_json)
+        all_keys=all_keys, nav_idx=nav_idx, logo=logo, search_json=search_json,
+        periods=period_list, periods_json=periods_json)
 
     n_workers = int(workers) if workers else 1
     if n_workers > 1 and len(keys) > 1:
@@ -649,7 +739,7 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
         initargs = (str(db_path), str(out_dir), str(fullcal_dir) if fullcal_dir else "",
                     str(opcoeff_csv) if opcoeff_csv else "", str(oldray_dir) if oldray_dir else "",
                     str(v13_dir) if v13_dir else "",
-                    logo or "", search_json)
+                    logo or "", search_json, periods_json)
         # Expose the parent's ctx so fork()ed workers (Linux/CSCS) inherit it for free; spawn()ed
         # workers (Windows) ignore this and rebuild from initargs in the initializer.
         global _WORKER_CTX

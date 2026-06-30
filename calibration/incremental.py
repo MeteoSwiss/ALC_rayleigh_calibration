@@ -30,6 +30,58 @@ from typing import Optional
 
 import numpy as np
 
+
+# ----------------------------------------------------------------------------
+# date-window helpers (per-period aggregation off the SAME cache)
+# ----------------------------------------------------------------------------
+# The caches store one column per CAMS step (OmB) / per day (sensitivity). A period window is just a
+# boolean mask over those columns, so a per-period snapshot re-aggregates the existing cache with NO
+# extra L1 reads -- only the cheap nanmedian + figure save is repeated. ``start``/``end`` are inclusive
+# 'YYYYMMDD' strings (None = open). See monitoring/periods.py for the period set.
+
+def _ymd_to_dt64(ymd: str) -> "np.datetime64":
+    s = str(ymd)
+    return np.datetime64(f"{s[:4]}-{s[4:6]}-{s[6:8]}")
+
+
+def _window_mask(times, start: Optional[str], end: Optional[str]):
+    """Boolean mask selecting columns whose timestamp falls in [start, end] inclusive, or ``None``
+    when the window is open on both sides (caller then keeps every column = full period)."""
+    if start is None and end is None:
+        return None
+    t = np.asarray(times)
+    try:
+        t = t.astype("datetime64[ns]")
+    except (TypeError, ValueError):
+        return None  # unparseable timestamps -> fall back to the full period rather than crash
+    mask = np.ones(t.shape[0], dtype=bool)
+    if start is not None:
+        mask &= t >= _ymd_to_dt64(start)
+    if end is not None:
+        mask &= t < (_ymd_to_dt64(end) + np.timedelta64(1, "D"))   # inclusive of the whole end day
+    return mask
+
+
+def _subset_omb_cache(c: dict, mask) -> dict:
+    """Subset every time-indexed array of a loaded OmB cache dict by ``mask`` (a column selector)."""
+    c = dict(c)
+    srcs = list(c["srcs"])
+    mean_srcs = list(c["mean_srcs"]) if "mean_srcs" in c else srcs
+    c["time_cams"] = c["time_cams"][mask]
+    c["cams_beta"] = c["cams_beta"][:, mask]
+    for k in srcs:
+        c[f"bias__{k}"] = c[f"bias__{k}"][:, mask]
+        c[f"obsint__{k}"] = c[f"obsint__{k}"][:, mask]
+    for k in mean_srcs:
+        c[f"obsmean__{k}"] = c[f"obsmean__{k}"][mask]
+    for k in list(c.get("full_srcs", [])):
+        if f"obsfull__{k}" in c:
+            c[f"obsfull__{k}"] = c[f"obsfull__{k}"][mask]
+    if "cloud_base" in c:
+        c["cloud_base"] = c["cloud_base"][mask]
+    return c
+
+
 # ----------------------------------------------------------------------------
 # sensitivity
 # ----------------------------------------------------------------------------
@@ -67,19 +119,26 @@ def sens_cache_update(key_dir: Path, day_result) -> None:
              bmin_night=bn[:, order], bmin_day=bd[:, order], wavelength=wl)
 
 
-def sens_cache_aggregate(key_dir: Path):
-    """Full-period ``SensResult`` rebuilt from the cache (ext/mass/ICAO/sigma
-    recomputed from the per-day median), or ``None`` if the cache is empty."""
+def sens_cache_aggregate(key_dir: Path, start: Optional[str] = None, end: Optional[str] = None):
+    """``SensResult`` rebuilt from the cache over the [start, end] window (ext/mass/ICAO/sigma
+    recomputed from the per-day median), or ``None`` if the cache is empty / the window has no days.
+    ``start``/``end`` are inclusive 'YYYYMMDD' (None = full period)."""
     from calibration.sensitivity.network import SensResult, combine_sens_results
     p = sens_cache_path(key_dir)
     if not p.exists():
         return None
     c = np.load(p, allow_pickle=False)
-    if c["dates"].size == 0:
+    dates = c["dates"].astype("datetime64[D]")
+    if dates.size == 0:
         return None
+    bn, bd = c["bmin_night"], c["bmin_day"]
+    mask = _window_mask(dates, start, end)
+    if mask is not None:
+        if not mask.any():
+            return None
+        dates, bn, bd = dates[mask], bn[:, mask], bd[:, mask]
     seed = SensResult(wavelength=float(c["wavelength"]) if "wavelength" in c else float("nan"),
-                      z_ctr=c["z_ctr"], dates=c["dates"].astype("datetime64[D]"),
-                      bmin_night=c["bmin_night"], bmin_day=c["bmin_day"])
+                      z_ctr=c["z_ctr"], dates=dates, bmin_night=bn, bmin_day=bd)
     return combine_sens_results([seed])     # recomputes the derived fields
 
 
@@ -168,9 +227,11 @@ def omb_cache_update(key_dir: Path, res) -> None:
     np.savez(p, **part)
 
 
-def omb_cache_aggregate(key_dir: Path):
-    """Full-period ``OmBResult`` rebuilt from the cache, with scalar/prof recomputed
-    over all cached CAMS times exactly as compute_omb does, or ``None`` if empty."""
+def omb_cache_aggregate(key_dir: Path, start: Optional[str] = None, end: Optional[str] = None):
+    """``OmBResult`` rebuilt from the cache over the [start, end] window, with scalar/prof recomputed
+    over the in-window CAMS times exactly as compute_omb does, or ``None`` if empty / no in-window step.
+    ``start``/``end`` are inclusive 'YYYYMMDD' (None = full period). The window is a column mask on the
+    cached steps -- no extra L1 reads, just the cheap nanmedian over a subset."""
     from calibration.omb.omb import OmBResult
     p = omb_cache_path(key_dir)
     if not p.exists():
@@ -178,6 +239,11 @@ def omb_cache_aggregate(key_dir: Path):
     c = dict(np.load(p, allow_pickle=True))
     if c["time_cams"].size == 0:
         return None
+    mask = _window_mask(c["time_cams"], start, end)
+    if mask is not None:
+        if not mask.any():
+            return None
+        c = _subset_omb_cache(c, mask)
     srcs = list(c["srcs"])
     mean_srcs = list(c["mean_srcs"]) if "mean_srcs" in c else srcs
     cams_beta = c["cams_beta"]

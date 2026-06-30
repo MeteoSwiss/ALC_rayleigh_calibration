@@ -87,6 +87,7 @@ from calibration.flags import cloud_flag, flag_label, dominant_cloud_reject_flag
 from calibration.io.output import write_calibration_result, strip_calibration_method  # noqa: E402
 from calibration.plotting import plot_cloud_diagnostics_compact  # noqa: E402
 from monitoring.kalman import kalman_best_estimate  # noqa: E402  (self-contained leaf)
+from monitoring import periods as periods_mod  # noqa: E402  (period set: auto years + active/frozen)
 
 # PLOTS=1 emits a diagnostic PNG per SUCCESSFUL calibration (Rayleigh via plot_main, cloud via
 # plot_cloud_diagnostics_compact). Env-controlled so it propagates to every per-stream subprocess.
@@ -116,9 +117,9 @@ CLOUD_TYPES = {"CL31", "CL51", "CL61"}
 L2_ROOT = Path(os.environ.get("ALC_L2_DIR", "D:/E-PROFILE_L2_2026"))
 SENS_OMB_METHOD = {"CHM15k": "rayleigh", "CL61": "rayleigh", "Mini-MPL": "rayleigh",
                    "CL31": "cloud", "CL51": "cloud"}
-OMB_FIELDS = ["date_start", "date_end", "wavelength", "median_bias_ours",
+OMB_FIELDS = ["period", "date_start", "date_end", "wavelength", "median_bias_ours",
               "median_bias_op", "median_bias_ours_wv", "rms_ours", "n_obs"]
-SENS_FIELDS = ["date_start", "date_end", "wavelength", "icao_alt_200", "icao_alt_2000",
+SENS_FIELDS = ["period", "date_start", "date_end", "wavelength", "icao_alt_200", "icao_alt_2000",
                "icao_alt_4000", "sigma_night_3000", "n_days_night", "n_days_day"]
 
 CSV_FIELDS = ["date", "method", "flag", "cal_value", "uncertainty",
@@ -180,10 +181,64 @@ def _write_csv_atomic(path, fieldnames, rows):
     under the final name (which existence-only resume would wrongly treat as 'done')."""
     tmp = path.with_suffix(path.suffix + ".tmp")
     with open(tmp, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=fieldnames)
+        w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         w.writeheader()
         w.writerows(rows)
     os.replace(tmp, path)
+
+
+def _read_period_rows(path, fields):
+    """Existing per-period OmB/sens rows as {period: rowdict}. A legacy single-row CSV (no 'period'
+    column) maps its row to 'all' so it is preserved/updated. Missing/unreadable file -> {}."""
+    out = {}
+    if not Path(path).exists():
+        return out
+    try:
+        with open(path, newline="", encoding="utf-8") as f:
+            for r in csv.DictReader(f):
+                pk = (r.get("period") or "all").strip() or "all"
+                row = {k: r.get(k, "") for k in fields}
+                row["period"] = pk
+                out[pk] = row
+    except OSError:
+        return {}
+    return out
+
+
+def _emit_period_products(sdir, key, png_prefix, csv_name, fields, aggregate_fn, plot_fn,
+                          row_fn, title_fn, span_min, span_max):
+    """Render the per-period OmB/sensitivity products off the SAME cache (no extra L1 reads).
+
+    For each period in the auto-derived set (all-time + each calendar year + rolling windows), if it is
+    *active* (or a not-yet-built frozen past year), re-aggregate the cache over the window and render
+    ``<key>_<prefix>_<period>.png`` (all-time keeps the legacy name ``<key>_<prefix>.png``) plus a
+    period-keyed row in ``<key>_<csv>``. A *frozen* past year whose PNG + CSV row already exist is left
+    untouched (its data can no longer change), so the steady-state daily cost is bounded at the ~6 active
+    windows regardless of how many years accumulate. Returns the 'all' row (back-compat for the caller)."""
+    backfill = int(os.environ.get("ALC_BACKFILL_DAYS", "5") or "5")
+    plist = periods_mod.build_periods(span_min, span_max, backfill_days=backfill)
+    rows_by = _read_period_rows(sdir / csv_name, fields)
+    all_row = rows_by.get("all")
+    for p in plist:
+        png = sdir / (f"{key}_{png_prefix}.png" if p.key == "all"
+                      else f"{key}_{png_prefix}_{p.key}.png")
+        if not p.active and png.exists() and p.key in rows_by:
+            continue   # frozen past year, already rendered -> never recompute in real time
+        res_w = aggregate_fn(sdir, p.start, p.end)
+        if res_w is None:
+            continue
+        plot_fn(res_w, png, title_fn(p))
+        row = row_fn(res_w, p)
+        row["period"] = p.key
+        rows_by[p.key] = row
+        if p.key == "all":
+            all_row = row
+    order = [p.key for p in plist]
+    rows = [rows_by[k] for k in order if k in rows_by]
+    rows += [rows_by[k] for k in rows_by if k not in order]   # keep stragglers (e.g. dropped year)
+    if rows:
+        _write_csv_atomic(sdir / csv_name, fields, rows)
+    return all_row
 
 
 # --- Rayleigh (per night) ---------------------------------------------------
@@ -566,20 +621,33 @@ def _do_omb(s, start, end, kalman_rows):
     sdir = OUT / key
     from calibration.incremental import omb_cache_update, omb_cache_aggregate
     omb_cache_update(sdir, res)
-    res = omb_cache_aggregate(sdir)
-    plot_omb_station(res, itype, sdir / f"{key}_omb.png",
-                     title=f"{s.get('site', key)} ({s['wmo']}) — OmB "
-                           f"{start:%Y-%m-%d}..{end:%Y-%m-%d}")
-    sc = res.scalar
-    wv = sc.get("ours_wv", {}).get("median_bias", float("nan"))
-    row = dict(date_start=start.strftime("%Y%m%d"), date_end=end.strftime("%Y%m%d"),
-               wavelength=f"{data['wl']:.1f}",
-               median_bias_ours=f"{sc['ours']['median_bias']:.6e}",
-               median_bias_op=f"{sc['op']['median_bias']:.6e}",
-               median_bias_ours_wv=f"{wv:.6e}",
-               rms_ours=f"{sc['ours']['rms']:.6e}", n_obs=sc["ours"]["n_obs"])
-    _write_csv_atomic(sdir / f"{key}_omb.csv", OMB_FIELDS, [row])
-    return row
+    res_all = omb_cache_aggregate(sdir)               # full-period snapshot off the (updated) cache
+    if res_all is None:
+        return None
+    tc = np.asarray(res_all.time_cams)
+    span_min, span_max = str(tc.min())[:10].replace("-", ""), str(tc.max())[:10].replace("-", "")
+    site = s.get("site", key)
+
+    def _omb_row(rw, p):
+        sc = rw.scalar
+        wv = sc.get("ours_wv", {}).get("median_bias", float("nan"))
+        tcw = np.asarray(rw.time_cams)
+        return dict(date_start=(p.start or str(tcw.min())[:10].replace("-", "")),
+                    date_end=(p.end or str(tcw.max())[:10].replace("-", "")),
+                    wavelength=f"{rw.wavelength:.1f}",
+                    median_bias_ours=f"{sc['ours']['median_bias']:.6e}",
+                    median_bias_op=f"{sc['op']['median_bias']:.6e}",
+                    median_bias_ours_wv=f"{wv:.6e}",
+                    rms_ours=f"{sc['ours']['rms']:.6e}", n_obs=sc["ours"]["n_obs"])
+
+    # Per-period images + period-keyed CSV off the SAME cache (no extra L1 reads). All-time keeps the
+    # legacy <key>_omb.png name the dashboard already stages; frozen past years are rendered once.
+    return _emit_period_products(
+        sdir, key, "omb", f"{key}_omb.csv", OMB_FIELDS,
+        aggregate_fn=omb_cache_aggregate,
+        plot_fn=lambda rw, png, title: plot_omb_station(rw, itype, png, title=title),
+        row_fn=_omb_row, title_fn=lambda p: f"{site} ({s['wmo']}) — OmB [{p.label}]",
+        span_min=span_min, span_max=span_max)
 
 
 def _do_sens(s, start, end, kalman_rows):
@@ -621,25 +689,33 @@ def _do_sens(s, start, end, kalman_rows):
     for _p in parts:
         if _p is not None and getattr(_p, "dates", None) is not None and _p.dates.size:
             sens_cache_update(sdir, _p)
-    res = sens_cache_aggregate(sdir)
-    if res is None:
+    res_all = sens_cache_aggregate(sdir)
+    if res_all is None:
         return None
-    plot_sensitivity_station(res, itype, sdir / f"{key}_sens.png",
-                             title=f"{s.get('site', key)} ({s['wmo']}) — Sensitivity "
-                                   f"{start:%Y-%m-%d}..{end:%Y-%m-%d}")
+    from calibration.incremental import sens_cache_path
+    _cd = np.load(sens_cache_path(sdir), allow_pickle=False)["dates"].astype("datetime64[D]")
+    span_min, span_max = str(_cd.min()).replace("-", ""), str(_cd.max()).replace("-", "")
+    site = s.get("site", key)
 
     def _fa(v):
         return "" if (v is None or v != v) else f"{v:.0f}"
 
-    a = res.icao_alt
-    row = dict(date_start=start.strftime("%Y%m%d"), date_end=end.strftime("%Y%m%d"),
-               wavelength=f"{res.wavelength:.1f}",
-               icao_alt_200=_fa(a.get(200.0)), icao_alt_2000=_fa(a.get(2000.0)),
-               icao_alt_4000=_fa(a.get(4000.0)),
-               sigma_night_3000=f"{res.sigma_probe.get(3000, float('nan')):.6e}",
-               n_days_night=res.n_days_night, n_days_day=res.n_days_day)
-    _write_csv_atomic(sdir / f"{key}_sens.csv", SENS_FIELDS, [row])
-    return row
+    def _sens_row(rw, p):
+        a = rw.icao_alt
+        return dict(date_start=(p.start or span_min), date_end=(p.end or span_max),
+                    wavelength=f"{rw.wavelength:.1f}",
+                    icao_alt_200=_fa(a.get(200.0)), icao_alt_2000=_fa(a.get(2000.0)),
+                    icao_alt_4000=_fa(a.get(4000.0)),
+                    sigma_night_3000=f"{rw.sigma_probe.get(3000, float('nan')):.6e}",
+                    n_days_night=rw.n_days_night, n_days_day=rw.n_days_day)
+
+    # Per-period images + period-keyed CSV off the SAME sens cache (no extra L1 reads).
+    return _emit_period_products(
+        sdir, key, "sens", f"{key}_sens.csv", SENS_FIELDS,
+        aggregate_fn=sens_cache_aggregate,
+        plot_fn=lambda rw, png, title: plot_sensitivity_station(rw, itype, png, title=title),
+        row_fn=_sens_row, title_fn=lambda p: f"{site} ({s['wmo']}) — Sensitivity [{p.label}]",
+        span_min=span_min, span_max=span_max)
 
 
 # --- One instrument stream --------------------------------------------------
