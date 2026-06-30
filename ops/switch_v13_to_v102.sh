@@ -12,7 +12,7 @@ NEW=/data/zue/E_PROFILE/ALC/Calibration/rayleigh-v1.0.2
 REPO=/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.0_code
 DEVOPT=/proj/pay/E-PROFILE/Calibration_codes/dev/rayleigh_calibration/options.json
 
-if pgrep -f 'rayleigh_calibration\.main' >/dev/null; then
+if pgrep -f 'python.* -m rayleigh_calibration' >/dev/null; then
   echo "REFUSING: rayleigh_calibration.main is still running (it writes $OLD)."
   echo "          Re-run this script once that recalc has finished."
   exit 3

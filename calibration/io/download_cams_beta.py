@@ -553,8 +553,15 @@ def download_to_netcdf(dates, out_path, variables=None, keep_intermediate=KEEP_I
     regional box (``region_area(name)``) to fetch a far-flung station cluster. Returns *out_path*.
     """
     out_path = str(out_path)
-    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-    workdir = tempfile.mkdtemp(prefix="cams_")
+    out_dir = os.path.dirname(out_path) or "."
+    os.makedirs(out_dir, exist_ok=True)
+    # Stage scratch (the GRIB + raw netCDF, up to a few GB) on the SAME filesystem as
+    # the output, NEVER /tmp: on the ops host /tmp is a tiny separate volume that fills
+    # up and aborts the download with [Errno 28] No space left on device. The CAMS
+    # output dir lives on the big /data share. Override with CAMS_TMPDIR if needed.
+    tmp_base = os.environ.get("CAMS_TMPDIR") or out_dir
+    os.makedirs(tmp_base, exist_ok=True)
+    workdir = tempfile.mkdtemp(prefix="cams_", dir=tmp_base)
     grib_path = os.path.join(workdir, "cams.grib")
     raw_nc = os.path.join(workdir, "cams_raw.nc")
 

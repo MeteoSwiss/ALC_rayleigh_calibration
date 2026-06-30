@@ -3,8 +3,9 @@
 # ALC_* environment variables, so migrating to Linux is a one-file change (no code edits).
 
 # --- repo + python environment ------------------------------------------------------------------
-export ALC_REPO="${ALC_REPO:-$HOME/ALC_rayleigh_calibration}"        # this repo's location on the server
+export ALC_REPO="${ALC_REPO:-/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.0_code}"        # this repo's location on the server
 export ALC_VENV="${ALC_VENV:-$ALC_REPO/.venv}"                       # venv with deps (cfgrib, eccodes, plotly, netCDF4, pandas, cdsapi)
+export PATH="/data/zue/E_PROFILE/ALC/Calibration/tools/bin:$PATH"   # AWS CLI v2 (installed off the slow NFS home) for ops/publish.sh
 
 # --- data inputs --------------------------------------------------------------------------------
 export ALC_L1_ROOT="/data/zue/E_PROFILE/ALC/L1_FILES"               # E-PROFILE L1: <wmo>/<year>/<month>/L1_<wmo>_<ident><YYYYMMDD>.nc
@@ -12,27 +13,29 @@ export ALC_CAMS_DIR="/data/zue/E_PROFILE/ALC/CAMS"                  # CAMS cache
 export ALC_CENSUS="$ALC_REPO/validation/scope_l1_2026_census.json" # station census (wmo/ident/type/lat/lon) -- also used as the dashboard manifest
 
 # --- calibration output (per-stream <key>_cal.csv + yearly NetCDFs) -----------------------------
-export ALC_FULLCAL_DIR="/data/pay/REM/ACQ/E_PROFILE_ALC/Calibration/fullcal"
+export ALC_FULLCAL_DIR="/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.0"
 
 # --- dashboard (static site, served by your web server at a SEPARATE path) ----------------------
-export ALC_DASHBOARD_DIR="/data/pay/REM/ACQ/E_PROFILE_ALC/Calibration/dashboard"
-export ALC_L2_DIR=""                                                # optional: L2 archive for station name/country (blank = skip)
-export ALC_OPCOEFF_CSV=""                                           # optional: operational-constant CSV for the comparison maps (blank = skip)
+export ALC_DASHBOARD_DIR="/data/zue/E_PROFILE/ALC/Calibration/dashboard"
+export ALC_L2_DIR="/data/zue/E_PROFILE/ALC/L2_FILES"                                                # optional: L2 archive for station name/country (blank = skip)
+export ALC_OPCOEFF_CSV="/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.0/operational_coefficients.csv"                                           # optional: operational-constant CSV for the comparison maps (blank = skip)
+export ALC_OLDRAY_DIR="/data/pay/REM/ACQ/E_PROFILE_ALC/Calibration/rayleigh"   # old operational Rayleigh (v1) overlay
+# v1.0.2-removed-20260629: export ALC_V13_DIR="/data/zue/E_PROFILE/ALC/Calibration/rayleigh-v1.0.2"   # v13 test Rayleigh overlay
 
 # --- publish to the European Weather Cloud (optional; all blank/0 = don't publish) ---------------
 # Push the built site online: bulky images (diag/ombsens/flagex) -> a public S3 bucket, and the static
 # HTML+assets -> a web VM's docroot (nginx). See ops/publish.sh + ops/README.md. The bucket base URL
 # must match ALC_IMG_BASE_URL so the HTML (built by build_dashboard.py) points its images at the bucket.
-export ALC_PUBLISH="${ALC_PUBLISH:-0}"                              # 1 = publish after each successful dashboard build
-export ALC_IMG_BASE_URL="${ALC_IMG_BASE_URL:-}"                    # public bucket base URL baked into the HTML, e.g.
+export ALC_PUBLISH="${ALC_PUBLISH:-1}"                              # 1 = publish after each successful dashboard build
+export ALC_IMG_BASE_URL="${ALC_IMG_BASE_URL:-https://object-store.os-api.cci2.ecmwf.int/eprofile-alc-dashboard/}"                    # public bucket base URL baked into the HTML, e.g.
                                                                    #   https://object-store.os-api.cci2.ecmwf.int/eprofile-alc-dashboard/
-export ALC_S3_BUCKET="${ALC_S3_BUCKET:-}"                          # bucket name, e.g. eprofile-alc-dashboard
-export ALC_S3_TOOL="${ALC_S3_TOOL:-rclone}"                        # image-upload client: rclone | aws
+export ALC_S3_BUCKET="${ALC_S3_BUCKET:-eprofile-alc-dashboard}"                          # bucket name, e.g. eprofile-alc-dashboard
+export ALC_S3_TOOL="${ALC_S3_TOOL:-aws}"                        # image-upload client: rclone | aws
 export ALC_S3_REMOTE="${ALC_S3_REMOTE:-}"                          # rclone remote name (ALC_S3_TOOL=rclone), ~/.config/rclone/rclone.conf
-export ALC_AWS_PROFILE="${ALC_AWS_PROFILE:-}"                      # aws profile (ALC_S3_TOOL=aws), e.g. ewc
-export ALC_S3_ENDPOINT="${ALC_S3_ENDPOINT:-}"                      # aws endpoint (ALC_S3_TOOL=aws), e.g. https://object-store.os-api.cci2.ecmwf.int
-export ALC_VM_RSYNC_TARGET="${ALC_VM_RSYNC_TARGET:-}"             # ssh host:path of the web docroot, e.g. hem@136.156.139.31:/var/www/alc
-export ALC_VM_SSH="${ALC_VM_SSH:-ssh}"                             # ssh command for the rsync; add -i KEY + ProxyCommand behind a proxy
+export ALC_AWS_PROFILE="${ALC_AWS_PROFILE:-ewc}"                      # aws profile (ALC_S3_TOOL=aws), e.g. ewc
+export ALC_S3_ENDPOINT="${ALC_S3_ENDPOINT:-https://object-store.os-api.cci2.ecmwf.int}"                      # aws endpoint (ALC_S3_TOOL=aws), e.g. https://object-store.os-api.cci2.ecmwf.int
+export ALC_VM_RSYNC_TARGET="${ALC_VM_RSYNC_TARGET:-hem@136.156.139.31:/var/www/alc}"             # ssh host:path of the web docroot, e.g. hem@136.156.139.31:/var/www/alc
+export ALC_VM_SSH='ssh -i ~/.ssh/EWC -o ProxyCommand="connect -S proxy.meteoswiss.ch:1080 %h %p"'                             # ssh command for the rsync; add -i KEY + ProxyCommand behind a proxy
 # Behind a proxy (e.g. MeteoSwiss server 434) -- aws/rclone honour http_proxy/https_proxy; the VM rsync
 # uses ALC_VM_SSH. Example:
 #   export https_proxy="http://proxy.meteoswiss.ch:<port>"; export http_proxy="$https_proxy"
@@ -48,7 +51,23 @@ export STREAM_TIMEOUT="${STREAM_TIMEOUT:-1800}"                     # per-stream
 export PLOTS="${PLOTS:-1}"                                          # 1 = render diagnostic PNGs (needed for the per-calibration viewer)
 
 # --- network (no-sudo server behind a proxy): uncomment + set if CAMS download needs it ----------
-# export http_proxy="http://proxy.example:8080"; export https_proxy="$http_proxy"; export no_proxy="localhost,127.0.0.1"
+export https_proxy="http://proxy.meteoswiss.ch:8080"; export http_proxy="$https_proxy"; export no_proxy="localhost,127.0.0.1"
 
 # --- failure notification (optional) ------------------------------------------------------------
-export ALC_ALERT_EMAIL=""                                          # blank = no mail; else run_daily.sh mails this address on failure
+export ALC_ALERT_EMAIL="hem@meteoswiss.ch"                                          # blank = no mail; else run_daily.sh mails this address on failure
+
+# images live in the EWC bucket; build lists diag/ombsens from CSVs, local PNGs deletable
+export ALC_IMAGES_IN_BUCKET=1
+
+# TLS CA bundle for cron egress: venv certifi lacks the ADS chain CA in the bare cron env.
+export REQUESTS_CA_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
+
+# --- scratch space: keep ALL temp files off the tiny system /tmp --------------------------------
+# /tmp on the ops host is a small separate volume (~3 GB) that fills up and aborts the CAMS
+# download with "[Errno 28] No space left on device". Point every tool's scratch at the big /data
+# share instead. CAMS_TMPDIR is read by download_cams_beta.py; TMPDIR/TMP/TEMP cover everything
+# else (cfgrib/eccodes, xarray, aws cli, ...).
+export ALC_TMPDIR="${ALC_TMPDIR:-/data/zue/E_PROFILE/ALC/Calibration/tmp}"
+mkdir -p "$ALC_TMPDIR" 2>/dev/null || true
+export TMPDIR="$ALC_TMPDIR"; export TMP="$ALC_TMPDIR"; export TEMP="$ALC_TMPDIR"
+export CAMS_TMPDIR="$ALC_TMPDIR"
