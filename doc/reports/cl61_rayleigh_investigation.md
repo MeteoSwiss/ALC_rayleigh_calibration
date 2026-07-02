@@ -237,6 +237,21 @@ negative extreme **combined with** the rising WV lever (corr +0.93, above); both
 upward into spring. Consequence: at Aosta a *static* dark correction would not suffice — hood
 tests with a temperature-indexed lookup (as in Le et al. 2026) are required.
 
+**Network offset histories (same 9–13 km proxy; expected molecular-only value ≈ +0.02…+0.03).**
+All units run firmware 1.2.7 throughout (no configuration events anywhere):
+
+| station (serial) | offset behaviour | matches its C_L(ray)/C_L(cloud) |
+|---|---|---|
+| Payerne | stable **negative** (−0.015 hood-measured) | 0.87 (ray low) ✓ |
+| Camborne (U0810559) | proxy −0.01…−0.02 all months → offset ≈ **−0.03…−0.05, negative** | 0.945 (ray low) ✓ |
+| Aosta (U0850589) | **sign-changing**, winter-negative → spring-positive | 0.89 + seasonal cycle ✓ |
+| Uccle (V4010423) | **sign-changing** ±0.02 around zero | no usable Rayleigh series (4 marginal nights) ✓ |
+| Lindenberg (Cloudnet chain) | **positive, growing** +0.00 (Nov) → **+0.10 (Jun)** | **1.06 (ray HIGH)** ✓✓ |
+
+The unit-specific sign and drift of the residual background explains the full network pattern —
+including Lindenberg's inverted ratio (a positive offset inflates the fitted Rayleigh constant)
+and its lack of WV correlation. This is the coherent closing of §"network coherence".
+
 **Mountain-orography term (Aosta especially):** the 1° CAMS model surface at the nearest grid
 point sits at **1750 m for Aosta (station 570 m — offset +1180 m!)** and 1395 m for Payerne
 (+904 m); the moistest valley layer is simply absent from the WV column (the correction clamps
@@ -286,7 +301,26 @@ The finding has direct published precedent and one genuine novelty:
   2–6 km molecular fit — that is this study's contribution** (measured offset → +4…+22 %
   per-night C_L correction → ⅔ of the method gap closed).
 
-## 7. Recommendations
+## 7. Detecting the offset from clear nights (no hood)
+
+The offset is separable from molecular signal and aerosol layers because the three have different
+*shapes and time signatures*: over a deep upper layer (e.g. 7-14 km) the molecular attenuated
+backscatter decays quasi-exponentially (scale height ~8 km) and is KNOWN (standard atmosphere +
+WV), aerosol layers are episodic, vertically structured and decay differently, while the offset
+is flat-to-slowly-varying in range and drifts only with internal temperature (hours). Proposed
+**clear-night intercept method**: regress the nightly-mean signal against the modelled molecular
+attenuated backscatter over 7-14 km - the SLOPE is C_L, the INTERCEPT is the offset b. The
+operational fit already computes this intercept but *minimises* it in window selection; instead,
+extend the fit upward and *use* it: (i) screen cirrus/aerosol by requiring residual whiteness (no
+vertically-correlated residual structure) and by the episodic-vs-persistent time test (b must be
+stable over the night while layers advect); (ii) regress the retrieved b(t) against the
+housekeeping laser/internal temperature to build the temperature-indexed correction that Aosta
+and Uccle need; (iii) validate against periodic hood tests. Feasibility is already demonstrated:
+our clear-night residual (-0.021 at 3-6 km, S1b) reproduces the hood value (-0.015) without any
+covered measurement. The 15.4 km top gates (beta_mol*T^2 ~ 0.008) provide a nearly pure offset
+tracer for the flat component.
+
+## 8. Recommendations
 
 1. **Operations:** keep the **cloud method** as the CL61 constant of record (already the case in
    the fullcal chain); flag the CL61 native Rayleigh constant as biased low ≈ 10–15 %.

@@ -300,6 +300,17 @@ spurious −43 % for the Payerne CL61-Rayleigh in earlier drafts; the convention
 path (β = rcs₀/C_L) gives +12.6 %, and the corrected L2 formula reproduces it (+13.5 %). All
 constants are now expressed and displayed as the absolute C_L everywhere (§3.1, Figure 10).
 
+**Root cause found and corrected (2026-07-02, see
+[cl61_rayleigh_investigation.md](cl61_rayleigh_investigation.md)):** termination-hood dark
+measurements on the Payerne CL61 (three covered-telescope windows, May–June 2026) reveal a
+range-dependent **negative signal offset** (−0.008/−0.017/−0.027 Mm⁻¹sr⁻¹ at 3/5/8 km) that
+amounts to −8…−13 % of the molecular signal at the fit windows. **Recalibrating with the measured
+offset removed** moves the per-night Rayleigh constants by +4…+23 % and the median gap to the
+cloud constant from **−26.5 % to −9.8 %** (common nights) — i.e. ≈ ⅔ of the method discrepancy is
+the instrument offset (the remainder is consistent with a ≈ 40 % larger night-time offset; a
+night-time hood test is pending). Across the network the offset's unit-specific sign explains the
+whole CL61 pattern, including Lindenberg's inverted ratio (positive, growing offset).
+
 **Hypotheses tested and excluded for the ~15 % Rayleigh-vs-cloud C_L gap** (Payerne recalibration
 experiments, 2026-07-02): (i) *water vapour is applied and essential in both methods and in the
 comparison* — a 910 nm night is only calibrated when WV-correctable; at the 2.6–6 km fit windows
