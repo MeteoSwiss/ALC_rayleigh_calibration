@@ -134,6 +134,24 @@ Per-night T²_wv at the fit window (probe `_cl61_wv_sources_probe.py`):
 The ±4 % night-to-night WV term also explains a good part of the C_L(ray) scatter (and its
 `sensitivity 2σ` being smaller than the observed night-to-night spread).
 
+**Full recalibration with the radiosonde WV** (`_cl61_sounding_calibration.py`; the sounding
+profile injected as the WV source, everything else identical — the proper evaluation):
+
+| configuration | n | median C_L | robust scatter | gap to C_L(cloud) |
+|---|---|---|---|---|
+| (a) monthly-CAMS WV, original data | 7 | 1.268 | 8.5 % | −11.1 % |
+| (b) radiosonde WV, original data | 7 | 1.246 | 12.3 % | −12.6 % |
+| (c) radiosonde WV + measured offset removed | 9 | 1.214 | 9.2 % | −14.8 % |
+
+Paired statistics (the valid comparison — the offset correction changes which windows are
+eligible, so each configuration succeeds on a different night set and ensemble medians carry
+±5 % sampling noise at n ≤ 9): **sounding-vs-CAMS = −1.0 % median on 7 common nights** (the
+T²-scaling estimate of −3.6 % is damped by the fit's window re-selection) — the WV source is a
+confirmed secondary term; **offset-correction = +4 %, +16 %, +22 % on the nights common to (b)
+and (c)** — the dominant term, as in §1c. The residual ≈ −10 ± 5 % gap of the best-physics chain
+is consistent with the night-time offset exceeding the daytime-measured b_dark by ≈ 40 % (§1b);
+a night-time covered test is the missing measurement.
+
 ## 5. Aosta: why only the Rayleigh constant has a seasonal cycle
 
 ![coherence](figs_paper_report/fig_cl61_network_coherence.png)
