@@ -301,24 +301,24 @@ The finding has direct published precedent and one genuine novelty:
   2–6 km molecular fit — that is this study's contribution** (measured offset → +4…+22 %
   per-night C_L correction → ⅔ of the method gap closed).
 
-## 7. Detecting the offset from clear nights (no hood)
+## 7. Detecting the offset from clear nights (no hood) - implementation and lessons
 
-The offset is separable from molecular signal and aerosol layers because the three have different
-*shapes and time signatures*: over a deep upper layer (e.g. 7-14 km) the molecular attenuated
-backscatter decays quasi-exponentially (scale height ~8 km) and is KNOWN (standard atmosphere +
-WV), aerosol layers are episodic, vertically structured and decay differently, while the offset
-is flat-to-slowly-varying in range and drifts only with internal temperature (hours). Proposed
-**clear-night intercept method**: regress the nightly-mean signal against the modelled molecular
-attenuated backscatter over 7-14 km - the SLOPE is C_L, the INTERCEPT is the offset b. The
-operational fit already computes this intercept but *minimises* it in window selection; instead,
-extend the fit upward and *use* it: (i) screen cirrus/aerosol by requiring residual whiteness (no
-vertically-correlated residual structure) and by the episodic-vs-persistent time test (b must be
-stable over the night while layers advect); (ii) regress the retrieved b(t) against the
-housekeeping laser/internal temperature to build the temperature-indexed correction that Aosta
-and Uccle need; (iii) validate against periodic hood tests. Feasibility is already demonstrated:
-our clear-night residual (-0.021 at 3-6 km, S1b) reproduces the hood value (-0.015) without any
-covered measurement. The 15.4 km top gates (beta_mol*T^2 ~ 0.008) provide a nearly pure offset
-tracer for the flat component.
+Three formulations were implemented and tested on the 12 Payerne calibration nights
+(`_cl61_intercept_method.py`); the exercise itself is instructive:
+
+| variant | formulation | result | verdict |
+|---|---|---|---|
+| joint intercept fit | regress nightly mean vs modelled molecular over 7-14 km; slope=C_L, intercept=b | C_L wanders 1.1-22, R^2~0: slope and intercept are COLLINEAR where the molecular dynamic range is comparable to the noise | ill-conditioned - rejected |
+| two-stage | slope from the 2.5-5 km window, b = mean residual at 10-14 km, iterated | C_L~2.0 (aerosol in the "molecular" window inflates the slope), and the hood shows b is NOT flat (+0.007 at 10-14 km vs -0.015 at 3-6 km): a high-altitude b cannot represent the fit-window offset | aerosol-biased + wrong-altitude b - rejected |
+| **residual method (production)** | forward-Klett the nightly mean (aerosol transmission, LR 52) with the CLOUD-method constant; b(z) = residual vs the full model C_L*beta_mol*T2_mol*T2_wv*T2_aer, averaged 3-6 km on screened nights | **-0.021 median vs hood -0.015** (S1b): sign and magnitude recovered with no hood | **works - adopt** |
+
+Production algorithm: (1) clear-night screen (adaptive per-gate MAD + episodic-vs-persistent
+test); (2) forward aerosol transmission from the profile itself; (3) b_hat = 3-6 km residual per
+night; (4) regress b_hat(t) against the housekeeping internal/laser temperature to build the
+temperature-indexed correction (needed at Aosta and Uccle); (5) validate against quarterly hood
+tests. Key insight: the offset must be estimated AT the fit-window altitudes (it is
+range-dependent), with the aerosol transmission modelled - shortcuts that assume a flat offset or
+an aerosol-free window fail in ways the table quantifies.
 
 ## 8. Recommendations
 

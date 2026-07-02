@@ -53,6 +53,12 @@ def run_station(name):
         if sc["molaer"] and c["label"] == sc["molaer"]:
             d["wavelengthModel"] = "molaer"
         chans.append(d)
+    if name == "payerne":
+        # second CL61 Rayleigh entry: constants recalibrated after removing the hood-measured
+        # dark offset (cl61_rayleigh_investigation.md 1c) — shown alongside the native series
+        chans.append(dict(wmo="0-20000-0-06610", ident="C", calib="rayleigh",
+                          label="CL61 (Rayleigh, offset-corr)", itype="CL61",
+                          key="0-20000-0-06610_C_rayleigh_offsetcorr"))
     cfg = dict(wmo=sc["wmo"], start=st["start"], end=st["end"], referenceChannel=sc["ref"],
                channels=chans, lambda_target=sc["target"], alpha=1.0, zMin=500, zMax=3000,
                calibLevel="L1")   # native L1 (binned, eprof_v2 + fixed cloud); falls back to L2 where no L1

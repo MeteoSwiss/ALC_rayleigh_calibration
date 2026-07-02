@@ -48,10 +48,16 @@ def channel_colors(channels):
     from collections import Counter
     cnt = Counter(c.get("itype", "") for c in channels)
     cols = []
+    seen_cl61 = {}
     for k, c in enumerate(channels):
         it = c.get("itype", "")
         if it == "CL61":
-            cols.append(CL61_COLORS.get(c.get("calib", ""), "#404040"))
+            cal = c.get("calib", "")
+            if seen_cl61.get(cal):          # 2nd CL61 entry of the same method (e.g. offset-corr)
+                cols.append("#17BECF")       # -> cyan to stay distinguishable
+            else:
+                cols.append(CL61_COLORS.get(cal, "#404040"))
+            seen_cl61[cal] = True
         elif it in TYPE_COLORS and cnt[it] == 1:
             cols.append(TYPE_COLORS[it])
         else:
