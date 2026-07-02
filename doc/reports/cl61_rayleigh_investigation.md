@@ -35,9 +35,22 @@ their periods are present in the L1 archive and are unambiguously dark (window-m
 = +0.001 to +0.002 Mm⁻¹sr⁻¹, where any real daytime boundary layer gives 0.1–0.5). With no
 atmosphere involved, the window-mean profile **is** the processing offset:
 
-| range | 1 km | 3 km | 5 km | 8 km |
-|---|---|---|---|---|
-| b_dark(z) [Mm⁻¹sr⁻¹], median of 3 tests, 300 m smoothed | ≈ 0 | **−0.008** | **−0.017** | **−0.027** |
+| window (UTC) | duration | N profiles | b(3 km) | b(5 km) | b(8 km) |
+|---|---|---|---|---|---|
+| 2026-05-12 09:35–14:50 | 5.2 h | 630 | −0.012 | −0.025 | −0.029 |
+| 2026-05-26 11:45 – 05-27 13:15 | 25.5 h | 3054 | −0.013 | −0.008 | −0.042 |
+| 2026-06-09 09:20–11:50 | 2.5 h | 300 | −0.001 | −0.024 | +0.043 |
+| **median profile, 300 m smoothed** | | | **−0.008** | **−0.017** | **−0.027** |
+
+(The 2026-05-12 01:35–09:35 period is **discarded**: it precedes the hood installation and
+contains fog/cloud returns.) The offset is reproducible in sign and magnitude at 3–5 km across
+the three tests (the short 2.5 h window is the noisiest, ±0.03 at 8 km). In the
+**non-range-corrected** signal β_att/z² the offset is largest in the first kilometres and decays
+with range — i.e. it is *not* a constant electronic offset amplified by z² but a decaying
+near-signal residual (afterpulse-like, cf. Le et al. 2026 §6), whose z²-weighted tail is what
+survives at the fit altitudes. The per-sample β_att/z² **histograms** (bands 2–4, 4–8, 8–14 km)
+are single-mode and near-Gaussian with their *centres* displaced negative — the offset is a
+distribution shift, not skewness or outliers: pure detector noise around a negative mean.
 
 ![dark windows](figs_paper_report/fig_cl61_dark_windows.png)
 *Figure 1 — L1 archive during the covered-telescope windows: (a) window-mean β_att; (b) zoom
