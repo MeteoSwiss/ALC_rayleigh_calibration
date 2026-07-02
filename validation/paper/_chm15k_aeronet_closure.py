@@ -23,17 +23,17 @@ from validation.paper._cl61_aeronet_closure import parse_aeronet, fnum, forward_
 WMO, IDENT, ALT, LAT, LON = "0-20000-0-06610", "A", 491.0, 46.813, 6.943
 L1 = Path("D:/E-PROFILE_L1_2026")
 STD = Path("calibration/data/standard_atmosphere_US_1976_50km.csv")
-LEV20 = Path(r"C:/Users/hervo/Downloads/20250101_20261231_Payerne/20250101_20261231_Payerne.lev20")
-LID = Path(r"C:/Users/hervo/Downloads/20250101_20261231_Payerne(2)/20250101_20261231_Payerne.lid")
+LEV20 = Path(r"C:/Users/hervo/Downloads/20260101_20261231_Payerne/20260101_20261231_Payerne.lev15")
+LID = Path(r"C:/Users/hervo/Downloads/aeronet_2026/Payerne_2026_LID15.txt")
 CAL = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/figs_paper_validation/paper_python/calib/0-20000-0-06610_A_rayleigh_L1.csv")
-D0, D1 = datetime(2025, 1, 2), datetime(2025, 3, 10)
+D0, D1 = datetime(2026, 3, 1), datetime(2026, 6, 20)
 
 # daily Kalman C_L
 rows = list(csv.DictReader(open(CAL, encoding="utf-8")))
 kd = np.array([np.datetime64(r["time"][:10]) for r in rows if r["C_kalman"] not in ("", "nan")])
 kv = np.array([float(r["C_kalman"]) for r in rows if r["C_kalman"] not in ("", "nan")])
-print(f"CHM15k Kalman C_L: {kv.size} days, Jan-Mar 2025 median = "
-      f"{np.median(kv[(kd >= np.datetime64('2025-01-01')) & (kd <= np.datetime64('2025-03-10'))]):.3e}")
+print(f"CHM15k Kalman C_L: {kv.size} days, 2026 window median = "
+      f"{np.median(kv[(kd >= np.datetime64('2026-03-01')) & (kd <= np.datetime64('2026-06-20'))]):.3e}")
 
 def cl_for(day):
     return float(np.interp(np.datetime64(day).astype("datetime64[D]").astype(float),
@@ -118,7 +118,7 @@ if res:
     ax.plot(lim, lim, "k--", lw=1)
     ax.set_xlim(*lim); ax.set_ylim(*lim); ax.grid(alpha=0.3)
     ax.set_xlabel("AERONET AOD @1064 nm"); ax.set_ylabel("CHM15k forward-Klett AOD @1064 nm")
-    ax.set_title("Payerne CHM15k AERONET closure, Jan-Mar 2025 — median ratio %.2f (n=%d)"
+    ax.set_title("Payerne CHM15k AERONET closure, 2026 (same window as the CL61 closure) — median ratio %.2f (n=%d)"
                  % (np.median(ratio), m.sum()))
     fig.tight_layout()
     out = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/figs_paper_validation/paper_python/fig_chm15k_aeronet_closure.png")

@@ -29,20 +29,21 @@ from calibration.io.cams import ensure_cams_file
 WMO, IDENT, ALT, LAT, LON = "0-20000-0-06610", "C", 491.0, 46.813, 6.943
 L1 = Path("D:/E-PROFILE_L1_2026")
 STD = Path("calibration/data/standard_atmosphere_US_1976_50km.csv")
-LEV20 = Path(r"C:/Users/hervo/Downloads/20250101_20261231_Payerne/20250101_20261231_Payerne.lev20")
-LID = Path(r"C:/Users/hervo/Downloads/20250101_20261231_Payerne(2)/20250101_20261231_Payerne.lid")
+LEV20 = Path(r"C:/Users/hervo/Downloads/20260101_20261231_Payerne/20260101_20261231_Payerne.lev15")
+LID = Path(r"C:/Users/hervo/Downloads/aeronet_2026/Payerne_2026_LID15.txt")
 CL_RAY, CL_CLD = 1.251, 1.425
 LR_MOL = 8 * np.pi / 3
 D0, D1 = datetime(2026, 3, 1), datetime(2026, 6, 20)
 ZTOP = 6000.0
 
 
-def parse_aeronet(path, header_line_startswith, date_key="Date(dd:mm:yyyy)", time_key="Time(hh:mm:ss)"):
-    """Generic AERONET text parser -> list of dicts keyed by header names."""
+def parse_aeronet(path, header_marker, date_key="Date(dd:mm:yyyy)", time_key="Time(hh:mm:ss)"):
+    """Generic AERONET text parser -> list of dicts keyed by header names. The header line is the
+    first line CONTAINING header_marker (works for both the download portal and web-API formats)."""
     rows = []
     with open(path, encoding="utf-8", errors="replace") as f:
         lines = f.read().splitlines()
-    hi = next(i for i, l in enumerate(lines) if l.startswith(header_line_startswith))
+    hi = next(i for i, l in enumerate(lines) if header_marker in l and "Date(dd:mm:yyyy)" in l)
     hdr = [h.strip() for h in lines[hi].split(",")]
     for l in lines[hi + 1:]:
         p = l.split(",")
@@ -81,7 +82,7 @@ lid_rows = parse_aeronet(LID, "Site,")
 lr_by_day = {}
 for r in lid_rows:
     lr = fnum(r.get("Lidar_Ratio[1020nm]"))
-    if np.isfinite(lr) and str(r.get("If_Retrieval_is_L2", "0")).strip() in ("1", "1.0"):
+    if np.isfinite(lr):        # L1.5 almucantar inversions (2026 has no L2 yet)
         lr_by_day.setdefault(r["_t"].date(), []).append(lr)
 print(f"days with valid AERONET LR(1020): {len(lr_by_day)}")
 
@@ -165,13 +166,18 @@ for t_ae, aod910_ae, ang in aods:
     lr = float(np.median(lr_by_day.get(t_ae.date(), [50.0])))
     lr = min(max(lr, 20.0), 100.0)
     row = dict(t=t_ae, aeronet=aod910_ae, lr=lr)
-    okboth = True
-    for tag, cl in (("ray", CL_RAY), ("cld", CL_CLD)):
-        r = forward_inversion(prof / cl, rng, bmol, amol, t2wv, lr)
+    # JOINT (C_L, baseline) closure: the dark probe found a NEGATIVE vendor baseline b in
+    # beta_att; correct it (beta - b) BEFORE applying the constant. The (C_L, b) pair that
+    # closes the AOD, cross-checked against the independent dark-probe b, is the answer.
+    okall = True
+    for tag, cl, b in (("ray", CL_RAY, 0.0), ("cld", CL_CLD, 0.0),
+                       ("ray_b", CL_RAY, -0.03), ("cld_b1", CL_CLD, -0.02),
+                       ("cld_b2", CL_CLD, -0.03), ("cld_b3", CL_CLD, -0.04)):
+        r = forward_inversion((prof - b * cl) / cl, rng, bmol, amol, t2wv, lr)
         if r is None:
-            okboth = False; break
+            okall = False; break
         row[tag] = r[1]
-    if okboth:
+    if okall:
         res.append(row)
 
 print(f"closure samples: {len(res)}")
@@ -181,10 +187,13 @@ if res:
     lrs = np.array([r["lr"] for r in res])
     print(f"AERONET AOD910: median={np.median(ae):.3f}  (LR used: median={np.median(lrs):.0f} sr, "
           f"{np.sum(lrs != 50)} from AERONET inversions)")
-    for tag, x in (("C_L(Rayleigh)=1.251", ray), ("C_L(cloud)  =1.425", cld)):
+    for tag, key in (("C_L=1.251 (Rayleigh), b=0    ", "ray"), ("C_L=1.425 (cloud),   b=0    ", "cld"),
+                     ("C_L=1.251 (Rayleigh), b=-0.03", "ray_b"), ("C_L=1.425 (cloud),   b=-0.02", "cld_b1"),
+                     ("C_L=1.425 (cloud),   b=-0.03", "cld_b2"), ("C_L=1.425 (cloud),   b=-0.04", "cld_b3")):
+        x = np.array([r[key] for r in res])
         m = np.isfinite(x) & np.isfinite(ae) & (ae > 0.01)
         ratio = x[m] / ae[m]
-        print(f"{tag}: AOD_lidar median={np.median(x[m]):.3f}  ratio lidar/AERONET: "
+        print(f"{tag}: AOD median={np.median(x[m]):.3f}  ratio lidar/AERONET: "
               f"median={np.median(ratio):.2f}  p25-p75={np.percentile(ratio,25):.2f}-{np.percentile(ratio,75):.2f}  n={m.sum()}")
 
     import matplotlib

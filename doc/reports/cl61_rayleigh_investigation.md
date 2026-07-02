@@ -57,21 +57,36 @@ moves C_L by ≤ 2.4 %. The MATLAB reference (`rayleigh_calibration_matlab`) app
 correction at all** and hard-codes 910 nm (`l0_wavelength` is read but unused) — with
 T²_wv ≈ 0.78 its CL61 Rayleigh constants are low by construction; not comparable.
 
-## 3. AERONET forward-Klett closure (the absolute anchor)
+## 3. AERONET forward-Klett closure (CL61 direct, CHM15k as method control)
 
-![chm closure](figs_paper_report/fig_chm15k_aeronet_closure.png)
-*Figure 2 — Payerne CHM15k forward-Klett AOD (1064 nm, daily Kalman C_L, LR = 50 sr) vs AERONET
-L2 AOD interpolated to 1064 nm, Jan–Mar 2025 (the only AERONET-L2/ceilometer overlap; the local
-AERONET files end 2025-03-10). Median ratio **0.85** (IQR 0.62–1.05, n = 1176) at a median AOD of
-only 0.029 — consistent with unity within the method envelope (assumed LR, sub-300 m extension,
-winter shallow layers).*
+Run on the 2026 L1.5 AERONET data (Mar-01…Jun-20, 6 897 CL61 / 7 350 CHM15k matched samples,
+LR from the 2026 almucantar inversions where valid, else 50 sr; WV per monthly CAMS):
 
-Chain of anchors: AERONET ⇒ CHM15k (ratio 0.85 ≈ 1) ⇒ CL61-cloud (−0.6 %) ⇒ **C_L(cloud) is the
-correct constant**; the Rayleigh constant is the outlier. The direct CL61 closure
-(`_cl61_aeronet_closure.py`, ready to run) needs 2026 AERONET data — the current L2 download ends
-2025-03-10 while the Payerne CL61 archive starts 2026: **action: download the 2026 AERONET
-(L1.5/L2 when available) and rerun.** The same closure quantifies the below-window aerosol
-transmission empirically, closing the remaining loophole in the aerosol question.
+| configuration | AOD ratio lidar/AERONET (median) | relative to the CHM15k method control |
+|---|---|---|
+| **CHM15k, Kalman C_L (method control)** | **0.70** | 1.00 |
+| CL61, C_L = 1.251 (Rayleigh), b = 0 | 0.71 | 1.01 |
+| CL61, C_L = 1.425 (cloud), b = 0 | 0.51 | 0.73 |
+| CL61, C_L = 1.251, b = −0.03 | 0.98 | 1.40 |
+| CL61, C_L = 1.425, **b = −0.02** | 0.69 | **0.99** |
+| CL61, C_L = 1.425, b = −0.03 | 0.78 | 1.11 |
+
+(b = a constant baseline removed from the vendor β_att before calibrating; the earlier Jan–Mar
+2025 CHM15k run gave 0.85 at AOD ≈ 0.03.) Three lessons:
+1. **The daytime forward-Klett carries a common ≈ 0.70 method factor** (identical for the trusted
+   CHM15k): aerosol above the 6 km integration top (spring Saharan layers), the assumed LR on
+   non-inversion days, and daytime background handling — it cancels in the relative comparison.
+2. **The closure is (C_L, b)-degenerate**: relative to the control, (1.251, b=0) and
+   (1.425, b=−0.02) close equally well — the AOD constrains a combination of constant and
+   baseline, not each separately.
+3. **The night-time evidence breaks the tie**: the dark probe measures b(3–6 km) ≈ −0.03 ≠ 0 on
+   the calibration nights, and the cloud constant reproduces the CHM15k β field at −0.6 % in the
+   0.5–3 km band (where b ≈ 0). Hence (C_L = 1.425, b(z) < 0 above ≈ 3 km) is the consistent
+   solution; (1.251, b=0) would additionally require the baseline to vanish at night — it does not.
+
+Chain of anchors: AERONET ⇒ CHM15k (method control) ⇒ CL61-cloud (−0.6 % in β) ⇒ **C_L(cloud)**;
+the Rayleigh constant absorbs the 3–6 km baseline. Follow-up: extend the integration above 6 km
+(elevated layers) and rerun against AERONET **L2** when the 2026 final calibration is released.
 
 ## 4. Water-vapour source sensitivity
 
@@ -106,6 +121,16 @@ stations.*
 bias, §4) imprints seasonally. The cloud method integrates 0.1–2.4 km where the WV lever is ≈ 4×
 smaller — hence no visible cycle. Camborne behaves the same (ratio-corr +0.79). Payerne's 5-month
 record is too short to separate the terms.
+
+**Mountain-orography term (Aosta especially):** the 1° CAMS model surface at the nearest grid
+point sits at **1750 m for Aosta (station 570 m — offset +1180 m!)** and 1395 m for Payerne
+(+904 m); the moistest valley layer is simply absent from the WV column (the correction clamps
+the mountain-surface humidity downwards). Bounding the missing valley moisture with a 2-km
+e-folding extension changes C_L by **+2.1 % at Aosta / +2.0 % at Payerne — seasonally varying**
+(moist summer valley → larger), i.e. the right sign and season to add to the Aosta Rayleigh
+cycle. Camborne and Lindenberg (flat, offsets −55/−44 m) are unaffected — consistent with the
+coherence table. Fix: the **0.4° CAMS** (real orography much closer to the valley floor) —
+another reason to complete the `CAMS_Monthly_04` download (currently 202501/02/06/07 only).
 
 **Coherence across the network:** the ray/cloud ratio is NOT a universal constant (0.87, 0.89,
 0.95, 1.06) — consistent with a data-dependent artefact (baseline strength differs per unit /
