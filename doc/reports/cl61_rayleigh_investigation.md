@@ -64,9 +64,9 @@ itself (LR = 50 sr). On the six clean calibration nights the fully-corrected res
 **−0.021 Mm⁻¹sr⁻¹ (median; range −0.021…−0.035)**, against the covered-telescope
 b_dark(3–6 km) = −0.015: same sign and magnitude. The ≈ 40 % excess is now CONFIRMED as the
 day/night dependence of the offset by the 25.5-h hood window itself, which spans a full night:
-**b(3–6 km) = −0.013 by day vs −0.019 by night (×1.44), and −0.007 vs −0.029 (×4.1) at 8–12 km**
+**b(3–6 km) = −0.012 by day vs −0.016 by night (×1.33), and −0.012 vs −0.022 (×1.8) at 8–12 km** (hourly means)
 (`_cl61_hood_night_variability.py`, fig_cl61_hood_night) — the night-sky residual (−0.021) matches
-the directly-measured night hood value (−0.019) within 10 %.
+the directly-measured night hood value (−0.016) within ≈ 25 %.
 (An earlier draft of this analysis omitted T²_aer and overstated the residual by ≈ 30 %; the
 conclusion survives the correction.)
 
@@ -84,8 +84,8 @@ Per-night changes +4.0 %, +21.6 %, +22.7 %; the corrected data also yields **mor
 nights** (9 vs 7) — windows previously rejected by the |intercept| criterion become admissible,
 confirming the offset as the fit-spoiler. The daytime-measured b_dark thus removes ≈ ⅔ of the
 method discrepancy; the remainder is consistent with the ≈ 40 % larger night-time offset seen in
-§1b — and the 25.5-h hood window confirms it directly: the night offset is ×1.44 the daytime
-value at 3–6 km (−0.019 vs −0.013), so correcting with the night profile would close most of the
+§1b — and the 25.5-h hood window confirms it directly: the night offset is ×1.33 the daytime
+value at 3–6 km (−0.016 vs −0.012), so correcting with the night profile would close most of the
 remaining −9.8 %.
 
 ![hood night](figs_paper_report/fig_cl61_hood_night.png)
