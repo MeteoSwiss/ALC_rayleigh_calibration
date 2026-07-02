@@ -27,21 +27,54 @@ with 1 at winter AODs of 0.03). **Use the cloud constant for the CL61; treat the
 constant as biased low by ≈ 10–15 % until the baseline is handled.** A ≈ −4 % secondary term comes
 from the monthly-CAMS WV over-correction on dry calibration nights.
 
-## 1. The dark/baseline probe (the confirmed mechanism)
+## 1. The signal offset: direct measurement, consistency, and causal test
 
-![baseline probe](figs_paper_report/fig_cl61_dark_baseline.png)
-*Figure 1 — (a) CL61 nightly-mean profiles (21–04 UT) on the 12 successful Rayleigh-calibration
-nights vs the calibrated attenuated-molecular models. (b) Median residual: with the cloud constant
-(black) the residual is ≈ 0 in the lower troposphere and drifts negative above ≈ 6 km, reaching
-−0.05…−0.07 Mm⁻¹sr⁻¹ at 11–14 km where the true signal is ≈ +0.02 — the nightly means are
-physically negative up there, which only a processing baseline can produce. Noise is not the issue
-(σ/√N ≈ 0.02 per night); the offset is systematic.*
+**1a. Direct measurement (covered telescope).** Three hood-on dark tests were performed on the
+operational Payerne CL61 (2026-05-12 09:35–14:50, 2026-05-26 11:45–13:15, 2026-06-09 09:20–11:50);
+their periods are present in the L1 archive and are unambiguously dark (window-mean β_att at 1 km
+= +0.001 to +0.002 Mm⁻¹sr⁻¹, where any real daytime boundary layer gives 0.1–0.5). With no
+atmosphere involved, the window-mean profile **is** the processing offset:
 
-Magnitude check: explaining C_L(ray)/C_L(cloud) = 0.88 needs a mean signal deficit of
-−0.12 · C_L · β_mol · T² ≈ **−0.014 Mm⁻¹sr⁻¹** over the fit window; the clean-night residuals are
-−0.02…−0.04 (the window-selection's |intercept|-minimisation absorbs part, hence −12 % and not
-−25 %). Dark-measurement context ([dark_measurement_payerne.md](dark_measurement_payerne.md)):
-CL61 per-sample noise σ ≈ 0.17 (3 km) → 0.57 (4–7 km) Mm⁻¹sr⁻¹.
+| range | 1 km | 3 km | 5 km | 8 km |
+|---|---|---|---|---|
+| b_dark(z) [Mm⁻¹sr⁻¹], median of 3 tests, 300 m smoothed | ≈ 0 | **−0.008** | **−0.017** | **−0.027** |
+
+![dark windows](figs_paper_report/fig_cl61_dark_windows.png)
+*Figure 1 — L1 archive during the covered-telescope windows: (a) window-mean β_att; (b) zoom
+around zero — the negative, altitude-growing offset; (c) β_att/z², the non-range-corrected shape.*
+
+**1b. Consistency with the night sky under full transmission.** The measured attenuated
+backscatter must lie below the aerosol-free molecular curve because of aerosol and water-vapour
+extinction; a meaningful residual therefore requires the complete model
+C_L·β_mol·T²_mol·T²_wv·**T²_aer**, with T²_aer forward-integrated from the measured profile
+itself (LR = 50 sr). On the six clean calibration nights the fully-corrected residual at 3–6 km is
+**−0.021 Mm⁻¹sr⁻¹ (median; range −0.021…−0.035)**, against the covered-telescope
+b_dark(3–6 km) = −0.015: same sign and magnitude, the ≈ 40 % excess being compatible with a
+day/night dependence of the offset (the dark tests are daytime) and residual LR/WV model error.
+(An earlier draft of this analysis omitted T²_aer and overstated the residual by ≈ 30 %; the
+conclusion survives the correction.)
+
+**1c. Causal test — remove the measured offset and recalibrate.** Since range correction is the
+fixed z² map, removing the offset from the non-range-corrected signal and re-range-correcting is
+identical to subtracting b_dark(z) from β_att. Doing so on the calibration nights (corrected
+copies of the L1 files, full eprof_v2 recalibration, WV on):
+
+| | C_L median (common nights) | gap to C_L(cloud) = 1.425 |
+|---|---|---|
+| original | 1.047 | −26.5 % |
+| **offset-corrected** | **1.286** | **−9.8 %** |
+
+Per-night changes +4.0 %, +21.6 %, +22.7 %; the corrected data also yields **more eligible
+nights** (9 vs 7) — windows previously rejected by the |intercept| criterion become admissible,
+confirming the offset as the fit-spoiler. The daytime-measured b_dark thus removes ≈ ⅔ of the
+method discrepancy; the remainder is consistent with the ≈ 40 % larger night-time offset seen in
+§1b (a night-time covered test would settle it).
+
+Magnitude closure: explaining C_L(ray)/C_L(cloud) = 0.88 requires a window-mean deficit of
+−0.12·C_L·β_mol·T² ≈ **−0.014 Mm⁻¹sr⁻¹** — bracketed by the daytime dark (−0.008…−0.017 over the
+window range) and the night-sky residual (−0.021). Noise is not a factor: the per-sample σ
+(0.17–0.57 Mm⁻¹sr⁻¹, [dark_measurement_payerne.md](dark_measurement_payerne.md)) averages to
+≈ 0.02/√N per night; the offset is systematic.
 
 ## 2. Wavelength & spectrum (excluded)
 
