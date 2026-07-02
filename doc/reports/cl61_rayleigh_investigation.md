@@ -190,7 +190,39 @@ is the outlier in every respect** (ratio > 1, no WV correlation): its "L1" is co
 Cloudnet, i.e. a different processing chain — supporting the baseline explanation (different
 background handling → different Rayleigh bias).
 
-## 6. Recommendations
+## 6. Literature context
+
+The finding has direct published precedent and one genuine novelty:
+- **Kotthaus et al. 2016** (AMT 9, 3769–3791, doi:10.5194/amt-9-3769-2016): the CL31 carries a
+  **range-dependent negative baseline** ("cosmetic shift", fw 1.71; non-zero up to ≈ 5.5 km,
+  instrument background switching sign at 6–7 km, temperature-dependent, changed by hardware
+  swaps) and must be corrected — via **termination-hood dark measurements** or a clear-sky
+  night climatology — *before* any calibration.
+- **Le et al. 2026** (EGUsphere preprint egusphere-2025-6331, in review for AMT): for the **CL61**
+  specifically, "residual background components may still remain in the measured signal" after
+  the internal correction; they publish a termination-hood P_instrument(r, T) subtraction (hood
+  repeated every few months), report one unit whose bias intrudes from 5 km down — into the
+  Rayleigh window — and document the internal calibration factor's behaviour under laser ageing.
+- **Hopkin et al. 2019** (AMT 12, 4131–4147): firmware shifts "should certainly be corrected for
+  in the study of smaller particles… however, for the stronger signal from cloud particles the
+  effect… is negligible" — precisely the mechanism by which the cloud and Rayleigh methods
+  diverge on an offset-affected unit.
+- **Wiegner & Geiß 2012** (AMT 5, 1953–1964) and **Wiegner et al. 2019** (CeiLinEx, AMT 12,
+  471–490): the free-troposphere molecular return sits at/below the ceilometer noise floor and
+  the "range from 3 to 8 km is especially affected by artifacts"; hood corrections were judged
+  not yet accurate enough in 2019. **Wiegner & Gasteiger 2015** (AMT 8, 3971–3984) and
+  **Chen et al. 2025** (Remote Sens. 17, 2013: combined dark + WV correction cuts CL51 error
+  29 → 21 % vs Raman lidar) frame the 910 nm WV side. **Looschelders et al. 2025**
+  (Met. Appl. 32, doi:10.1002/met.70088): six co-located CL61s, hood offsets "small" on healthy
+  units.
+- **Nuances to carry into the paper:** published offsets are of *either* sign (unit/firmware/
+  temperature dependent) — our unit's is negative; healthy-unit offsets are "small" in absolute
+  terms, so the argument must be (and is, §1) quantitative against the ≈ 10× weaker molecular
+  signal at the fit window. **No published work quantifies the offset-induced C_L bias of a
+  2–6 km molecular fit — that is this study's contribution** (measured offset → +4…+22 %
+  per-night C_L correction → ⅔ of the method gap closed).
+
+## 7. Recommendations
 
 1. **Operations:** keep the **cloud method** as the CL61 constant of record (already the case in
    the fullcal chain); flag the CL61 native Rayleigh constant as biased low ≈ 10–15 %.
