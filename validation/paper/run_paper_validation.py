@@ -83,12 +83,12 @@ def calib_channel_list():
             k = key_of(c)
             if stream in seen:
                 if k not in [s["key"] for s in seen[stream]["series"]]:
-                    seen[stream]["series"].append(dict(key=k, calib=c["calib"]))
+                    seen[stream]["series"].append(dict(key=k, calib=c["calib"], itype=c["itype"]))
                 continue
             site = SITE_NAME.get(name) or c["label"].split(" ")[0]
             base = c["label"].split(" (")[0]     # drop the "(cloud)/(Rayleigh)" method suffix
             title = f"{site} {base}" if SITE_NAME.get(name) else base
-            entry = dict(title=title, unit="C$_L$", series=[dict(key=k, calib=c["calib"])])
+            entry = dict(title=title, unit="C$_L$", series=[dict(key=k, calib=c["calib"], itype=c["itype"])])
             seen[stream] = entry
             order.append(entry)
     return order
@@ -121,16 +121,21 @@ def main():
 
     # EARLINET 2x2 figures
     erows = []
-    for code in ("sir", "ino", "ari", "lei", "cbw"):
+    for code in ("sir", "ino", "ari", "lei", "cbw", "sir_532"):
         try:
             s = EA.compare(code, "20250101", "20260630", return_profiles=True)
         except Exception as exc:
             s = {"error": repr(exc)}
         mm = EA.load_matlab_earlinet(code)
-        label = {"sir": "Palaiseau", "ino": "Magurele", "ari": "Leipzig", "lei": "Leipzig", "cbw": "Cabauw"}[code]
+        label = {"sir": "Palaiseau", "ino": "Magurele", "ari": "Leipzig", "lei": "Leipzig",
+                 "cbw": "Cabauw", "sir_532": "Palaiseau 532 nm"}[code]
         if s and "error" not in s:
             erows.append((code, label, s, mm))
-            FIG.fig_earlinet(code, label, s["betaE"], s["betaC"], s["grid"], s["times"], s, mm, OUT / f"fig_earlinet_{code}.png")
+            site = EA.SITES[code]
+            FIG.fig_earlinet(code, label, s["betaE"], s["betaC"], s["grid"], s["times"], s, mm,
+                             OUT / f"fig_earlinet_{code}.png", betaC_raw=s.get("betaC_raw"),
+                             instr=site.get("instr", "CHM15k (Rayleigh)"),
+                             itype=site.get("itype", "CHM15k"))
             print("   EARLINET %s: relbias=%+.1f%% (med %+.1f%%) r=%.2f (log %.2f) matched=%d -> fig_earlinet_%s.png"
                   % (code, s["relbias_pct"], s.get("medrelbias_pct", np.nan), s["r"],
                      s.get("r_log", np.nan), s["matched"], code), flush=True)
@@ -182,13 +187,14 @@ def write_report(rows, erows):
     L.append("## Mini-MPL 532 nm -> 1064 nm wavelength conversion (Palaiseau)\n")
     L.append("The Palaiseau Mini-MPL operates at **532 nm** and is compared to the **1064 nm** CHM15k "
              "reference, so its β_att is converted 532->1064 with the **molaer** model "
-             "(`intercompare.wavelength_correct`). The two scatterers have different wavelength dependence, "
-             "so a single Ångström exponent on the whole signal would be wrong: molecular (Rayleigh) "
-             "β_mol ∝ λ⁻⁴ drops by (532/1064)⁴ = **1/16**; aerosol (Mie) β_aer ∝ λ⁻ᵅ (α≈1) drops by "
-             "(532/1064)¹ = **1/2**. The model extracts β_aer(532) = β_total − β_mol(532), scales it by ½, "
-             "and recombines with the 1064 nm molecular. A naïve single-exponent conversion would scale the "
-             "molecular by λ⁻¹ instead of λ⁻⁴ (8× too large in clean air). Result: Mini-MPL **−54.6%, r 0.79** "
-             "vs the CHM; the residual reflects the fixed α=1 and the 532 nm Rayleigh calibration.\n")
+             "(`intercompare.wavelength_correct`): β_aer = β_total − β_mol·T²_mol(532) (ATTENUATED "
+             "molecular), scaled by (532/1064)^(−α), recombined with the attenuated 1064 nm molecular. "
+             "A single Ångström exponent on the whole signal would scale the molecular by λ⁻¹ instead of "
+             "λ⁻⁴ (8× too large in clean air). CAVEAT: in clean air the extraction subtracts two "
+             "nearly-equal numbers (aerosol ≈ 2 % of the 532 nm signal above the SNR gate), amplifying "
+             "any residual 532 nm scale/model error ≈ 13× into the converted value — the ≈ −36 % vs the "
+             "CHM15k measures this conditioning, NOT the instrument: at native 532 nm the Mini-MPL agrees "
+             "with the EARLINET SIRTA lidar to **−1.9 %** (see the `sir_532` comparison).\n")
     # EARLINET
     L.append("## EARLINET — ceilometer (CHM15k) vs EARLINET research-lidar reference\n")
     L.append("*The CHM stream is screened like the station intercomparison (quality flag, clouds via CBH, "

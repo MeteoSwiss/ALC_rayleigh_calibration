@@ -29,9 +29,34 @@ COLORS = np.array([[0.00, 0.45, 0.74], [0.85, 0.33, 0.10], [0.47, 0.67, 0.19], [
 CLIM = (-2.0, 1.0)
 BETALIM = (1e-2, 1e2)
 
+# General colour rules (2026-07-02): CHM15k / Rayleigh-calibrated reference = red; CL61 = blue
+# (Rayleigh) / dark grey (cloud); Mini-MPL = green; CL31 = orange; CL51 = purple; EARLINET = black.
+# Exception: several units of the SAME type at one station (Amsterdam 4x CHM15k) -> default palette.
+TYPE_COLORS = {"CHM15k": "#d62728", "CHM8k": "#d62728", "CL31": "#ff7f0e", "CL51": "#9467bd",
+               "Mini-MPL": "#2ca02c", "MPL": "#2ca02c", "EARLINET": "#000000"}
+CL61_COLORS = {"rayleigh": "#1f77b4", "cloud": "#404040"}
+
 
 def _col(k):
     return COLORS[k % len(COLORS)]
+
+
+def channel_colors(channels):
+    """Per-channel colours by instrument type + calibration method (see rules above).
+    channels: list of dicts with itype + calib (falls back to the palette when a type appears
+    more than once at the station, or the type is unknown)."""
+    from collections import Counter
+    cnt = Counter(c.get("itype", "") for c in channels)
+    cols = []
+    for k, c in enumerate(channels):
+        it = c.get("itype", "")
+        if it == "CL61":
+            cols.append(CL61_COLORS.get(c.get("calib", ""), "#404040"))
+        elif it in TYPE_COLORS and cnt[it] == 1:
+            cols.append(TYPE_COLORS[it])
+        else:
+            cols.append(_col(k))
+    return cols
 
 
 def _median_iqr(B):
@@ -44,9 +69,10 @@ def _median_iqr(B):
     return med, q1, q3, nz
 
 
-def _truncate_noise_floor(med, nz, z, zmin, nprof, minfrac=0.05):
-    """MATLAB: keep up to the first altitude above zMin where the median is no longer positive
-    (or coverage too thin). Above that the screened signal is noise."""
+def _truncate_noise_floor(med, nz, z, zmin, nprof, minfrac=0.20):
+    """Keep up to the first altitude above zMin where the median is no longer positive (or the
+    coverage too thin). The median is only shown where MORE THAN 20 % of the profiles contribute —
+    otherwise a handful of profiles could define the curve."""
     good = np.isfinite(med) & (med > 0) & (nz >= max(10, minfrac * nprof))
     keep = np.ones(med.size, bool)
     bad = np.where(~good & (z > zmin))[0]
@@ -66,6 +92,7 @@ def fig_multi_alc(R, cfg, out_png, title, zmax_plot=6000):
     zmin, zmax = cfg["zMin"], cfg["zMax"]
     band = (z >= zmin) & (z <= zmax)
     nch = len(R["channels"])
+    cols = channel_colors(R["channels"])
     tx = mdates.date2num(np.asarray(R["time_sync"]).astype("datetime64[s]").astype(datetime))
 
     fig = plt.figure(figsize=(19, 10))
@@ -81,20 +108,23 @@ def fig_multi_alc(R, cfg, out_png, title, zmax_plot=6000):
     common = np.logical_and.reduce(have)
     ncom = int(common.sum())
     synced = ncom > 0
+    xmax_seen = 0.0
     for k in range(nch):
         B = R["beta"][k][:, zmask]
         if synced:
             B = B[common]
         med, q1, q3, nz = _median_iqr(B)
         keep = _truncate_noise_floor(med, nz, zc, zmin, B.shape[0])
-        c = _col(k)
+        c = cols[k]
         m1 = keep & np.isfinite(q1) & (q1 > 0)
         axp.plot(q1[m1], zc[m1], ":", color=c, lw=1.0)
         m3 = keep & np.isfinite(q3) & (q3 > 0)
         axp.plot(q3[m3], zc[m3], ":", color=c, lw=1.0)
         axp.plot(med[keep], zc[keep], "-", color=c, lw=1.8, label=R["channels"][k]["label"])
+        if m3.any():
+            xmax_seen = max(xmax_seen, float(np.nanpercentile(q3[m3], 98)))
     axp.axhline(zmin, ls="--", color="k", lw=0.8); axp.axhline(zmax, ls="--", color="k", lw=0.8)
-    axp.set_xscale("log"); axp.set_xlim(*BETALIM); axp.set_ylim(0, zmax_plot)
+    axp.set_xlim(0, xmax_seen * 1.05 if xmax_seen > 0 else 1.0); axp.set_ylim(0, zmax_plot)
     axp.grid(alpha=0.3); axp.set_xlabel(r"$\beta_{att}$ [Mm$^{-1}$ sr$^{-1}$]"); axp.set_ylabel("Altitude a.g.l. [m]")
     axp.set_title("(a) Median (solid) $\\pm$ IQR (dotted)  %s-%s\n%s"
                   % (_fmt_my(cfg["start"]), _fmt_my(cfg["end"]),
@@ -115,7 +145,7 @@ def fig_multi_alc(R, cfg, out_png, title, zmax_plot=6000):
         if a.size > 6000:
             sel = np.random.default_rng(k).permutation(a.size)[:6000]; a, b = a[sel], b[sel]
         st = R["stats"][k]
-        axs.scatter(a, b, 4, color=_col(k), alpha=0.25, edgecolors="none",
+        axs.scatter(a, b, 4, color=cols[k], alpha=0.25, edgecolors="none",
                     label="%s (r=%.2f, %+.0f%%)" % (R["channels"][k]["label"], st["r"], st["relbias_pct"]))
         allv.append(a); allv.append(b)
     if allv:
@@ -142,14 +172,16 @@ def fig_multi_alc(R, cfg, out_png, title, zmax_plot=6000):
             if k == iref:
                 continue
             d = (R["beta"][k][:, band] - refb).ravel(); d = d[np.isfinite(d)]
-            axh.hist(d, edges, density=True, histtype="step", color=_col(k), lw=1.6,
+            axh.hist(d, edges, density=True, histtype="step", color=cols[k], lw=1.6,
                      label="%s (med %+.2f)" % (R["channels"][k]["label"], np.median(d)))
         axh.axvline(0, ls="--", color="k", lw=0.8); axh.set_xlim(-xmax, xmax)
     axh.grid(alpha=0.3); axh.set_xlabel(r"$\beta_{att}$ difference [Mm$^{-1}$ sr$^{-1}$]"); axh.set_ylabel("pdf")
     axh.set_title("(c) Difference vs %s" % R["channels"][iref]["label"], fontsize=10)
     axh.legend(loc="upper right", fontsize=7)
 
-    # (d-g) four channel pcolors (lower-right 2x2)
+    # (d-g) four channel pcolors (lower-right 2x2) — OmB style: ALL data in greyscale, only the
+    # KEPT gates (screening + SNR + coverage; what the medians/statistics use) in colour on top,
+    # so everything flagged stays grey.
     pc_pos = [(1, 1), (1, 2), (2, 1), (2, 2)]
     letters = "defg"
     last = None
@@ -158,7 +190,12 @@ def fig_multi_alc(R, cfg, out_png, title, zmax_plot=6000):
         ax = fig.add_subplot(gs[r_, c_])
         B = R["beta_disp"][k][:, zmask].T.copy()
         B[B < 1e-3] = 1e-3
-        pcm = ax.pcolormesh(tx, zc, np.log10(np.abs(B)), shading="auto", vmin=CLIM[0], vmax=CLIM[1], cmap="viridis")
+        ax.pcolormesh(tx, zc, np.log10(np.abs(B)), shading="auto", vmin=CLIM[0], vmax=CLIM[1],
+                      cmap="gray_r")
+        K = R["beta"][k][:, zmask].T.copy()
+        K[K < 1e-3] = 1e-3
+        pcm = ax.pcolormesh(tx, zc, np.log10(np.abs(K)), shading="auto", vmin=CLIM[0], vmax=CLIM[1],
+                            cmap="viridis")
         cbh = np.asarray(R["cbh"][k]) - R["station"]["altitude"] if R.get("cbh") else None
         if cbh is not None and np.isfinite(cbh).any():
             ax.plot(tx, np.where((cbh > 0) & (cbh < zmax_plot), cbh, np.nan), ".", color="k", ms=2)
@@ -172,6 +209,7 @@ def fig_multi_alc(R, cfg, out_png, title, zmax_plot=6000):
     if last is not None:
         cax = fig.add_axes([0.945, 0.07, 0.012, 0.55])
         cb = fig.colorbar(last, cax=cax); cb.set_label(r"log$_{10}\beta_{att}$")
+        fig.text(0.951, 0.655, "colour = kept\ngrey = flagged", fontsize=7, ha="left")
 
     fig.suptitle(title, fontweight="bold", fontsize=12)
     fig.savefig(out_png, dpi=200); plt.close(fig)
@@ -181,31 +219,35 @@ def fig_multi_alc(R, cfg, out_png, title, zmax_plot=6000):
 # ---------------------------------------------------------------------------
 #  EARLINET 2x2 figure
 # ---------------------------------------------------------------------------
-def fig_earlinet(code, label, betaE, betaC, grid, times, stats, matlab, out_png, zmin=500, zmax=5000, zmax_plot=6000):
+def fig_earlinet(code, label, betaE, betaC, grid, times, stats, matlab, out_png, zmin=500, zmax=5000,
+                 zmax_plot=6000, betaC_raw=None, instr="CHM15k (Rayleigh)", itype="CHM15k"):
     zmask = (grid >= 0) & (grid <= zmax_plot)
     z = grid[zmask]
     order = np.argsort(times)
     bE = betaE[order][:, zmask]; bC = betaC[order][:, zmask]; ts = np.asarray(times)[order]
-    colE, colC = COLORS[0], COLORS[1]
+    bCraw = betaC_raw[order][:, zmask] if betaC_raw is not None else None
+    colE = TYPE_COLORS["EARLINET"]                                 # black
+    colC = TYPE_COLORS.get(itype, TYPE_COLORS["CHM15k"])           # per-type (CHM red, MPL green)
 
     fig = plt.figure(figsize=(14, 9))
     gs = GridSpec(2, 2, figure=fig, hspace=0.22, wspace=0.2, left=0.07, right=0.95, top=0.91, bottom=0.08)
 
-    # (a) median matched profile +/- IQR. A gate's median is only shown when enough matched
-    # profiles contribute (>= max(10, 5%) of the matched sample) — otherwise a single profile
-    # could define the curve.
+    # (a) median matched profile +/- IQR. A gate's median is only shown when MORE THAN 20 % of
+    # the matched profiles contribute — otherwise a single profile could define the curve.
     ax1 = fig.add_subplot(gs[0, 0])
     nprof = bE.shape[0]
-    minn = max(10, int(round(0.05 * nprof)))
-    for B, c, nm in ((bE, colE, "EARLINET (%s)" % label), (bC, colC, "CHM15k (Rayleigh)")):
+    minn = max(10, int(round(0.20 * nprof)))
+    xmax_seen = 0.0
+    for B, c, nm in ((bE, colE, "EARLINET (%s)" % label), (bC, colC, instr)):
         med, q1, q3, nz = _median_iqr(B)
         good = np.isfinite(med) & (nz >= minn)
         q1c = np.where(q1 > 0, q1, np.nan); q3c = np.where(q3 > 0, q3, np.nan)
         v = good & np.isfinite(q1c) & np.isfinite(q3c)
         if v.any():
             ax1.fill_betweenx(z[v], q1c[v], q3c[v], color=c, alpha=0.15)
+            xmax_seen = max(xmax_seen, float(np.nanpercentile(q3c[v], 98)))
         ax1.plot(med[good], z[good], "-", color=c, lw=2.0, label=nm)
-    ax1.set_xscale("log"); ax1.set_xlim(*BETALIM); ax1.set_ylim(0, zmax_plot); ax1.grid(alpha=0.3)
+    ax1.set_xlim(0, xmax_seen * 1.05 if xmax_seen > 0 else 1.0); ax1.set_ylim(0, zmax_plot); ax1.grid(alpha=0.3)
     ax1.set_xlabel(r"$\beta_{att}$ [Mm$^{-1}$ sr$^{-1}$]"); ax1.set_ylabel("Altitude a.g.l. [m]")
     ax1.set_title(r"(a) Median matched profile ($\pm$ IQR)", fontsize=10); ax1.legend(loc="upper right", fontsize=8)
 
@@ -224,25 +266,33 @@ def fig_earlinet(code, label, betaE, betaC, grid, times, stats, matlab, out_png,
         ax2.set_xticks(ticks); ax2.set_yticks(ticks)
         ax2.set_xticklabels([r"10$^{%d}$" % t for t in ticks]); ax2.set_yticklabels([r"10$^{%d}$" % t for t in ticks])
         cb = fig.colorbar(hb, ax=ax2); cb.set_label("counts")
-    ax2.grid(alpha=0.3); ax2.set_xlabel("EARLINET (%s) [Mm$^{-1}$ sr$^{-1}$]" % label); ax2.set_ylabel("CHM15k (Rayleigh) [Mm$^{-1}$ sr$^{-1}$]")
+    ax2.grid(alpha=0.3); ax2.set_xlabel("EARLINET (%s) [Mm$^{-1}$ sr$^{-1}$]" % label); ax2.set_ylabel("%s [Mm$^{-1}$ sr$^{-1}$]" % instr)
     ax2.set_title("(b) Density (%.0f-%.0f m): r=%.2f (log r=%.2f), bias=%+.0f%% (med %+.0f%%), N=%d"
                   % (zmin, zmax, stats["r"], stats.get("r_log", np.nan),
                      stats["relbias_pct"], stats.get("medrelbias_pct", np.nan), stats["n"]), fontsize=10)
 
-    # (c) EARLINET curtain ; (d) CHM curtain (profile index x-axis, date ticks)
+    # (c) EARLINET curtain ; (d) CHM curtain (profile index x-axis, date ticks). The CHM curtain
+    # is OmB-style: the unscreened data in greyscale, only the KEPT gates in colour on top —
+    # everything flagged (clouds/fog/qf/SNR) stays grey.
     npr = bE.shape[0]
     tlbl = [np.datetime64(t, "D").astype(datetime).strftime("%y-%m-%d") for t in ts]
     ti = np.round(np.linspace(0, npr - 1, min(5, npr))).astype(int)
-    for tile, (B, nm) in ((gs[1, 0], (bE, "EARLINET (%s)" % label)), (gs[1, 1], (bC, "CHM15k (Rayleigh)"))):
+    for tile, (B, Braw, nm) in ((gs[1, 0], (bE, None, "EARLINET (%s)" % label)),
+                                (gs[1, 1], (bC, bCraw, instr))):
         ax = fig.add_subplot(tile)
+        if Braw is not None:
+            Bg = Braw.T.copy(); Bg[Bg < 1e-3] = 1e-3
+            ax.pcolormesh(np.arange(npr), z, np.log10(np.abs(Bg)), shading="auto",
+                          vmin=CLIM[0], vmax=CLIM[1], cmap="gray_r")
         Bp = B.T.copy(); Bp[Bp < 1e-3] = 1e-3
         pcm = ax.pcolormesh(np.arange(npr), z, np.log10(np.abs(Bp)), shading="auto", vmin=CLIM[0], vmax=CLIM[1], cmap="viridis")
         ax.set_xlim(0, max(npr - 1, 1)); ax.set_xticks(ti); ax.set_xticklabels([tlbl[i] for i in ti])
         ax.set_ylabel("Alt. a.g.l. [m]"); ax.set_xlabel("Matched profile (by date)")
-        ax.set_title("(%s) %s" % ("c" if tile == gs[1, 0] else "d", nm), fontsize=10)
+        ax.set_title("(%s) %s%s" % ("c" if tile == gs[1, 0] else "d", nm,
+                                    "" if Braw is None else "  (grey = flagged)"), fontsize=10)
         cb = fig.colorbar(pcm, ax=ax); cb.set_label(r"log$_{10}\beta_{att}$")
 
-    fig.suptitle("%s — EARLINET vs CHM15k (Rayleigh)  (%d matched)" % (label, npr),
+    fig.suptitle("%s — EARLINET vs %s  (%d matched)" % (label, instr, npr),
                  fontweight="bold", fontsize=12)
     fig.savefig(out_png, dpi=200); plt.close(fig)
     return out_png
@@ -251,14 +301,12 @@ def fig_earlinet(code, label, betaE, betaC, grid, times, stats, matlab, out_png,
 # ---------------------------------------------------------------------------
 #  Combined calibration time-series grid (all channels)
 # ---------------------------------------------------------------------------
-# calibration-method colours (general guideline): Rayleigh = blue, cloud = dark grey
-CAL_COLORS = {"rayleigh": "#1f77b4", "cloud": "#404040"}
-
-
 def fig_calib_timeseries(channels, calib_dir, out_png, ncol=5):
     """One panel per INSTRUMENT showing the absolute lidar constant C_L: raw daily (x) + Kalman
     (line +/- 1 sigma) for every calibration method available (CL61: Rayleigh AND cloud in the
-    same panel). channels: list of dict(title, unit, series=[dict(key, calib)]). Landscape."""
+    same panel). Colours follow the general per-type rules (CHM15k red, CL31 orange, CL51 purple,
+    Mini-MPL green; CL61 blue=Rayleigh / dark grey=cloud). channels: list of
+    dict(title, unit, series=[dict(key, calib, itype)]). Landscape."""
     have = []
     for c in channels:
         ser = [s for s in c["series"] if (Path(calib_dir) / f"{s['key']}.csv").is_file()]
@@ -270,7 +318,8 @@ def fig_calib_timeseries(channels, calib_dir, out_png, ncol=5):
         ax = axes[i // ncol][i % ncol]
         vals = []
         for s in c["series"]:
-            col = CAL_COLORS.get(s["calib"], "0.45")
+            col = (CL61_COLORS.get(s.get("calib", ""), "#404040") if s.get("itype") == "CL61"
+                   else TYPE_COLORS.get(s.get("itype", ""), "0.45"))
             t, cd, ck, cks = _read_calib_csv(Path(calib_dir) / f"{s['key']}.csv")
             ax.plot(t, cd, "x", color=col, ms=4, mew=0.8, alpha=0.65)
             good = np.isfinite(ck)
@@ -294,7 +343,8 @@ def fig_calib_timeseries(channels, calib_dir, out_png, ncol=5):
     for j in range(n, nrow * ncol):
         axes[j // ncol][j % ncol].axis("off")
     fig.suptitle("Lidar constant C$_L$ time series — raw daily (x) and Kalman estimate (line, $\\pm1\\sigma$); "
-                 "blue = Rayleigh, dark grey = cloud", fontweight="bold", fontsize=13)
+                 "CHM15k red, CL31 orange, CL51 purple, Mini-MPL green, CL61 blue=Rayleigh / dark grey=cloud",
+                 fontweight="bold", fontsize=13)
     fig.tight_layout(rect=(0, 0, 1, 0.985))
     fig.savefig(out_png, dpi=150); plt.close(fig)
     return out_png

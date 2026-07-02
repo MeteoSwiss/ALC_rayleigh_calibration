@@ -26,7 +26,7 @@
 | uccle | CL61 (cloud) | cloud | +35.9% | +27.4% | 0.931 | 0.847 | 52817 | -2.9% | 0.944 |
 | sirta | CHM15k (Rayleigh) *(ref)* | rayleigh | +0.0% | +0.0% | 1.000 | 1.000 | 184001 | +0.0% | 1.000 |
 | sirta | CL31 (cloud) | cloud | +1.8% | -1.2% | 0.852 | 0.781 | 85400 | -16.4% | 0.813 |
-| sirta | Mini-MPL (Rayleigh) | rayleigh | -37.4% | -41.9% | 0.820 | 0.839 | 50574 | -45.5% | 0.789 |
+| sirta | Mini-MPL (Rayleigh) | rayleigh | -33.0% | -36.3% | 0.836 | 0.845 | 60965 | -45.5% | 0.789 |
 | lindenberg | CHM15k (Rayleigh) *(ref)* | rayleigh | +0.0% | +0.0% | 1.000 | 1.000 | 833353 | +nan% | nan |
 | lindenberg | CL61 (cloud) | cloud | +28.0% | +42.5% | 0.976 | 0.962 | 775298 | +nan% | nan |
 | lindenberg | CL61 (Rayleigh) | rayleigh | +21.1% | +35.4% | 0.977 | 0.966 | 775298 | +nan% | nan |
@@ -53,7 +53,7 @@
 
 ## Mini-MPL 532 nm -> 1064 nm wavelength conversion (Palaiseau)
 
-The Palaiseau Mini-MPL operates at **532 nm** and is compared to the **1064 nm** CHM15k reference, so its β_att is converted 532->1064 with the **molaer** model (`intercompare.wavelength_correct`). The two scatterers have different wavelength dependence, so a single Ångström exponent on the whole signal would be wrong: molecular (Rayleigh) β_mol ∝ λ⁻⁴ drops by (532/1064)⁴ = **1/16**; aerosol (Mie) β_aer ∝ λ⁻ᵅ (α≈1) drops by (532/1064)¹ = **1/2**. The model extracts β_aer(532) = β_total − β_mol(532), scales it by ½, and recombines with the 1064 nm molecular. A naïve single-exponent conversion would scale the molecular by λ⁻¹ instead of λ⁻⁴ (8× too large in clean air). Result: Mini-MPL **−54.6%, r 0.79** vs the CHM; the residual reflects the fixed α=1 and the 532 nm Rayleigh calibration.
+The Palaiseau Mini-MPL operates at **532 nm** and is compared to the **1064 nm** CHM15k reference, so its β_att is converted 532->1064 with the **molaer** model (`intercompare.wavelength_correct`): β_aer = β_total − β_mol·T²_mol(532) (ATTENUATED molecular), scaled by (532/1064)^(−α), recombined with the attenuated 1064 nm molecular. A single Ångström exponent on the whole signal would scale the molecular by λ⁻¹ instead of λ⁻⁴ (8× too large in clean air). CAVEAT: in clean air the extraction subtracts two nearly-equal numbers (aerosol ≈ 2 % of the 532 nm signal above the SNR gate), amplifying any residual 532 nm scale/model error ≈ 13× into the converted value — the ≈ −36 % vs the CHM15k measures this conditioning, NOT the instrument: at native 532 nm the Mini-MPL agrees with the EARLINET SIRTA lidar to **−1.9 %** (see the `sir_532` comparison).
 
 ## EARLINET — ceilometer (CHM15k) vs EARLINET research-lidar reference
 
@@ -66,9 +66,12 @@ The Palaiseau Mini-MPL operates at **532 nm** and is compared to the **1064 nm**
 | ari (Leipzig) | +8.6% | +5.8% | 0.95 | 0.94 | 933 | +34.1% | 0.16 |
 | lei (Leipzig) | no EARLINET 1064 data in the 2025-2026 window | | | | | | |
 | cbw (Cabauw) | no EARLINET 1064 data in the 2025-2026 window | | | | | | |
+| sir_532 (Palaiseau 532 nm) | -2.2% | -1.9% | 0.88 | 0.88 | 54 | +nan% | nan |
 
 ![earlinet sir](figs_paper_validation/paper_python/fig_earlinet_sir.png)
 
 ![earlinet ino](figs_paper_validation/paper_python/fig_earlinet_ino.png)
 
 ![earlinet ari](figs_paper_validation/paper_python/fig_earlinet_ari.png)
+
+![earlinet sir_532](figs_paper_validation/paper_python/fig_earlinet_sir_532.png)

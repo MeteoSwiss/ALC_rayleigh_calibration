@@ -116,12 +116,13 @@ def _spectrum(t, y):
 
 
 def cl51_oscillation(res):
-    series = [("0-20000-0-06447_A_cloud_L1", "Uccle CL51 (cloud)"),
-              ("0-20000-0-06610_B_cloud_L1", "Payerne CL31 (cloud)"),
-              ("0-20000-0-06610_C_cloud_L1", "Payerne CL61 (cloud)")]
+    # per-type colours: CL51 purple, CL31 orange, CL61-cloud dark grey (general colour rules)
+    series = [("0-20000-0-06447_A_cloud_L1", "Uccle CL51 (cloud)", "#9467bd"),
+              ("0-20000-0-06610_B_cloud_L1", "Payerne CL31 (cloud)", "#ff7f0e"),
+              ("0-20000-0-06610_C_cloud_L1", "Payerne CL61 (cloud)", CLD_COL)]
     fig, axes = plt.subplots(len(series), 3, figsize=(19, 3.4 * len(series)))
     out = {}
-    for i, (key, label) in enumerate(series):
+    for i, (key, label, lcol) in enumerate(series):
         d = _read_calib(key)
         if d is None:
             continue
@@ -131,9 +132,9 @@ def cl51_oscillation(res):
         relk = 100 * (ck / med - 1)
         ax = axes[i]
         ax[0].plot(t, rel, ".", ms=2.5, color="0.6")
-        ax[0].plot(t, relk, "-", color=CLD_COL, lw=1.6)   # cloud calibrations -> dark grey
+        ax[0].plot(t, relk, "-", color=lcol, lw=1.6)
         ax[0].set_ylabel("C$_L$ / median - 1 [%]"); ax[0].grid(alpha=0.3)
-        ax[0].set_title(f"(a{i+1}) {label}: daily (dots) + Kalman (dark grey)")
+        ax[0].set_title(f"(a{i+1}) {label}: daily (dots) + Kalman")
         ax[0].xaxis.set_major_formatter(mdates.DateFormatter("%b %y"))
         sp = _spectrum(t, cd)
         dom_period = np.nan

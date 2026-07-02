@@ -23,7 +23,8 @@ from netCDF4 import Dataset
 from calibration.io.cams import ensure_cams_file
 from calibration.cloud.calibration import INSTRUMENT_CAL_DEFAULT
 from calibration.water_vapor_correction.water_vapor import (
-    cams_water_vapor_profile, two_way_wv_transmission, laser_spectrum_for, in_water_vapor_band)
+    cams_water_vapor_profile, two_way_wv_transmission, laser_spectrum_for, in_water_vapor_band,
+    cams_point_too_far)
 from calibration.rayleigh.atmosphere import load_standard_atmosphere, calculate_molecular_properties
 from calibration.config import InstrumentType
 
@@ -288,6 +289,11 @@ def apply_wv(beta, l2, lam0, fwhm):
         if cams is None:
             out[sel, :] = np.nan
             info["months_excluded"].append(str(p)); continue
+        # same guard as the calibration (flag -10 there): NEVER correct with a far-away
+        # domain-edge grid point — exclude the data instead of reporting it uncorrected.
+        if cams_point_too_far(cams, l2["lat"], l2["lon"]):
+            out[sel, :] = np.nan
+            info["months_excluded"].append(f"{p} (CAMS too far)"); continue
         tstart = np.datetime64(f"{p.year}-{p.month:02d}-01") - np.timedelta64(1, "D")
         tend = (np.datetime64(f"{p.year}-{p.month:02d}-01") + np.timedelta64(40, "D"))
         prof = cams_water_vapor_profile(cams, l2["lat"], l2["lon"], tstart, tend)
@@ -306,17 +312,18 @@ def apply_wv(beta, l2, lam0, fwhm):
 
 
 # --------------------------------------------------------------------------- wavelength
-_STD = None
 def _molecular_beta(z_agl, station_alt, wavelength_nm):
-    """Molecular attenuated-ish backscatter [Mm^-1 sr^-1] on z_agl from the US standard atmosphere."""
-    global _STD
-    if _STD is None:
-        _STD = load_standard_atmosphere(STD_ATM, np.arange(0, 15001, 30.0))
+    """Molecular ATTENUATED backscatter beta_mol*T^2_mol [Mm^-1 sr^-1] on z_agl from the US
+    standard atmosphere. The two-way molecular transmission matters: the measured signal the
+    molaer model subtracts from is attenuated, and at 532 nm T^2_mol is already ~0.85-0.90 by
+    2-3 km — subtracting the UNattenuated beta_mol there biases the extracted aerosol low by
+    ~beta_mol*(1-T^2), which after the 532->1064 recombination produced a spurious ~-40 % on the
+    Mini-MPL (the native 532 nm EARLINET comparison shows the instrument itself is within a few %)."""
     grid = np.arange(0, 15001, 30.0)
     atm = load_standard_atmosphere(STD_ATM, grid)
     mol = calculate_molecular_properties(atm.temperature, atm.pressure, grid, wavelength_nm * 1e-9)
-    bmol_grid = mol.beta_mol * 1e6  # m^-1 sr^-1 -> Mm^-1 sr^-1
-    return np.interp(z_agl, grid, bmol_grid, left=np.nan, right=np.nan)
+    bmol_att = mol.beta_mol * mol.transmission * 1e6   # (m^-1 sr^-1 -> Mm^-1 sr^-1) x two-way T^2
+    return np.interp(z_agl, grid, bmol_att, left=np.nan, right=np.nan)
 
 
 def wavelength_correct(beta, l2, lam, target, alpha, model):
@@ -572,6 +579,7 @@ def process(cfg):
              lat=valid[0]["l2"]["lat"], lon=valid[0]["l2"]["lon"]), channels=[], beta=[], beta_disp=[], cbh=[], stats=[])
     for g in gridded:
         R["channels"].append(dict(label=g["c"]["ch"]["label"], calib=g["c"]["ch"]["calib"],
+                                  itype=g["c"]["ch"].get("itype", ""),
                                   wavelength=g["c"]["l2"]["wavelength"], med_corr=g["c"]["med_corr"]))
         R["beta"].append(g["betaC"]); R["beta_disp"].append(g["dispC"]); R["cbh"].append(g["cbhU"])
         R["stats"].append(_stats(g["betaC"], ref, zmask))

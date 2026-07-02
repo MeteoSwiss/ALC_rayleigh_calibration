@@ -27,19 +27,29 @@ from validation.paper import intercompare as IC
 EARLINET = Path("A:/EARLINET")
 RANGE_REF = np.arange(0, 15001, 15.0)            # m AGL
 LR_1064 = 50.0                                   # fallback lidar ratio [sr] when the file has none
-# code -> CHM channel (wmo, ident) + overlap-min [m AGL]
+# code -> ceilometer/lidar channel (wmo, ident) + EARLINET overlap-min [m AGL].
+# Optional keys: folder (defaults to code), band (file tag, default b1064), wl_nm (default 1064),
+# instr + itype (compared instrument label/colour, default CHM15k).
 SITES = {
     "sir": dict(wmo="0-250-1001-07151", ident="B", overlap=2000.0),
     "lei": dict(wmo="0-20000-0-10471", ident="0", overlap=800.0),
     "cbw": dict(wmo="0-20000-0-06348", ident="A", overlap=1000.0),
     "ino": dict(wmo="0-20008-0-INO", ident="B", overlap=1100.0),
     "ari": dict(wmo="0-20000-0-10471", ident="0", overlap=800.0),
+    # native 532 nm: EARLINET SIRTA 532 channel vs the Trappes Mini-MPL (~15 km away). No
+    # wavelength conversion involved -> isolates the Mini-MPL 532 nm Rayleigh calibration scale.
+    "sir_532": dict(wmo="0-20000-0-07145", ident="A", overlap=2000.0, folder="sir_532",
+                    band="b0532", wl_nm=532.0, itype="Mini-MPL",
+                    instr="Mini-MPL Trappes (Rayleigh)"),
 }
 
 
 def read_earlinet(code, start, end, station_alt, overlap):
-    folder = EARLINET / code
-    files = glob.glob(str(folder / f"*{code}*b1064*.nc"))
+    site = SITES.get(code, {})
+    folder = EARLINET / site.get("folder", code)
+    band = site.get("band", "b1064")
+    wl_m = site.get("wl_nm", 1064.0) * 1e-9
+    files = glob.glob(str(folder / f"*{band}*.nc"))
     # dedup: key = start_end timestamps; keep the highest (qc level, version)
     best = {}
     for f in files:
@@ -58,10 +68,10 @@ def read_earlinet(code, start, end, station_alt, overlap):
         rank = (qc, ver)
         if key not in best or rank > best[key][0]:
             best[key] = (rank, f, parts[5])
-    # molecular Rayleigh on the uniform AGL grid (US standard atmosphere)
+    # molecular Rayleigh on the uniform AGL grid (US standard atmosphere), at the site's band
     grid = RANGE_REF
     atm = load_standard_atmosphere(IC.STD_ATM, grid + station_alt)
-    mol = calculate_molecular_properties(atm.temperature, atm.pressure, grid, 1064e-9)
+    mol = calculate_molecular_properties(atm.temperature, atm.pressure, grid, wl_m)
     alpha_mol = mol.alpha_mol               # m^-1 (for optical depth in metres)
     d0 = datetime.strptime(start, "%Y%m%d")
     d1 = datetime.strptime(end, "%Y%m%d") + timedelta(days=1)   # include the end day fully
@@ -137,6 +147,7 @@ def compare(code, start, end, return_profiles=False):
         return dict(error="no CHM calibration series")
     ck = IC.interp_calib(cal[0], cal[1], l2["time"])
     beta = l2["beta"] * (l2["calc"] / ck)[:, None]            # Mm^-1 sr^-1, on l2['alt'] (ASL)
+    beta_raw = beta.copy()      # calibrated, UNscreened — the grey "flagged" display layer
     # paper-consistent screening (same policy as the station intercomparison): quality_flag,
     # clouds (any CBH 0-20 km), fog/vertical visibility, +/-15 min temporal expansion.
     # EARLINET profiles are already cloud-screened by the SCC.
@@ -151,7 +162,7 @@ def compare(code, start, end, return_profiles=False):
     chm_dt = float(np.median(np.diff(chm_t.values).astype("timedelta64[s]").astype(float))) \
         if chm_t.size > 1 else np.nan
     z_chm_agl = l2["alt"] - l2["station_alt"]
-    pairs_e, pairs_c, pairs_t = [], [], []
+    pairs_e, pairs_c, pairs_craw, pairs_t = [], [], [], []
     for te, ae in zip(ea["time"], ea["att"]):
         lo = pd.Timestamp(te) - pd.Timedelta(minutes=30); hi = pd.Timestamp(te) + pd.Timedelta(minutes=30)
         sel = (chm_t >= lo) & (chm_t <= hi)
@@ -162,11 +173,13 @@ def compare(code, start, end, return_profiles=False):
         W = beta[np.asarray(sel)]
         with np.errstate(all="ignore"):
             cprof = np.nanmedian(W, axis=0)
+            cprof_raw = np.nanmedian(beta_raw[np.asarray(sel)], axis=0)   # unscreened (grey layer)
         cprof[~IC.snr_mask(W)] = np.nan     # per-gate SNR>=3 over the window
         if not np.isfinite(cprof).any():
             continue    # every CHM profile in the window was screened out (clouds/fog/qf)
         ci = np.interp(ea["grid"], z_chm_agl, cprof, left=np.nan, right=np.nan)
-        pairs_e.append(ae); pairs_c.append(ci); pairs_t.append(te)
+        ci_raw = np.interp(ea["grid"], z_chm_agl, cprof_raw, left=np.nan, right=np.nan)
+        pairs_e.append(ae); pairs_c.append(ci); pairs_craw.append(ci_raw); pairs_t.append(te)
     if not pairs_e:
         return dict(error="no temporal matches")
     E = np.array(pairs_e); C = np.array(pairs_c)
@@ -174,7 +187,8 @@ def compare(code, start, end, return_profiles=False):
     s = IC._stats(C, E, zmask)
     s["matched"] = len(pairs_e)
     if return_profiles:
-        s["betaE"] = E; s["betaC"] = C; s["grid"] = ea["grid"]; s["times"] = np.array(pairs_t)
+        s["betaE"] = E; s["betaC"] = C; s["betaC_raw"] = np.array(pairs_craw)
+        s["grid"] = ea["grid"]; s["times"] = np.array(pairs_t)
     return s
 
 
@@ -194,9 +208,9 @@ def load_matlab_earlinet(code):
 
 
 def run_all(start="20250101", end="20260630"):
-    """Compare every EARLINET site to its colocated CHM15k; return rows for the report."""
+    """Compare every EARLINET site to its colocated ceilometer/lidar; return rows for the report."""
     rows = []
-    for code in ("sir", "lei", "cbw", "ino", "ari"):
+    for code in ("sir", "lei", "cbw", "ino", "ari", "sir_532"):
         try:
             s = compare(code, start, end)
         except Exception as e:

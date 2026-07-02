@@ -33,7 +33,7 @@ operational sensitivity product).
 | E-PROFILE L2 monthly (`A:/E-PROFILE_L2_monthly`) | calibrated-provider β_att, quality flag, CBH, vertical visibility | per station config | ~30 s × ~15 m |
 | CSCS calibration archive (`E_PROFILE_calout_2025_2026`, synced 2026-07-02) | nightly Rayleigh (eprof_v2) + daily liquid-cloud (O'Connor) lidar constants C_L + Kalman | 2025-01 → 2026-06 | daily |
 | EARLINET SCC L2 `b1064` files (`A:/EARLINET`) | particle backscatter 1064 nm, cloud-screened, with per-scene assumed lidar ratio and `time_bounds` | 2025-01 → 2026-06 | ~30 m, 2–68 min averages (median 58 min) |
-| CAMS global reanalysis (`D:/CAMS`, monthly) | water-vapour profiles for the 910 nm correction | per month | 1° |
+| CAMS reanalysis (`D:/CAMS`) | water-vapour profiles for the 910 nm correction | monthly 2018-01 → 2026-05 + daily 2026-06, complete | monthly **1°**, daily (June 2026) **0.4°**; Europe box 27.5–73.5° N / −27–45° E — same 1° archive as the CSCS calibration runs |
 | US standard atmosphere 1976 | molecular (Rayleigh) backscatter/extinction | — | — |
 
 Stations: Payerne (CHM15k ref; CL31, CL61×2 calibs), Amsterdam (4 × CHM15k), Uccle (CL51 ref;
@@ -58,9 +58,18 @@ profile times (clamped at the series ends) and applied as a multiplier derived a
   vs the CHM15k; the consistent form reads +13.5 % (L1 path: +12.6 %).
 
 ### 3.2 Spectral corrections
-- **Water vapour (910 nm family — CL31, CL51, CL61):** β is divided by the two-way WV
-  transmission computed per month from the CAMS profile at the station, with the instrument's
-  laser line (centre/FWHM per type). Months with no CAMS are excluded (NaN) and reported.
+- **Water vapour (910 nm family — CL31, CL51, CL61):** applied twice, consistently: (i) inside
+  the **calibration** itself (`apply_wv_correction=1` for the Rayleigh options and explicitly
+  `True` in the operational cloud runner), so the C_L series are WV-corrected at the source;
+  (ii) in the **comparison**, where β of every 910 nm channel is divided by the two-way WV
+  transmission from the monthly CAMS profile at the station, with the instrument's laser line
+  (centre/FWHM per type). Both stages use the **1° monthly** CAMS (June 2026: 0.4° daily).
+  **Fail-safe, never fail-open:** a month with no CAMS file, or whose nearest grid point is
+  farther than max(1°, 1.5 grid cells) from the station (`cams_point_too_far`, the same guard
+  that gives flag −10 in the calibration), is **excluded (NaN) and reported** — data is never
+  passed through uncorrected or corrected with a domain-edge point. The 2025–2026 runs excluded
+  **no** months (complete archive; all 11 stations are well inside the Europe box, nearest grid
+  point ≤ 0.7°).
 - **Wavelength normalisation to the reference (1064 nm, Uccle: 910 nm):** aerosol Ångström
   exponent α = 1. The Mini-MPL (532 nm) uses the **molaer** model: β_aer = β − β_mol(532) is
   scaled by (532/1064)^(−α) and recombined with β_mol(1064), because molecular scattering scales
@@ -132,7 +141,7 @@ pair **med relbias / log r** is the headline):
 | Amsterdam | CHM15k D | **−3.3 %** | **0.97** | −1.0 % | 0.95 | 33 213 |
 | Uccle | CL61 (cloud) | +27.4 % | 0.85 | +35.9 % | 0.93 | 52 817 |
 | Palaiseau | CL31 (cloud) | **−1.2 %** | 0.78 | +1.8 % | 0.85 | 85 400 |
-| Palaiseau | Mini-MPL (Rayleigh, 532→1064) | −41.9 % | 0.84 | −37.4 % | 0.82 | 50 574 |
+| Palaiseau | Mini-MPL (Rayleigh, 532→1064) | −36.3 % | 0.85 | −33.0 % | 0.84 | 60 965 |
 | Lindenberg (L1) | CL61 (cloud) | +42.5 % | 0.96 | +28.0 % | 0.98 | 775 298 |
 | Lindenberg (L1) | CL61 (Rayleigh) | +35.4 % | **0.97** | +21.1 % | 0.98 | 775 298 |
 | Aosta | CL61 (cloud) | +11.0 % | **0.95** | −1.5 % | 0.98 | 81 447 |
@@ -140,13 +149,14 @@ pair **med relbias / log r** is the headline):
 | Camborne | CL61 (cloud) | +39.0 % | **0.96** | +19.8 % | 0.97 | 27 859 |
 | Camborne | CL61 (Rayleigh) | +52.7 % | 0.96 | +31.3 % | 0.97 | 27 859 |
 
-Ceilometer (CHM15k, Rayleigh-calibrated) vs EARLINET (500–5000 m AGL):
+Ceilometer / lidar vs EARLINET (500–5000 m AGL):
 
-| site | med relbias | log r | relbias (mean) | r (linear) | matched profiles |
-|---|---|---|---|---|---|
-| Palaiseau (`sir`) | **−4.4 %** | **0.91** | −2.4 % | 0.95 | 177 |
-| Magurele (`ino`) | **+2.1 %** | **0.92** | −3.2 % | 0.30 | 625 |
-| Leipzig (`ari`) | **+5.8 %** | **0.94** | +8.6 % | 0.95 | 933 |
+| site | compared instrument | med relbias | log r | relbias (mean) | r (linear) | matched profiles |
+|---|---|---|---|---|---|---|
+| Palaiseau (`sir`, 1064 nm) | CHM15k (Rayleigh) | **−4.4 %** | **0.91** | −2.4 % | 0.95 | 177 |
+| Magurele (`ino`, 1064 nm) | CHM15k (Rayleigh) | **+2.1 %** | **0.92** | −3.2 % | 0.30 | 625 |
+| Leipzig (`ari`, 1064 nm) | CHM15k (Rayleigh) | **+5.8 %** | **0.94** | +8.6 % | 0.95 | 933 |
+| Palaiseau (`sir_532`, **532 nm native**) | **Mini-MPL Trappes (Rayleigh)** | **−1.9 %** | **0.88** | −2.2 % | 0.88 | 54 |
 
 Notes: reference channels (r = 1 by construction) are omitted. Uccle CL61 (Rayleigh) has **no
 usable calibration series** in the 2026-07-02 archive (only 4 marginal nights; the unified engine
@@ -157,10 +167,14 @@ Leipzig `lei` and Cabauw `cbw` have no EARLINET 1064 nm files in 2025–2026.
 ### 4.2 Station intercomparison figures
 
 Each station figure has the same layout: **(a)** median ± IQR profiles over the **common hours**
-where every channel reports (N in the title) — the profiles describe the same atmospheric sample;
-**(b)** scatter of each channel vs the reference (500–3000 m, log-log, 6000-point subsample);
-**(c)** histogram of β_att differences vs the reference; **(d–g)** display-stream curtains
-(quality-flag masking only, clouds visible, black dots = cloud base).
+where every channel reports (N in the title; a gate is drawn only where > 20 % of the profiles
+contribute) — the profiles describe the same atmospheric sample; **(b)** scatter of each channel
+vs the reference (500–3000 m, log-log, 6000-point subsample); **(c)** histogram of β_att
+differences vs the reference; **(d–g)** curtains in the OmB style: **all data in greyscale,
+only the kept gates (screening + SNR + coverage — what the statistics use) in colour**; black
+dots = cloud base. Channel colours follow the general rules (CHM15k red, CL31 orange, CL51
+purple, Mini-MPL green, CL61 blue = Rayleigh / dark grey = cloud; Amsterdam's four CHM15k units
+use the distinct palette).
 
 ![payerne](figs_paper_report/fig_payerne.png)
 *Figure 3 — Payerne (0-20000-0-06610), Mar–May 2026. CHM15k (Rayleigh) reference. The two CL61
@@ -181,8 +195,9 @@ the CL51; its Rayleigh twin has no valid series in this archive.*
 
 ![sirta](figs_paper_report/fig_sirta.png)
 *Figure 6 — Palaiseau/SIRTA (0-250-1001-07151), Mar 2025–Feb 2026. CHM15k (Rayleigh) reference.
-The CL31 (cloud) agrees to ≈ ±2 %. The Mini-MPL (532 nm, molaer-converted to 1064 nm) is ≈ −40 %:
-a calibration-scale offset, not an Ångström-exponent effect (§5.3).*
+The CL31 (cloud) agrees to ≈ ±2 %. The Mini-MPL (green; 532 nm, molaer-converted to 1064 nm)
+reads ≈ −36 % — an artefact of the ill-conditioned wavelength conversion, not of the instrument:
+at native 532 nm it agrees with EARLINET to −1.9 % (Figure 13b, §5.3).*
 
 ![lindenberg](figs_paper_report/fig_lindenberg.png)
 *Figure 7 — Lindenberg (0-20000-0-10393), 2025–2026, compared from the native L1 (β = rcs₀/C_L).
@@ -205,9 +220,11 @@ same axes — their vertical offset IS the method discrepancy of §5.1). Input t
 
 ### 4.3 Ceilometer vs EARLINET
 
-Layout per site: **(a)** median matched profile ± IQR (both instruments, same matched sample);
-**(b)** density scatter over 500–5000 m with the full metric set in the title; **(c/d)** matched
-curtains by date (EARLINET blank below its overlap — excluded, not filled).
+Layout per site: **(a)** median matched profile ± IQR (both instruments, same matched sample;
+gates drawn only where > 20 % of profiles contribute; EARLINET black, CHM15k red); **(b)** density
+scatter over 500–5000 m with the full metric set in the title; **(c/d)** matched curtains by date
+(EARLINET blank below its overlap — excluded, not filled; the CHM curtain shows the unscreened
+data in grey with only the kept gates in colour).
 
 ![earlinet ari](figs_paper_report/fig_earlinet_ari.png)
 *Figure 11 — Leipzig `ari` vs CHM15k: 933 matched ≥30-min profiles, med +5.8 %, log r 0.94. The
@@ -223,6 +240,12 @@ overlap of this system limits the comparison to the free troposphere.*
 *Figure 13 — Magurele `ino` vs CHM15k: 625 matched profiles, med +2.1 %, log r 0.92. The linear r
 (0.30) is dominated by a handful of strong-aerosol events and is not representative — this site is
 the clearest argument for the log-space metric.*
+
+![earlinet sir 532](figs_paper_report/fig_earlinet_sir_532.png)
+*Figure 13b — **Native 532 nm**: Mini-MPL at Trappes vs the EARLINET SIRTA 532 nm channel
+(~15 km apart, no wavelength conversion involved): 54 matched profiles, med **−1.9 %**, log r
+0.88. This comparison isolates the Mini-MPL 532 nm Rayleigh calibration from the 532→1064 nm
+conversion — and vindicates it (§5.3).*
 
 ### 4.4 Effect of the ≥30-min / SNR3 gates
 
@@ -277,6 +300,22 @@ spurious −43 % for the Payerne CL61-Rayleigh in earlier drafts; the convention
 path (β = rcs₀/C_L) gives +12.6 %, and the corrected L2 formula reproduces it (+13.5 %). All
 constants are now expressed and displayed as the absolute C_L everywhere (§3.1, Figure 10).
 
+**Hypotheses tested and excluded for the ~15 % Rayleigh-vs-cloud C_L gap** (Payerne recalibration
+experiments, 2026-07-02): (i) *water vapour is applied and essential in both methods and in the
+comparison* — a 910 nm night is only calibrated when WV-correctable; at the 2.6–6 km fit windows
+T²_wv ≈ 0.78, i.e. the correction already raises the Rayleigh C_L by ≈ 28 %; (ii) *the laser-line
+assumption is immaterial*: recalibrating every successful night with the manufacturer wavelength
+(910.55 nm) instead of the Qmini-measured one (910.74 nm) changes C_L by **+0.5 %**, and the whole
+plausible (λ₀ ± 0.5 nm, FWHM 0.3–3.4 nm) envelope spans ≤ 2.4 %; (iii) *aerosol contamination of
+the fit window has the wrong sign* — it would inflate C_L and bias the calibrated β low, while the
+observed β is high (the eprof_v2 profile-outlier screen and aerosol gate also flag such nights);
+(iv) *the assumed lidar ratio (52 sr, Klett transmission below the window) contributes only the
+quoted 2σ ≈ 2–6 %* (±20 sr scan). Remaining candidates: weak-signal artefacts of the CL61 at the
+high fit windows (afterpulse/baseline in the vendor β_att) and the cloud method's own scale
+constants — the cloud method is anchored by its −0.6 % agreement with the independent CHM15k.
+Note the MATLAB reference implementation applies **no WV correction at all** (and hard-codes
+910 nm), so its historical CL61-Rayleigh constants are not comparable at the 25–30 % level.
+
 ### 5.2 910 nm cloud calibrations (Figures 5, 10) — the CL51/CL31 oscillation
 
 ![oscillations](figs_paper_report/fig_report_cl51_oscillation.png)
@@ -284,31 +323,60 @@ constants are now expressed and displayed as the absolute C_L everywhere (§3.1,
 with the Kalman (dark grey = cloud); (b) spectrum of the daily series; (c) seasonal cycle of the
 monthly median departure. Rows: Uccle CL51, Payerne CL31, Payerne CL61.*
 
-The single-photodiode 910 nm Vaisalas oscillate strongly: **Uccle CL51 seasonal amplitude ≈ 36 %**
-(dominant period ≈ 267 d, Kalman peak-to-peak 78 %, deep Nov–Jan minimum) and **Payerne CL31
-≈ 38 %** (≈ 132 d). The CL61 cloud series is markedly stabler (≈ 22 % over its record). Because the
-daily-interpolated constant is applied to β, a perfectly-tracking calibration cancels the
-oscillation in the comparison — the residual seasonal signature visible at SIRTA (CL31 med relbias
-−20 % DJF → +6 % MAM → −12 % SON) shows the cancellation is imperfect at the weekly/monthly scale.
-**Any result quoted for a 910 nm cloud-calibrated channel depends on the season sampled**; only
-full-year windows (SIRTA) average it out. Candidate mechanism: laser wavelength drift with
-internal temperature across the 910 nm water-vapour band, which modulates both the signal
-absorption and the calibration; a WV-transmission model conditioned on laser temperature would
-test it.
+The single-photodiode 910 nm Vaisalas oscillate strongly: **Uccle CL51 seasonal amplitude ≈ 36 %
+peak-to-peak** (dominant period ≈ 267 d, deep Nov–Jan extreme) and **Payerne CL31 ≈ 38 %**
+(≈ 132 d). The CL61 cloud series is markedly stabler (≈ 22 % over its shorter record).
 
-### 5.3 Palaiseau Mini-MPL (Figure 6) — a 532 nm calibration-scale offset, not α
+**This residual exists although the WV correction is ON everywhere** (verified: the calibration
+producing these C_L series ran with `apply_wv_correction` enabled on the complete 1° monthly CAMS,
+and the comparison applies the same 1°-monthly correction with zero excluded months, §3.2).
+The WV correction removes the first-order seasonal water-vapour signal — without it the
+oscillation would be substantially larger and the constant biased high (cf. the historical
+Payerne CL31 with/without-WV comparison: mean 1.36 vs 1.63, strongly flattened seasonality).
+What remains is consistent with the **laser centre-wavelength drift with internal temperature**
+across the steep 910 nm WV absorption band: the correction assumes a fixed nominal laser line
+(CL31 909.7 ± 6 nm, CL51 910.0 ± 3.4 nm), so a seasonally-drifting true line leaves a seasonal
+residual that the fixed-line model cannot cancel; the alignment of the C_L extremes with the
+driest months supports this. A WV-transmission model conditioned on the housekeeping laser
+temperature is the follow-up.
+
+Because the daily-interpolated constant is applied to β, a perfectly-tracking calibration cancels
+the oscillation in the comparison — the residual seasonal signature at SIRTA (CL31 med relbias
+−20 % DJF → +6 % MAM → −12 % SON) shows the cancellation is imperfect at the weekly/monthly
+scale. **Any result quoted for a 910 nm cloud-calibrated channel depends on the season sampled**;
+only full-year windows (SIRTA, Lindenberg/Aosta/Camborne) average it out.
+
+### 5.3 Palaiseau Mini-MPL (Figures 6, 13b) — the 532→1064 nm conversion is the problem, not the instrument
 
 ![minimpl alpha](figs_paper_report/fig_report_minimpl_alpha.png)
 *Figure 16 — Median relative bias of the Mini-MPL vs CHM15k as a function of the assumed aerosol
 Ångström exponent used in the 532→1064 nm molaer conversion.*
 
-Above the SNR3 gate the Mini-MPL band signal is **97.7 % molecular** (median aerosol fraction
-0.023), so the α choice barely matters: sweeping α = 0.3–1.8 moves the median bias only between
-−25 % and −50 % around the −42 % operating point — **no plausible α explains the offset**. The
-−40 % is a scale error of the 532 nm Rayleigh calibration itself (and/or the Mini-MPL overlap
-correction). The split diagnostics support a daytime noise/background component on top: −49 % day
-vs −39 % night, −61 % DJF vs −36 % MAM, and before the SNR gate the offset read −56 %: **the
-Mini-MPL numbers depend more on the SNR screening and the season than any other channel's.**
+Three independent probes decompose the apparent ≈ −40 % Mini-MPL offset:
+
+1. **The instrument and its 532 nm Rayleigh calibration are good.** The new native-wavelength
+   comparison (Figure 13b) — Mini-MPL Trappes vs the EARLINET SIRTA 532 nm channel, no conversion
+   involved — gives **med −1.9 %, log r 0.88** over 54 matched nights (2–5 km).
+2. **A conversion physics error was found and fixed**: the molaer model subtracted the
+   *unattenuated* molecular backscatter from the *attenuated* 532 nm signal; at 532 nm the
+   two-way molecular transmission is ≈ 0.94 by 2.5 km (negligible at 1064 nm). Using the
+   attenuated molecular profile recovered ≈ 5 points (med −41.9 % → −36.3 %).
+3. **The remaining −36 % is the ill-conditioning of the conversion itself.** Above the SNR gate
+   the Mini-MPL band signal is ≈ 98 % molecular, so the extracted aerosol
+   β_aer = β_att(532) − β_mol·T²(532) is a small difference of two nearly-equal large numbers:
+   any residual few-% error in the 532 nm scale or the molecular/transmission model is amplified
+   ≈ 13× into the converted 1064 nm value (β_total(532)/(β_aer/2 + β_mol(1064)) ≈ 1.3/0.1).
+   The altitude dependence proves it: med relbias is −32.6 % at 500–2000 m but **−45.3 % at
+   2000–3000 m and −48.3 % at 2000–5000 m** — growing exactly where the aerosol fraction
+   shrinks, the *opposite* of an overlap-loss signature (and the same amplification explains why
+   no plausible Ångström exponent helps, Figure 16: α = 0.3–1.8 spans only −25 % to −50 %).
+
+**Consequence for the paper:** the Mini-MPL should be validated at its native wavelength (the
+532 nm EARLINET comparison), where it performs within a few %. A 532→1064 nm elastic conversion
+by molecular subtraction is structurally unreliable in clean air — the converted comparison
+measures the conversion's conditioning, not the instrument. The regime splits (−49 % day / −39 %
+night; −61 % DJF / −36 % MAM) follow the same logic: cleaner scenes → smaller aerosol fraction →
+larger amplification.
 
 ### 5.4 Day/night and seasonal splits — all stations
 
@@ -361,4 +429,6 @@ Mar–May 2026 stations have MAM only.*
 | cloud screen | any CBH 0–20 km + fog/VV, ±15 min expansion |
 | Ångström α (aerosol) | 1.0 |
 | EARLINET lidar ratio | per-scene SCC value, fallback 50 sr |
-| noise-floor truncation (profiles) | median ≤ 0 or coverage < max(10, 5 %) |
+| median-profile display threshold | > 20 % of profiles must contribute per gate (≥ 10 absolute) |
+| noise-floor truncation (profiles) | median ≤ 0 above zMin |
+| colour rules | CHM15k/Rayleigh-reference red; CL61 blue (Rayleigh) / dark grey (cloud); Mini-MPL green; CL31 orange; CL51 purple; EARLINET black; Amsterdam multi-CHM15k: palette |
