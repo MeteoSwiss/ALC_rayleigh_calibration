@@ -191,11 +191,15 @@ def fig_earlinet(code, label, betaE, betaC, grid, times, stats, matlab, out_png,
     fig = plt.figure(figsize=(14, 9))
     gs = GridSpec(2, 2, figure=fig, hspace=0.22, wspace=0.2, left=0.07, right=0.95, top=0.91, bottom=0.08)
 
-    # (a) median matched profile +/- IQR
+    # (a) median matched profile +/- IQR. A gate's median is only shown when enough matched
+    # profiles contribute (>= max(10, 5%) of the matched sample) — otherwise a single profile
+    # could define the curve.
     ax1 = fig.add_subplot(gs[0, 0])
+    nprof = bE.shape[0]
+    minn = max(10, int(round(0.05 * nprof)))
     for B, c, nm in ((bE, colE, "EARLINET (%s)" % label), (bC, colC, "CHM15k (Rayleigh)")):
-        med, q1, q3, _ = _median_iqr(B)
-        good = np.isfinite(med)
+        med, q1, q3, nz = _median_iqr(B)
+        good = np.isfinite(med) & (nz >= minn)
         q1c = np.where(q1 > 0, q1, np.nan); q3c = np.where(q3 > 0, q3, np.nan)
         v = good & np.isfinite(q1c) & np.isfinite(q3c)
         if v.any():
@@ -247,47 +251,50 @@ def fig_earlinet(code, label, betaE, betaC, grid, times, stats, matlab, out_png,
 # ---------------------------------------------------------------------------
 #  Combined calibration time-series grid (all channels)
 # ---------------------------------------------------------------------------
-def fig_calib_timeseries(channels, calib_dir, out_png, ncol=3):
-    """channels: list of dict(key, title, unit). Reads <calib_dir>/<key>.csv."""
-    have = [c for c in channels if (Path(calib_dir) / f"{c['key']}.csv").is_file()]
+# calibration-method colours (general guideline): Rayleigh = blue, cloud = dark grey
+CAL_COLORS = {"rayleigh": "#1f77b4", "cloud": "#404040"}
+
+
+def fig_calib_timeseries(channels, calib_dir, out_png, ncol=5):
+    """One panel per INSTRUMENT showing the absolute lidar constant C_L: raw daily (x) + Kalman
+    (line +/- 1 sigma) for every calibration method available (CL61: Rayleigh AND cloud in the
+    same panel). channels: list of dict(title, unit, series=[dict(key, calib)]). Landscape."""
+    have = []
+    for c in channels:
+        ser = [s for s in c["series"] if (Path(calib_dir) / f"{s['key']}.csv").is_file()]
+        if ser:
+            have.append(dict(c, series=ser))
     n = len(have); nrow = int(np.ceil(n / ncol))
-    fig, axes = plt.subplots(nrow, ncol, figsize=(6.2 * ncol, 2.5 * nrow), squeeze=False)
+    fig, axes = plt.subplots(nrow, ncol, figsize=(5.4 * ncol, 2.6 * nrow), squeeze=False)
     for i, c in enumerate(have):
         ax = axes[i // ncol][i % ncol]
-        t, cd, ck, cks = [], [], [], []
-        with open(Path(calib_dir) / f"{c['key']}.csv", encoding="utf-8") as f:
-            for row in csv.DictReader(f):
-                try:
-                    t.append(datetime.strptime(row["time"][:10], "%Y-%m-%d"))
-                except Exception:
-                    continue
-                cd.append(_f(row.get("C_daily"))); ck.append(_f(row.get("C_kalman"))); cks.append(_f(row.get("C_kalman_std")))
-        t = np.array(t); cd = np.array(cd); ck = np.array(ck); cks = np.array(cks)
-        ax.plot(t, cd, "x", color="0.45", ms=4, mew=0.8, label="raw daily")
-        good = np.isfinite(ck)
-        if good.any():
-            ax.plot(t[good], ck[good], "-", color=COLORS[1], lw=1.6, label="Kalman")
-            sg = good & np.isfinite(cks)
-            if sg.any():
-                ax.fill_between(t[sg], (ck - cks)[sg], (ck + cks)[sg], color=COLORS[1], alpha=0.2)
-        # focus the y-axis on the actual coefficient values (the Kalman ±1σ band on sparse
-        # channels can be much larger than the spread and would otherwise flatten the panel).
-        vals = np.concatenate([cd[np.isfinite(cd)], ck[good]])
+        vals = []
+        for s in c["series"]:
+            col = CAL_COLORS.get(s["calib"], "0.45")
+            t, cd, ck, cks = _read_calib_csv(Path(calib_dir) / f"{s['key']}.csv")
+            ax.plot(t, cd, "x", color=col, ms=4, mew=0.8, alpha=0.65)
+            good = np.isfinite(ck)
+            if good.any():
+                ax.plot(t[good], ck[good], "-", color=col, lw=1.7, label=s["calib"])
+                sg = good & np.isfinite(cks)
+                if sg.any():
+                    ax.fill_between(t[sg], (ck - cks)[sg], (ck + cks)[sg], color=col, alpha=0.18)
+            vals.append(cd[np.isfinite(cd)]); vals.append(ck[good])
+        # focus the y-axis on the actual constant values (the Kalman ±1σ band on sparse channels
+        # can be much larger than the spread and would otherwise flatten the panel).
+        vals = np.concatenate(vals) if vals else np.array([])
         if vals.size:
             lo, hi = np.nanpercentile(vals, 2), np.nanpercentile(vals, 98)
             pad = 0.15 * (hi - lo) if hi > lo else 0.1 * abs(hi) + 1e-12
             ax.set_ylim(lo - pad, hi + pad)
         ax.set_title(c["title"], fontsize=9); ax.grid(alpha=0.3)
-        ax.set_ylabel(c.get("unit", "C$_L$ [a.u.]"), fontsize=8)
+        ax.set_ylabel(c.get("unit", "C$_L$"), fontsize=8)
         ax.tick_params(labelsize=7)
-        for lab in ax.get_xticklabels():
-            lab.set_rotation(0); lab.set_fontsize(7)
-        if i == 0:
-            ax.legend(fontsize=7, loc="upper left")
+        ax.legend(fontsize=7, loc="upper left")
     for j in range(n, nrow * ncol):
         axes[j // ncol][j % ncol].axis("off")
-    fig.suptitle("Calibration coefficient time series — raw daily (x) and Kalman estimate (line, $\\pm1\\sigma$)",
-                 fontweight="bold", fontsize=13)
+    fig.suptitle("Lidar constant C$_L$ time series — raw daily (x) and Kalman estimate (line, $\\pm1\\sigma$); "
+                 "blue = Rayleigh, dark grey = cloud", fontweight="bold", fontsize=13)
     fig.tight_layout(rect=(0, 0, 1, 0.985))
     fig.savefig(out_png, dpi=150); plt.close(fig)
     return out_png

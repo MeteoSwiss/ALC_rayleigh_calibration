@@ -21,6 +21,7 @@ import pandas as pd
 from netCDF4 import Dataset
 
 from calibration.io.cams import ensure_cams_file
+from calibration.cloud.calibration import INSTRUMENT_CAL_DEFAULT
 from calibration.water_vapor_correction.water_vapor import (
     cams_water_vapor_profile, two_way_wv_transmission, laser_spectrum_for, in_water_vapor_band)
 from calibration.rayleigh.atmosphere import load_standard_atmosphere, calculate_molecular_properties
@@ -193,7 +194,7 @@ def _l1_day(fp):
             vv = _read1d(nc, "vertical_visibility", t.size)
     except Exception:
         return None
-    grid, (rcsh, cbhh, vvh) = retime_hourly(t, [rcs, cbh, vv])
+    grid, (rcsh, cbhh, vvh) = retime_hourly(t, [rcs, cbh, vv], min_cov_s=MIN_AVG_S, snr_idx=(0,))
     return grid, rcsh, cbhh, vvh, rng
 
 
@@ -355,27 +356,63 @@ def screen(beta, l2):
 
 
 # --------------------------------------------------------------------------- gridding + stats
-def retime_hourly(time, arrays):
-    """Median-aggregate each (time x range) or (time,) array onto a regular 60-min grid."""
+MIN_AVG_S = 1800.0    # minimum temporal coverage per averaging window [s] (>= 30 min requirement)
+SNR_MIN = 3.0         # per-gate detection threshold over the averaging window (SNR3, cf.
+                      # calibration/sensitivity: beta_min = SNR * sigma(tau))
+_SNR_MIN_SAMPLES = 5  # need at least this many samples to estimate the noise at all
+
+
+def snr_mask(X, snr_min=SNR_MIN):
+    """Per-gate SNR of the window median: |median| / (robust sigma / sqrt(n_finite)).
+    X is (time x range) over ONE averaging window. Returns a boolean keep-mask per gate
+    (True = detected at >= snr_min). Windows too short to estimate noise keep everything.
+    Uses the same robust scale (1.4826*MAD) as the operational sensitivity product."""
+    from calibration.sensitivity.noise import robust_std
+    X = np.asarray(X, "f8")
+    if X.ndim != 2 or X.shape[0] < _SNR_MIN_SAMPLES:
+        return np.ones(X.shape[-1], bool)
+    with np.errstate(all="ignore"):
+        med = np.nanmedian(X, axis=0)
+        sig = robust_std(X, axis=0)
+        nfin = np.isfinite(X).sum(axis=0)
+        snr = med / (sig / np.sqrt(np.maximum(nfin, 1)))
+    # keep where the estimate is undefined (sig==0 with finite med) or passes the threshold
+    keep = ~np.isfinite(snr) | (snr >= snr_min)
+    keep[~np.isfinite(med)] = True   # NaN gates stay NaN anyway; do not turn them into "removed"
+    return keep
+
+
+def retime_hourly(time, arrays, min_cov_s=None, snr_idx=()):
+    """Median-aggregate each (time x range) or (time,) array onto a regular 60-min grid.
+    min_cov_s: bins whose samples span less than this coverage [s] are left NaN (enforces the
+    >= 30-min temporal averaging). snr_idx: indices of 2D arrays whose gates with window
+    SNR < SNR_MIN are removed (NaN) — the science stream, not the display stream."""
     t = pd.to_datetime(time)
     idx = pd.DatetimeIndex(t)
     grid = pd.date_range(idx.min().floor("h"), idx.max().ceil("h"), freq="60min")
     binid = np.clip(np.searchsorted(grid.values, idx.values, side="right") - 1, 0, len(grid) - 1)
+    dt = float(np.median(np.diff(idx.values).astype("timedelta64[s]").astype(float))) if t.size > 1 else np.nan
     out = []
-    for A in arrays:
+    for j, A in enumerate(arrays):
         if A.ndim == 1:
             G = np.full(len(grid), np.nan)
             for b in range(len(grid)):
                 sel = binid == b
                 if sel.any():
+                    if min_cov_s and np.isfinite(dt) and sel.sum() * dt < min_cov_s:
+                        continue
                     G[b] = np.nanmedian(A[sel])
         else:
             G = np.full((len(grid), A.shape[1]), np.nan)
             for b in range(len(grid)):
                 sel = binid == b
                 if sel.any():
+                    if min_cov_s and np.isfinite(dt) and sel.sum() * dt < min_cov_s:
+                        continue
                     with np.errstate(all="ignore"):
                         G[b] = np.nanmedian(A[sel], axis=0)
+                    if j in snr_idx:
+                        G[b, ~snr_mask(A[sel])] = np.nan
         out.append(G)
     return grid.values, out
 
@@ -453,15 +490,26 @@ def process(cfg):
             else:
                 med_corr = np.nan
         else:
-            # L2 path: re-scale the L2 product. Rayleigh: corr = calibration_constant_0 / C_L; cloud:
-            # the O'Connor C is a physical O(1) multiplier (beta_true = C * attbsc_0).
+            # L2 path: re-scale the L2 product. The calibration CSVs hold the absolute lidar
+            # constant C_L for BOTH methods (single physical constant everywhere).
+            #   Rayleigh: corr = calibration_constant_0 / C_L  (undo the provider constant)
+            #   Cloud:    corr = INSTRUMENT_CAL_DEFAULT / C_L  (the O'Connor multiplier; the
+            #             calout C_L is expressed vs the default applied in the L1 calibration)
             cal = load_calib_series(ch["key"], cfg.get("calibLevel"))
             if ch["calib"] != "none" and cal is None:
                 print(f"    [skip] {ch['label']}: no calibration series ({ch['key']})")
                 chans.append(None); continue
             if cal is not None and ch["calib"] != "none":
                 ck = interp_calib(cal[0], cal[1], l2["time"])
-                corr = (l2["calc"] / ck) if ch["calib"] == "rayleigh" else ck
+                if ch["calib"] == "rayleigh" and ch.get("itype") != "CL61":
+                    corr = l2["calc"] / ck
+                else:
+                    # cloud (all types) and CL61 (both methods): the calout C_L is defined against
+                    # the L1 rcs_0 with the applied default; the CL61 L2 calibration_constant_0 is
+                    # Vaisala's internal factor in a DIFFERENT unit system and must not be used
+                    # (validated against the convention-free L1 path: CL61-Rayleigh reads +13 %
+                    # there, while calc/C_L produced a spurious -43 %).
+                    corr = INSTRUMENT_CAL_DEFAULT.get(ch.get("itype", ""), 1.0) / ck
                 beta = beta * corr[:, None]
                 med_corr = float(np.nanmedian(corr))
             else:
@@ -487,10 +535,13 @@ def process(cfg):
     valid = [c for c in chans if c is not None]
     if not valid:
         return None
-    # temporal sync: per-channel hourly median, then union grid
+    # temporal sync: per-channel hourly median, then union grid. The science stream (scr) gets
+    # the >=30-min coverage requirement and the per-gate SNR>=3 removal; the display stream keeps
+    # everything visible.
     gridded = []
     for c in valid:
-        g, arrs = retime_hourly(c["l2"]["time"], [c["beta_scr"], c["beta_disp"], c["cbh"]])
+        g, arrs = retime_hourly(c["l2"]["time"], [c["beta_scr"], c["beta_disp"], c["cbh"]],
+                                min_cov_s=MIN_AVG_S, snr_idx=(0,))
         gridded.append(dict(c=c, grid=g, scr=arrs[0], disp=arrs[1], cbh=arrs[2]))
     union = np.unique(np.concatenate([g["grid"] for g in gridded]))
     # reindex each to union time grid

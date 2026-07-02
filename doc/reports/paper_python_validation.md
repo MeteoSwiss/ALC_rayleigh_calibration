@@ -14,20 +14,28 @@
 
 | station | channel | calib | Python relbias | med relbias | Python r | log r | Python N | MATLAB relbias | MATLAB r |
 |---|---|---|---|---|---|---|---|---|---|
-| payerne | CHM15k (Rayleigh) *(ref)* | rayleigh | +0.0% | +0.0% | 1.000 | 1.000 | 79431 | +0.0% | 1.000 |
-| payerne | CL31 (cloud) | cloud | +24.2% | -2.4% | 0.473 | 0.242 | 79348 | +31.8% | 0.477 |
-| payerne | CL61 (cloud) | cloud | -6.8% | -2.6% | 0.983 | 0.937 | 77522 | +16.0% | 0.987 |
-| payerne | CL61 (Rayleigh) | rayleigh | -42.9% | -39.5% | 0.986 | 0.940 | 77522 | +1.7% | 0.987 |
-| amsterdam | CHM15k A *(ref)* | rayleigh | +0.0% | +0.0% | 1.000 | 1.000 | 36437 | +0.0% | 1.000 |
-| amsterdam | CHM15k B | rayleigh | +30.4% | +21.3% | 0.952 | 0.971 | 28884 | +24.0% | 0.956 |
-| amsterdam | CHM15k C | rayleigh | -2.4% | -0.7% | 0.918 | 0.959 | 32868 | -14.9% | 0.925 |
-| amsterdam | CHM15k D | rayleigh | -5.1% | -6.6% | 0.938 | 0.953 | 34196 | -15.6% | 0.943 |
-| uccle | CL51 (cloud) *(ref)* | cloud | +0.0% | +0.0% | 1.000 | 1.000 | 66068 | +0.0% | 1.000 |
-| uccle | CL61 (cloud) | cloud | +37.1% | +28.4% | 0.932 | 0.830 | 54365 | -2.9% | 0.944 |
-| uccle | CL61 (Rayleigh) | rayleigh | +19.8% | +11.1% | 0.917 | 0.829 | 54365 | -34.7% | 0.942 |
-| sirta | CHM15k (Rayleigh) *(ref)* | rayleigh | +0.0% | +0.0% | 1.000 | 1.000 | 193058 | +0.0% | 1.000 |
-| sirta | CL31 (cloud) | cloud | -20.2% | -18.0% | 0.803 | 0.655 | 191232 | -16.4% | 0.813 |
-| sirta | Mini-MPL (Rayleigh) | rayleigh | -55.5% | -70.6% | 0.797 | 0.771 | 88063 | -45.5% | 0.789 |
+| payerne | CHM15k (Rayleigh) *(ref)* | rayleigh | +0.0% | +0.0% | 1.000 | 1.000 | 72643 | +0.0% | 1.000 |
+| payerne | CL31 (cloud) | cloud | +27.1% | +4.7% | 0.540 | 0.306 | 34939 | +31.8% | 0.477 |
+| payerne | CL61 (cloud) | cloud | -0.6% | +4.3% | 0.984 | 0.966 | 70739 | +16.0% | 0.987 |
+| payerne | CL61 (Rayleigh) | rayleigh | +13.5% | +20.9% | 0.987 | 0.970 | 70739 | +1.7% | 0.987 |
+| amsterdam | CHM15k A *(ref)* | rayleigh | +0.0% | +0.0% | 1.000 | 1.000 | 36220 | +0.0% | 1.000 |
+| amsterdam | CHM15k B | rayleigh | +23.7% | +15.4% | 0.955 | 0.973 | 28558 | +24.0% | 0.956 |
+| amsterdam | CHM15k C | rayleigh | -3.5% | -2.5% | 0.931 | 0.965 | 32481 | -14.9% | 0.925 |
+| amsterdam | CHM15k D | rayleigh | -1.0% | -3.3% | 0.953 | 0.966 | 33213 | -15.6% | 0.943 |
+| uccle | CL51 (cloud) *(ref)* | cloud | +0.0% | +0.0% | 1.000 | 1.000 | 64038 | +0.0% | 1.000 |
+| uccle | CL61 (cloud) | cloud | +35.9% | +27.4% | 0.931 | 0.847 | 52817 | -2.9% | 0.944 |
+| sirta | CHM15k (Rayleigh) *(ref)* | rayleigh | +0.0% | +0.0% | 1.000 | 1.000 | 184001 | +0.0% | 1.000 |
+| sirta | CL31 (cloud) | cloud | +1.8% | -1.2% | 0.852 | 0.781 | 85400 | -16.4% | 0.813 |
+| sirta | Mini-MPL (Rayleigh) | rayleigh | -37.4% | -41.9% | 0.820 | 0.839 | 50574 | -45.5% | 0.789 |
+| lindenberg | CHM15k (Rayleigh) *(ref)* | rayleigh | +0.0% | +0.0% | 1.000 | 1.000 | 833353 | +nan% | nan |
+| lindenberg | CL61 (cloud) | cloud | +28.0% | +42.5% | 0.976 | 0.962 | 775298 | +nan% | nan |
+| lindenberg | CL61 (Rayleigh) | rayleigh | +21.1% | +35.4% | 0.977 | 0.966 | 775298 | +nan% | nan |
+| aosta | CHM15k (Rayleigh) *(ref)* | rayleigh | +0.0% | +0.0% | 1.000 | 1.000 | 107298 | +nan% | nan |
+| aosta | CL61 (cloud) | cloud | -1.5% | +11.0% | 0.980 | 0.954 | 81447 | +nan% | nan |
+| aosta | CL61 (Rayleigh) | rayleigh | +14.9% | +35.4% | 0.978 | 0.950 | 81447 | +nan% | nan |
+| camborne | CHM15k (Rayleigh) *(ref)* | rayleigh | +0.0% | +0.0% | 1.000 | 1.000 | 113971 | +nan% | nan |
+| camborne | CL61 (cloud) | cloud | +19.8% | +39.0% | 0.968 | 0.963 | 27859 | +nan% | nan |
+| camborne | CL61 (Rayleigh) | rayleigh | +31.3% | +52.7% | 0.968 | 0.963 | 27859 | +nan% | nan |
 
 ![payerne validation](figs_paper_validation/paper_python/fig_payerne.png)
 
@@ -53,9 +61,9 @@ The Palaiseau Mini-MPL operates at **532 nm** and is compared to the **1064 nm**
 
 | site | Python relbias | med relbias | Python r | log r | matched | MATLAB relbias | MATLAB r |
 |---|---|---|---|---|---|---|---|
-| sir (Palaiseau) | -14.2% | -16.5% | 0.92 | 0.80 | 189 | +70.0% | 0.23 |
-| ino (Magurele) | +1.5% | +4.2% | 0.34 | 0.87 | 689 | -6.8% | 0.25 |
-| ari (Leipzig) | +8.4% | +5.6% | 0.94 | 0.92 | 986 | +34.1% | 0.16 |
+| sir (Palaiseau) | -2.4% | -4.4% | 0.95 | 0.91 | 177 | +70.0% | 0.23 |
+| ino (Magurele) | -3.2% | +2.1% | 0.30 | 0.92 | 625 | -6.8% | 0.25 |
+| ari (Leipzig) | +8.6% | +5.8% | 0.95 | 0.94 | 933 | +34.1% | 0.16 |
 | lei (Leipzig) | no EARLINET 1064 data in the 2025-2026 window | | | | | | |
 | cbw (Cabauw) | no EARLINET 1064 data in the 2025-2026 window | | | | | | |
 

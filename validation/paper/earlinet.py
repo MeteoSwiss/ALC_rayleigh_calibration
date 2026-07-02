@@ -78,11 +78,15 @@ def read_earlinet(code, start, end, station_alt, overlap):
                 alt_asl = np.asarray(nc.variables["altitude"][:], "f8").ravel()
                 bsc = IC._clean(nc.variables["backscatter"][:]).ravel()    # m^-1 sr^-1
                 # profile time = midpoint of the averaging window (time_bounds, s since 1970);
-                # fall back to the filename start time if absent or implausible
+                # fall back to the filename start time if absent or implausible. Profiles whose
+                # own averaging window is shorter than the 30-min requirement are skipped, so
+                # BOTH sides of every matched pair are >= 30-min averages.
                 tmid = None
                 if "time_bounds" in nc.variables:
                     tb = np.asarray(nc.variables["time_bounds"][:], "f8").ravel()
                     if tb.size >= 2 and np.all(np.isfinite(tb[:2])):
+                        if (tb[1] - tb[0]) < IC.MIN_AVG_S:
+                            continue
                         tmid = np.datetime64("1970-01-01") + np.timedelta64(int(round(tb[:2].mean())), "s")
                         if abs((tmid - np.datetime64(ftime)) / np.timedelta64(1, "h")) > 24:
                             tmid = None
@@ -140,8 +144,12 @@ def compare(code, start, end, return_profiles=False):
     ea = read_earlinet(code, start, end, l2["station_alt"], site["overlap"])
     if ea is None:
         return dict(error="no EARLINET profiles in window")
-    # match: for each EARLINET time, median CHM within +/-30 min, interp to EARLINET grid (AGL)
+    # match: for each EARLINET time, median CHM within +/-30 min, interp to EARLINET grid (AGL).
+    # The window must contain >= 30 min of CHM samples (temporal-averaging requirement) and gates
+    # with window SNR < 3 are removed (same SNR3 convention as the sensitivity product).
     chm_t = pd.to_datetime(l2["time"])
+    chm_dt = float(np.median(np.diff(chm_t.values).astype("timedelta64[s]").astype(float))) \
+        if chm_t.size > 1 else np.nan
     z_chm_agl = l2["alt"] - l2["station_alt"]
     pairs_e, pairs_c, pairs_t = [], [], []
     for te, ae in zip(ea["time"], ea["att"]):
@@ -149,8 +157,12 @@ def compare(code, start, end, return_profiles=False):
         sel = (chm_t >= lo) & (chm_t <= hi)
         if sel.sum() == 0:
             continue
+        if np.isfinite(chm_dt) and sel.sum() * chm_dt < IC.MIN_AVG_S:
+            continue    # < 30 min of CHM data in the window: averaging requirement not met
+        W = beta[np.asarray(sel)]
         with np.errstate(all="ignore"):
-            cprof = np.nanmedian(beta[np.asarray(sel)], axis=0)
+            cprof = np.nanmedian(W, axis=0)
+        cprof[~IC.snr_mask(W)] = np.nan     # per-gate SNR>=3 over the window
         if not np.isfinite(cprof).any():
             continue    # every CHM profile in the window was screened out (clouds/fog/qf)
         ci = np.interp(ea["grid"], z_chm_agl, cprof, left=np.nan, right=np.nan)

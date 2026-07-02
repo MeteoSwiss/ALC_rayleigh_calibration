@@ -8,12 +8,12 @@ The dashboard (scripts/run_all_l1_2026.py) calibrates every stream from the nati
 In the dashboard, BOTH methods store the absolute Wiegner lidar constant C_L (cloud C_L =
 applied_default / O'Connor_C, with applied_default = INSTRUMENT_CAL_DEFAULT).
 
-The paper report (validation/paper/intercompare.py) expects, per benchmark channel
-<WMO>_<ident>_<calib>, a CSV `time, C_daily, C_daily_std, C_kalman, C_kalman_std` where the value is
-  - Rayleigh : the lidar constant C_L              (intercompare uses corr = calibration_constant_0 / C_L)
-  - Cloud    : the O'Connor multiplier C (~1)       (intercompare uses corr = C, with beta_true = C*attbsc_0)
-So we convert the dashboard cloud C_L back to O'Connor C = INSTRUMENT_CAL_DEFAULT / C_L (verified to
-match the previous benchmark cloud series within the per-channel scatter). Rayleigh passes through.
+The paper report (validation/paper/intercompare.py) reads, per benchmark channel
+<WMO>_<ident>_<calib>, a CSV `time, C_daily, C_daily_std, C_kalman, C_kalman_std` whose value is the
+**absolute Wiegner lidar constant C_L for BOTH methods** (single physical constant everywhere —
+displayed as C_L in every figure). The consumers derive their multipliers from it:
+  - Rayleigh : corr = calibration_constant_0 / C_L
+  - Cloud    : corr = INSTRUMENT_CAL_DEFAULT / C_L   (the O'Connor multiplier, computed at use time)
 
 We write the SAME dashboard-derived series to `<key>.csv`, `<key>_L1.csv` and `<key>_L2.csv` for every
 benchmark + EARLINET channel, so whichever suffix a reader picks (intercompare calibLevel, the
@@ -37,19 +37,13 @@ FC = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/fullcal_l1_2026")
 CALIB = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/figs_paper_validation/paper_python/calib")
 CALIB.mkdir(parents=True, exist_ok=True)
 
-# Applied-constant defaults used by the L1 cloud calibration (calibration.cloud INSTRUMENT_CAL_DEFAULT).
-DEFAULT = {"CL31": 1e8, "CL51": 1e8, "CL61": 1.0, "CHM15k": 3e11, "CHM8k": 3e11,
-           "Mini-MPL": 5e5, "MPL": 5e5}
 _SUCCESS = ("1", "1.0", "0.5")
 
 
 def _to_report_value(itype, calib, cl):
-    """Dashboard C_L -> the report's convention: O'Connor C (cloud) or C_L (rayleigh)."""
-    if calib == "cloud":
-        d = DEFAULT.get(itype)
-        if not d or cl in (None, 0) or cl != cl:
-            return None
-        return d / cl
+    """Dashboard value -> report value: the lidar constant C_L, unchanged, for BOTH methods."""
+    if cl in (None, 0) or cl != cl:
+        return None
     return cl
 
 

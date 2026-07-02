@@ -37,7 +37,9 @@ STATIONS = {
     "uccle":     dict(ref=0, target=910.0,  mat="R_cl51_06447.mat", molaer=None, wmo="0-20000-0-06447"),
     "sirta":     dict(ref=0, target=1064.0, mat="R_sirta.mat",      molaer="Mini-MPL (Rayleigh)", wmo="0-250-1001-07151"),
     # new CL61+CHM15k pairs (no MATLAB reference -> mat file absent -> load_matlab returns {})
-    "lindenberg": dict(ref=0, target=1064.0, mat="R_lindenberg.mat", molaer=None, wmo="0-20000-0-10393"),
+    # lindenberg: the CL61 L2 product is not in the local archive -> read native L1 (rcs_0 / C_L)
+    "lindenberg": dict(ref=0, target=1064.0, mat="R_lindenberg.mat", molaer=None, wmo="0-20000-0-10393",
+                       dataLevel="L1"),
     "aosta":      dict(ref=0, target=1064.0, mat="R_aosta.mat",      molaer=None, wmo="0-380-5-1"),
     "camborne":   dict(ref=0, target=1064.0, mat="R_camborne.mat",   molaer=None, wmo="0-20000-0-03808"),
 }
@@ -54,6 +56,8 @@ def run_station(name):
     cfg = dict(wmo=sc["wmo"], start=st["start"], end=st["end"], referenceChannel=sc["ref"],
                channels=chans, lambda_target=sc["target"], alpha=1.0, zMin=500, zMax=3000,
                calibLevel="L1")   # native L1 (binned, eprof_v2 + fixed cloud); falls back to L2 where no L1
+    if sc.get("dataLevel"):
+        cfg["dataLevel"] = sc["dataLevel"]   # read native L1 rcs_0 and apply the calout C_L directly
     return IC.process(cfg), cfg
 
 
@@ -70,22 +74,23 @@ def load_matlab(mat):
 
 
 def calib_channel_list():
-    """All calibrated channels (for the combined time-series grid), site-labelled, in a sensible order."""
-    order, seen = [], set()
-    # CHM Rayleigh first, then other Rayleigh, then cloud — grouped by station as defined
-    for pref in ("rayleigh", "cloud"):
-        for name, st in BENCHMARK.items():
-            for c in st["channels"]:
-                if c["calib"] != pref:
-                    continue
-                k = key_of(c)
-                if k in seen:
-                    continue
-                seen.add(k)
-                site = SITE_NAME.get(name) or c["label"].split(" ")[0]
-                unit = "C [-]" if c["calib"] == "cloud" else "C$_L$ [a.u.]"
-                title = f"{site} {c['label']}" if SITE_NAME.get(name) else c["label"]
-                order.append(dict(key=k, title=title, unit=unit))
+    """One entry per INSTRUMENT for the combined C_L time-series grid: all its calibration
+    methods (CL61: Rayleigh + cloud) are drawn in the same panel, site-labelled."""
+    order, seen = [], {}
+    for name, st in BENCHMARK.items():
+        for c in st["channels"]:
+            stream = f"{c['wmo']}_{c['ident']}"
+            k = key_of(c)
+            if stream in seen:
+                if k not in [s["key"] for s in seen[stream]["series"]]:
+                    seen[stream]["series"].append(dict(key=k, calib=c["calib"]))
+                continue
+            site = SITE_NAME.get(name) or c["label"].split(" ")[0]
+            base = c["label"].split(" (")[0]     # drop the "(cloud)/(Rayleigh)" method suffix
+            title = f"{site} {base}" if SITE_NAME.get(name) else base
+            entry = dict(title=title, unit="C$_L$", series=[dict(key=k, calib=c["calib"])])
+            seen[stream] = entry
+            order.append(entry)
     return order
 
 
