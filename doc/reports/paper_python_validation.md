@@ -18,6 +18,7 @@
 | payerne | CL31 (cloud) | cloud | +27.1% | +4.7% | 0.540 | 0.306 | 34939 | +31.8% | 0.477 |
 | payerne | CL61 (cloud) | cloud | -0.6% | +4.3% | 0.984 | 0.966 | 70739 | +16.0% | 0.987 |
 | payerne | CL61 (Rayleigh) | rayleigh | +13.5% | +20.9% | 0.987 | 0.970 | 70739 | +1.7% | 0.987 |
+| payerne | CL61 (Rayleigh, offset-corr) | rayleigh | +8.6% | +16.8% | 0.984 | 0.966 | 70740 | +nan% | nan |
 | amsterdam | CHM15k A *(ref)* | rayleigh | +0.0% | +0.0% | 1.000 | 1.000 | 36220 | +0.0% | 1.000 |
 | amsterdam | CHM15k B | rayleigh | +23.7% | +15.4% | 0.955 | 0.973 | 28558 | +24.0% | 0.956 |
 | amsterdam | CHM15k C | rayleigh | -3.5% | -2.5% | 0.931 | 0.965 | 32481 | -14.9% | 0.925 |
