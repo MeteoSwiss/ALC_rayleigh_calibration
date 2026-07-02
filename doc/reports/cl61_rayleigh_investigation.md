@@ -62,8 +62,11 @@ extinction; a meaningful residual therefore requires the complete model
 C_L·β_mol·T²_mol·T²_wv·**T²_aer**, with T²_aer forward-integrated from the measured profile
 itself (LR = 50 sr). On the six clean calibration nights the fully-corrected residual at 3–6 km is
 **−0.021 Mm⁻¹sr⁻¹ (median; range −0.021…−0.035)**, against the covered-telescope
-b_dark(3–6 km) = −0.015: same sign and magnitude, the ≈ 40 % excess being compatible with a
-day/night dependence of the offset (the dark tests are daytime) and residual LR/WV model error.
+b_dark(3–6 km) = −0.015: same sign and magnitude. The ≈ 40 % excess is now CONFIRMED as the
+day/night dependence of the offset by the 25.5-h hood window itself, which spans a full night:
+**b(3–6 km) = −0.013 by day vs −0.019 by night (×1.44), and −0.007 vs −0.029 (×4.1) at 8–12 km**
+(`_cl61_hood_night_variability.py`, fig_cl61_hood_night) — the night-sky residual (−0.021) matches
+the directly-measured night hood value (−0.019) within 10 %.
 (An earlier draft of this analysis omitted T²_aer and overstated the residual by ≈ 30 %; the
 conclusion survives the correction.)
 
@@ -81,7 +84,14 @@ Per-night changes +4.0 %, +21.6 %, +22.7 %; the corrected data also yields **mor
 nights** (9 vs 7) — windows previously rejected by the |intercept| criterion become admissible,
 confirming the offset as the fit-spoiler. The daytime-measured b_dark thus removes ≈ ⅔ of the
 method discrepancy; the remainder is consistent with the ≈ 40 % larger night-time offset seen in
-§1b (a night-time covered test would settle it).
+§1b — and the 25.5-h hood window confirms it directly: the night offset is ×1.44 the daytime
+value at 3–6 km (−0.019 vs −0.013), so correcting with the night profile would close most of the
+remaining −9.8 %.
+
+![hood night](figs_paper_report/fig_cl61_hood_night.png)
+*Figure 2b — Hourly band-mean offset during the 25.5-h hood test (grey shading: night). The
+offset deepens at night — larger APD gain / colder detector — which is why the daytime-hood
+correction under-corrects the (night-time) Rayleigh calibration.*
 
 ![profiles before/after](figs_paper_report/fig_cl61_profiles_beforeafter.png)
 *Figure 2a — Nightly-mean CL61 (ident C) profiles on three clean calibration nights: original
