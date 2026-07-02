@@ -223,6 +223,20 @@ bias, §4) imprints seasonally. The cloud method integrates 0.1–2.4 km where t
 smaller — hence no visible cycle. Camborne behaves the same (ratio-corr +0.79). Payerne's 5-month
 record is too short to separate the terms.
 
+**Does the offset explanation apply to Aosta, and what changed around March 2026?** The monthly
+offset proxy (median nightly-mean β_att at 9–13 km on cirrus-free nights, where the true signal is
+≈ +0.03) drifts **+0.051 (Nov) → +0.021/+0.013 (Dec–Feb) → +0.001 (Mar) → +0.021 (Apr) → +0.046
+(May)**, i.e. an instrument offset wandering from ≈ +0.02 through ≈ −0.03 (March) back to
+≈ +0.015 — *sign-changing*, unlike the statically negative Payerne unit, but exactly the
+temperature-dependent, either-sign behaviour documented for CL61 residual backgrounds (Le et al.
+2026). **No configuration event occurred**: the L1 metadata are constant through the whole period
+(instrument firmware 1.2.7, serial U0850589, raw2l1 3.2.2) — the March transition is
+environmental (internal-temperature-driven background), not firmware/hardware. The observed
+Rayleigh–cloud convergence from ≈ April therefore reflects the offset relaxing from its winter
+negative extreme **combined with** the rising WV lever (corr +0.93, above); both push C_L(ray)
+upward into spring. Consequence: at Aosta a *static* dark correction would not suffice — hood
+tests with a temperature-indexed lookup (as in Le et al. 2026) are required.
+
 **Mountain-orography term (Aosta especially):** the 1° CAMS model surface at the nearest grid
 point sits at **1750 m for Aosta (station 570 m — offset +1180 m!)** and 1395 m for Payerne
 (+904 m); the moistest valley layer is simply absent from the WV column (the correction clamps
