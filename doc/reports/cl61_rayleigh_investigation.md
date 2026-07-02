@@ -83,6 +83,14 @@ confirming the offset as the fit-spoiler. The daytime-measured b_dark thus remov
 method discrepancy; the remainder is consistent with the ≈ 40 % larger night-time offset seen in
 §1b (a night-time covered test would settle it).
 
+![offset correction](figs_paper_report/fig_cl61_offset_correction.png)
+*Figure 2 — Per-night Rayleigh lidar constant before (grey) and after (blue) subtraction of the
+measured dark offset; arrows join the nights calibrated in both configurations. Dashed dark grey:
+the cloud-method (CHM15k-anchored) constant; dotted: the operational Rayleigh Kalman. The
+correction moves every paired night toward the cloud constant and unlocks additional nights
+(blue-only points); the corrected-only nights at low C_L illustrate the ±9 % per-night scatter
+(WV + noise) that the Kalman averages over.*
+
 **1d. Direct impact estimate on the molecular calibration.** Comparing the *uncorrected* dark
 distributions with the Rayleigh-calibration target signal C_L·β_mol·T²_mol·T²_wv
 (fig_cl61_dark_vs_molecular): the fractional β bias — which is the C_L bias for a fit window at
@@ -96,6 +104,13 @@ The observed −12 % method gap corresponds to an effective fit window at ≈ 4.
 where the operational windows sit (2.6–6 km, §"nights" table). The histograms also show the
 offset (−0.005…−0.014) is far below the per-sample noise width, i.e. invisible per profile and
 only emerging in the nightly mean — which is why it evaded routine inspection.
+
+![dark vs molecular](figs_paper_report/fig_cl61_dark_vs_molecular.png)
+*Figure 3 — Uncorrected covered-telescope β_att distributions (2–4 and 4–6 km bands, one
+histogram per test) against the Rayleigh-calibration target signal C_L·β_mol·T²_mol·T²_wv (red
+dashed) and the band-mean dark offset (dotted). The offset is a small displacement of a wide,
+near-Gaussian noise distribution — a few % of the width — yet amounts to 3–13 % of the molecular
+signal the calibration fits, and grows through the window range.*
 
 Magnitude closure: explaining C_L(ray)/C_L(cloud) = 0.88 requires a window-mean deficit of
 −0.12·C_L·β_mol·T² ≈ **−0.014 Mm⁻¹sr⁻¹** — bracketed by the daytime dark (−0.008…−0.017 over the
