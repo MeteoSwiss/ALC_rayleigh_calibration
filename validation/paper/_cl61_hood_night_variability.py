@@ -30,7 +30,7 @@ tt = np.array(tt)
 assert len(tt) == X.shape[0], (len(tt), X.shape)
 
 BANDS = [(3000, 6000), (8000, 12000)]
-hours = np.array([t.replace(minute=0, second=0) for t in tt])
+hours = np.array([t.replace(minute=0, second=0, microsecond=0) for t in tt])
 uh = sorted(set(hours))
 series = {b: [] for b in BANDS}
 for h in uh:
