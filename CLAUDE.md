@@ -61,6 +61,12 @@ Everything is driven by `ALC_*` env vars in `ops/config.sh` — the single file 
 - **balfrin (CSCS)**: from zueub434 `ssh -n -o BatchMode=yes balfrin`. Compute nodes have no
   internet; SLURM can park failed array tasks as held ("launch failed requeued held") — release
   with `scontrol release <jobid>`.
+  - **⚠️ CPU nodes ONLY — never GPU. GPU runs cost a fortune (a recent batch was > $10,000).**
+    Always submit to a **CPU partition**: `pp-short` (1 h; CI/pre-post), `pp-serial` (120 h, 1 core;
+    verification), `postproc` (24 h; analysis), `pp-long` (120 h; long analysis),
+    `pp-production`/`pp-prodntc`/`pp-dispntc` (production, restricted users).
+    **Do NOT use** the GPU partitions `debug`, `short`, `short-shared`, `normal`, `normal-shared`,
+    `lowprio`, `preemptible`, `production`. If a job seems to need a GPU, **stop and ask first**.
 
 ## Rayleigh overlays (dashboard)
 
