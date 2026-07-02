@@ -83,6 +83,14 @@ confirming the offset as the fit-spoiler. The daytime-measured b_dark thus remov
 method discrepancy; the remainder is consistent with the ≈ 40 % larger night-time offset seen in
 §1b (a night-time covered test would settle it).
 
+![profiles before/after](figs_paper_report/fig_cl61_profiles_beforeafter.png)
+*Figure 2a — Nightly-mean CL61 (ident C) profiles on three clean calibration nights: original
+(grey) and after subtraction of the smoothed dark offset (blue), against the molecular model
+scaled by the cloud constant (red dashed) and by the operational Rayleigh constant (dotted);
+shaded band = typical fit window (3–5 km). The corrected profile aligns with the
+cloud-constant model through the window, while the original tracks the (biased-low) Rayleigh
+model — the offset is exactly the wedge between the two methods.*
+
 ![offset correction](figs_paper_report/fig_cl61_offset_correction.png)
 *Figure 2 — Per-night Rayleigh lidar constant before (grey) and after (blue) subtraction of the
 measured dark offset; arrows join the nights calibrated in both configurations. Dashed dark grey:
