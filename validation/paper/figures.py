@@ -72,10 +72,19 @@ def fig_multi_alc(R, cfg, out_png, title, zmax_plot=6000):
     gs = GridSpec(3, 3, figure=fig, hspace=0.28, wspace=0.26,
                   left=0.05, right=0.93, top=0.92, bottom=0.07)
 
-    # (a) profile median +/- IQR — left column
+    # (a) profile median +/- IQR — left column.
+    # Common-time restriction: only hours where EVERY channel has a valid screened profile enter
+    # the medians, so the per-channel medians describe the same atmospheric sample (a sparse
+    # channel would otherwise be compared against medians of different weather).
     axp = fig.add_subplot(gs[:, 0])
+    have = [np.any(np.isfinite(R["beta"][k][:, zmask]), axis=1) for k in range(nch)]
+    common = np.logical_and.reduce(have)
+    ncom = int(common.sum())
+    synced = ncom > 0
     for k in range(nch):
         B = R["beta"][k][:, zmask]
+        if synced:
+            B = B[common]
         med, q1, q3, nz = _median_iqr(B)
         keep = _truncate_noise_floor(med, nz, zc, zmin, B.shape[0])
         c = _col(k)
@@ -87,8 +96,10 @@ def fig_multi_alc(R, cfg, out_png, title, zmax_plot=6000):
     axp.axhline(zmin, ls="--", color="k", lw=0.8); axp.axhline(zmax, ls="--", color="k", lw=0.8)
     axp.set_xscale("log"); axp.set_xlim(*BETALIM); axp.set_ylim(0, zmax_plot)
     axp.grid(alpha=0.3); axp.set_xlabel(r"$\beta_{att}$ [Mm$^{-1}$ sr$^{-1}$]"); axp.set_ylabel("Altitude a.g.l. [m]")
-    axp.set_title("(a) Median (solid) $\\pm$ IQR (dotted)  %s-%s"
-                  % (_fmt_my(cfg["start"]), _fmt_my(cfg["end"])), fontsize=10)
+    axp.set_title("(a) Median (solid) $\\pm$ IQR (dotted)  %s-%s\n%s"
+                  % (_fmt_my(cfg["start"]), _fmt_my(cfg["end"]),
+                     "N=%d common hours (all channels)" % ncom if synced
+                     else "no common hours - per-channel sampling"), fontsize=10)
     axp.legend(loc="upper right", fontsize=8)
 
     # (b) scatter vs reference
@@ -210,8 +221,9 @@ def fig_earlinet(code, label, betaE, betaC, grid, times, stats, matlab, out_png,
         ax2.set_xticklabels([r"10$^{%d}$" % t for t in ticks]); ax2.set_yticklabels([r"10$^{%d}$" % t for t in ticks])
         cb = fig.colorbar(hb, ax=ax2); cb.set_label("counts")
     ax2.grid(alpha=0.3); ax2.set_xlabel("EARLINET (%s) [Mm$^{-1}$ sr$^{-1}$]" % label); ax2.set_ylabel("CHM15k (Rayleigh) [Mm$^{-1}$ sr$^{-1}$]")
-    ax2.set_title("(b) Density (%.0f-%.0f m): r=%.2f, bias=%+.0f%%, N=%d"
-                  % (zmin, zmax, stats["r"], stats["relbias_pct"], stats["n"]), fontsize=10)
+    ax2.set_title("(b) Density (%.0f-%.0f m): r=%.2f (log r=%.2f), bias=%+.0f%% (med %+.0f%%), N=%d"
+                  % (zmin, zmax, stats["r"], stats.get("r_log", np.nan),
+                     stats["relbias_pct"], stats.get("medrelbias_pct", np.nan), stats["n"]), fontsize=10)
 
     # (c) EARLINET curtain ; (d) CHM curtain (profile index x-axis, date ticks)
     npr = bE.shape[0]

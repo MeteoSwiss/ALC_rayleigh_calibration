@@ -29,13 +29,17 @@ OUT.mkdir(parents=True, exist_ok=True)
 CALIB = OUT / "calib"
 MAT = Path("C:/Users/hervo/OneDrive/Documents/MATLAB/ALC/figs_paper_validation")
 SITE_NAME = {"payerne": "Payerne", "amsterdam": "Amsterdam", "uccle": "Uccle", "sirta": "Palaiseau",
-             "earlinet": ""}
+             "lindenberg": "Lindenberg", "aosta": "Aosta", "camborne": "Camborne", "earlinet": ""}
 # station -> (referenceChannel, lambda_target, MATLAB R file, molaer label, WIGOS for title)
 STATIONS = {
     "payerne":   dict(ref=0, target=1064.0, mat="R_payerne.mat",    molaer=None, wmo="0-20000-0-06610"),
     "amsterdam": dict(ref=0, target=1064.0, mat="R_amsterdam.mat",  molaer=None, wmo="0-20000-0-06240"),
     "uccle":     dict(ref=0, target=910.0,  mat="R_cl51_06447.mat", molaer=None, wmo="0-20000-0-06447"),
     "sirta":     dict(ref=0, target=1064.0, mat="R_sirta.mat",      molaer="Mini-MPL (Rayleigh)", wmo="0-250-1001-07151"),
+    # new CL61+CHM15k pairs (no MATLAB reference -> mat file absent -> load_matlab returns {})
+    "lindenberg": dict(ref=0, target=1064.0, mat="R_lindenberg.mat", molaer=None, wmo="0-20000-0-10393"),
+    "aosta":      dict(ref=0, target=1064.0, mat="R_aosta.mat",      molaer=None, wmo="0-380-5-1"),
+    "camborne":   dict(ref=0, target=1064.0, mat="R_camborne.mat",   molaer=None, wmo="0-20000-0-03808"),
 }
 
 
@@ -96,10 +100,12 @@ def main():
         for k, ch in enumerate(R["channels"]):
             s = R["stats"][k]; mm = mat.get(ch["label"], {})
             rows.append(dict(station=name, label=ch["label"], calib=ch["calib"], ref=(k == cfg["referenceChannel"]),
-                             py_relbias=s["relbias_pct"], py_r=s["r"], py_n=s["n"],
+                             py_relbias=s["relbias_pct"], py_medrel=s.get("medrelbias_pct", np.nan),
+                             py_r=s["r"], py_rlog=s.get("r_log", np.nan), py_n=s["n"],
                              mat_relbias=mm.get("relbias", np.nan), mat_r=mm.get("r", np.nan), mat_n=mm.get("n", 0)))
-            print("   %-20s PY relbias=%+7.1f%% r=%.3f N=%7d | MAT relbias=%+7.1f%% r=%.3f"
-                  % (ch["label"], s["relbias_pct"], s["r"], s["n"], mm.get("relbias", np.nan), mm.get("r", np.nan)), flush=True)
+            print("   %-20s PY relbias=%+7.1f%% (med %+6.1f%%) r=%.3f (log %.3f) N=%7d | MAT relbias=%+7.1f%% r=%.3f"
+                  % (ch["label"], s["relbias_pct"], s.get("medrelbias_pct", np.nan), s["r"],
+                     s.get("r_log", np.nan), s["n"], mm.get("relbias", np.nan), mm.get("r", np.nan)), flush=True)
         title = "%s (%s)  —  %s to %s" % (SITE_NAME[name], sc["wmo"], _d(cfg["start"]), _d(cfg["end"]))
         FIG.fig_multi_alc(R, cfg, OUT / f"fig_{name}.png", title)
         print(f"   -> fig_{name}.png", flush=True)
@@ -120,8 +126,9 @@ def main():
         if s and "error" not in s:
             erows.append((code, label, s, mm))
             FIG.fig_earlinet(code, label, s["betaE"], s["betaC"], s["grid"], s["times"], s, mm, OUT / f"fig_earlinet_{code}.png")
-            print("   EARLINET %s: relbias=%+.1f%% r=%.2f matched=%d -> fig_earlinet_%s.png"
-                  % (code, s["relbias_pct"], s["r"], s["matched"], code), flush=True)
+            print("   EARLINET %s: relbias=%+.1f%% (med %+.1f%%) r=%.2f (log %.2f) matched=%d -> fig_earlinet_%s.png"
+                  % (code, s["relbias_pct"], s.get("medrelbias_pct", np.nan), s["r"],
+                     s.get("r_log", np.nan), s["matched"], code), flush=True)
         else:
             erows.append((code, label, s, mm)); print("   EARLINET %s: %s" % (code, s), flush=True)
 
@@ -146,16 +153,23 @@ def write_report(rows, erows):
          "Uccle. Note the **Payerne CL61 Rayleigh** series is thin (only ~6 successful nights in the 2025-2026 "
          "L1 record — the native-signal molecular fit rarely finds an eligible window), so its constant is "
          "largely Kalman-predicted; the CL61 cloud calibration is robust.\n",
+         "*Metrics: **relbias** = 100·mean(channel−ref)/mean(ref); **med relbias** = "
+         "100·median((channel−ref)/ref) over ref>0; **r** = Pearson on linear β_att; **log r** = Pearson on "
+         "log₁₀ β_att over positive pairs. The linear moments are dominated by the rare large aerosol/cloud "
+         "values while the band also contains the molecular floor, so the log-space r and the median relative "
+         "bias are the robust indicators. Panel (a) of each station figure shows medians restricted to the "
+         "**common hours** where every channel reports (N in the panel title), so the profiles describe the "
+         "same atmospheric sample.*\n",
          "## Calibration coefficient time series (all channels)\n",
          "![calibration time series](figs_paper_validation/paper_python/fig_calib_timeseries.png)\n",
          "## Per-station validation\n",
-         "| station | channel | calib | Python relbias | Python r | Python N | MATLAB relbias | MATLAB r |",
-         "|---|---|---|---|---|---|---|---|"]
+         "| station | channel | calib | Python relbias | med relbias | Python r | log r | Python N | MATLAB relbias | MATLAB r |",
+         "|---|---|---|---|---|---|---|---|---|---|"]
     for r in rows:
         tag = " *(ref)*" if r["ref"] else ""
-        L.append("| %s | %s%s | %s | %+.1f%% | %.3f | %d | %+.1f%% | %.3f |"
-                 % (r["station"], r["label"], tag, r["calib"], r["py_relbias"], r["py_r"], r["py_n"],
-                    r["mat_relbias"], r["mat_r"]))
+        L.append("| %s | %s%s | %s | %+.1f%% | %+.1f%% | %.3f | %.3f | %d | %+.1f%% | %.3f |"
+                 % (r["station"], r["label"], tag, r["calib"], r["py_relbias"], r["py_medrel"],
+                    r["py_r"], r["py_rlog"], r["py_n"], r["mat_relbias"], r["mat_r"]))
     L.append("")
     for name in STATIONS:
         L.append(f"![{name} validation](figs_paper_validation/paper_python/fig_{name}.png)\n")
@@ -172,14 +186,19 @@ def write_report(rows, erows):
              "vs the CHM; the residual reflects the fixed α=1 and the 532 nm Rayleigh calibration.\n")
     # EARLINET
     L.append("## EARLINET — ceilometer (CHM15k) vs EARLINET research-lidar reference\n")
-    L.append("| site | Python relbias | Python r | matched | MATLAB relbias | MATLAB r |")
-    L.append("|---|---|---|---|---|---|")
+    L.append("*The CHM stream is screened like the station intercomparison (quality flag, clouds via CBH, "
+             "fog, ±15 min expansion); EARLINET profiles are SCC cloud-screened. EARLINET gates below the "
+             "instrument overlap are excluded (not filled); the transmission integral extends the lowest "
+             "trusted extinction to the ground; the lidar ratio is the per-scene SCC assumption (fallback 50 sr).*\n")
+    L.append("| site | Python relbias | med relbias | Python r | log r | matched | MATLAB relbias | MATLAB r |")
+    L.append("|---|---|---|---|---|---|---|---|")
     for code, label, s, mm in erows:
         if s and "error" not in s:
-            L.append("| %s (%s) | %+.1f%% | %.2f | %d | %+.1f%% | %.2f |"
-                     % (code, label, s["relbias_pct"], s["r"], s["matched"], mm.get("relbias", np.nan), mm.get("r", np.nan)))
+            L.append("| %s (%s) | %+.1f%% | %+.1f%% | %.2f | %.2f | %d | %+.1f%% | %.2f |"
+                     % (code, label, s["relbias_pct"], s.get("medrelbias_pct", np.nan), s["r"],
+                        s.get("r_log", np.nan), s["matched"], mm.get("relbias", np.nan), mm.get("r", np.nan)))
         else:
-            L.append("| %s (%s) | no EARLINET 1064 data in the 2025-2026 window | | | | |" % (code, label))
+            L.append("| %s (%s) | no EARLINET 1064 data in the 2025-2026 window | | | | | | |" % (code, label))
     L.append("")
     for code, label, s, mm in erows:
         if s and "error" not in s:

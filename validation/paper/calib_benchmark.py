@@ -84,6 +84,22 @@ BENCHMARK = {
         _ch("0-250-1001-07151", "A", "CL31", "cloud", "CL31 (cloud)", 48.71, 2.21, 156.0),
         _ch("0-20000-0-07145", "A", "Mini-MPL", "rayleigh", "Mini-MPL (Rayleigh)", 48.71, 2.21, 156.0),
     ]),
+    # New CL61 + CHM15k same-site pairs (Rayleigh CHM15k reference vs CL61 cloud + Rayleigh).
+    "lindenberg": dict(start="20250101", end="20260623", calStart="20250101", calEnd="20260630", channels=[
+        _ch("0-20000-0-10393", "0", "CHM15k", "rayleigh", "CHM15k (Rayleigh)", 52.21, 14.12, 123.0),
+        _ch("0-20000-0-10393", "C", "CL61", "cloud", "CL61 (cloud)", 52.21, 14.12, 123.0),
+        _ch("0-20000-0-10393", "C", "CL61", "rayleigh", "CL61 (Rayleigh)", 52.21, 14.12, 123.0),
+    ]),
+    "aosta": dict(start="20250101", end="20260623", calStart="20250101", calEnd="20260630", channels=[
+        _ch("0-380-5-1", "0", "CHM15k", "rayleigh", "CHM15k (Rayleigh)", 45.74, 7.36, 560.0),
+        _ch("0-380-5-1", "B", "CL61", "cloud", "CL61 (cloud)", 45.74, 7.36, 560.0),
+        _ch("0-380-5-1", "B", "CL61", "rayleigh", "CL61 (Rayleigh)", 45.74, 7.36, 560.0),
+    ]),
+    "camborne": dict(start="20250101", end="20260623", calStart="20250101", calEnd="20260630", channels=[
+        _ch("0-20000-0-03808", "A", "CHM15k", "rayleigh", "CHM15k (Rayleigh)", 50.22, -5.33, 87.0),
+        _ch("0-20000-0-03808", "C", "CL61", "cloud", "CL61 (cloud)", 50.22, -5.33, 87.0),
+        _ch("0-20000-0-03808", "C", "CL61", "rayleigh", "CL61 (Rayleigh)", 50.22, -5.33, 87.0),
+    ]),
     # EARLINET CHM15k references (for earlinet.py): Leipzig (lei/ari), Cabauw (cbw), Magurele (ino).
     "earlinet": dict(start="20250101", end="20260630", channels=[
         _ch("0-20000-0-10471", "0", "CHM15k", "rayleigh", "Leipzig CHM (lei/ari)", 51.35, 12.43, 125.0),
