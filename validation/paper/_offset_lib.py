@@ -144,6 +144,33 @@ def dominant_period(hp, rng, dr, lo, hi, pmin=20.0, pmax=1500.0):
     return float(lag[p0]), float(ac[p0]), rms
 
 
+def gate_fold(hp, rng, N, lo, hi):
+    """Phase-locked N-range-gate fixed pattern. A digitizer/ADC-interleave ripple is locked to the
+    sample-clock index, so it repeats EXACTLY every N gates. We estimate the N-value pattern (mean
+    removed) from the clean window [lo,hi] and return it evaluated at EVERY gate — so the ripple is
+    reconstructed at all altitudes (including the aerosol-contaminated near range) without any
+    period-drift dephasing that a sinusoid extrapolation would suffer."""
+    idx = np.arange(len(rng))
+    m = (rng >= lo) & (rng <= hi)
+    pat = np.array([np.nanmedian(hp[m][(idx[m] % N) == k]) for k in range(N)])
+    pat = pat - np.nanmean(pat)
+    return pat[idx % N]
+
+
+def split_half_repro(X, rng, lo=2000.0, hi=8000.0):
+    """Reproducibility of the high-pass offset across two independent halves of the profiles (even /
+    odd). A FIXED instrumental pattern reproduces (corr -> 1); residual atmosphere / noise does not.
+    This is the robust 'is there a real fixed offset' test (better than single-set autocorrelation)."""
+    dr = float(np.median(np.diff(rng)))
+    Pa = np.nanmedian(pspace(X[::2], rng), axis=0)
+    Pb = np.nanmedian(pspace(X[1::2], rng), axis=0)
+    hpa, hpb = highpass(Pa, dr), highpass(Pb, dr)
+    m = (rng >= lo) & (rng <= hi) & np.isfinite(hpa) & np.isfinite(hpb)
+    if m.sum() < 30:
+        return np.nan, hpa, hpb
+    return float(np.corrcoef(hpa[m], hpb[m])[0, 1]), hpa, hpb
+
+
 def fit_ripple(hp, rng, Lam, lo, hi):
     """Least-squares period-Lam ripple (fundamental + Nyquist harmonic), undamped. Returns dict."""
     m = (rng >= lo) & (rng <= hi)

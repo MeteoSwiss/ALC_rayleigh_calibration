@@ -28,9 +28,15 @@ NPZ = D / "network_offset"
 REPORT_FIG = Path("C:/Users/hervo/OneDrive/Documents/ALC_rayleigh_calibration/doc/reports/figs_paper_report")
 BETA_SCALE = 1e-2                       # rcs_0 (V*m^2) -> attenuated backscatter [Mm^-1 sr^-1], nominal C=1e8
 ZTOP = 6000.0                          # pcolor top
-STATIONS = [("CL51", "0-20000-0-06447", "A", "Uccle"),
-            ("CL51", "0-20000-0-06477", "A", "Diepenbeek"),
-            ("CL31", "0-20000-0-17601", "A", "Akrotiri")]
+import csv as _csv
+# correctable stations are read from the coefficient table (the set can change with the metric)
+STATIONS = []
+_cf = D / "network_offset_coeffs_final.csv"
+if _cf.exists():
+    for _r in _csv.DictReader(open(_cf, encoding="utf-8")):
+        if _r.get("correctable") == "1":
+            _site = _r["site"].split("(")[0].title().replace("_", " ")   # strip (ref)/(hood), tidy
+            STATIONS.append((_r["itype"], _r["wmo"], _r["ident"], _site))
 DAY_OVERRIDE = {"Uccle": ("2026", "05", "20260526"), "Diepenbeek": ("2026", "05", "20260526"),
                 "Akrotiri": ("2026", "05", "20260527")}    # pre-found clearest days (skip the scan)
 
@@ -44,7 +50,7 @@ def load_day(wmo, ident, ymd):
     return tt, r, x, cbh
 
 
-def pick_clear_day(wmo, ident, months=("05", "04", "06")):
+def pick_clear_day(wmo, ident, months=("05",)):
     """Return (datetimes, range, rcs_0, cbh) for the day with the most cloud-free profiles."""
     best = None
     for f in list_files(wmo, ident, months):
@@ -110,8 +116,8 @@ for itype, wmo, ident, site in STATIONS:
     axc.set_xscale("log"); axc.set_ylim(0, ZTOP / 1000); axc.set_xlabel(r"β_att [Mm$^{-1}$sr$^{-1}$]")
     axc.set_ylabel("height [km]"); axc.set_title("(c) day-mean profile (clear)"); axc.legend(fontsize=9); axc.grid(alpha=0.3)
 
-    # --- row 2: free-troposphere zoom where the ripple is resolvable ---
-    zlo, zhi = 2.5, 4.5
+    # --- row 2: zoom spanning the OLD 1.8 km cutoff (the correction now extends to ALL altitudes) ---
+    zlo, zhi = 1.5, 3.5
     zmz = (rng >= zlo * 1000) & (rng <= zhi * 1000)
     extz = [tnum[0], tnum[-1], zlo, zhi]
     bz = beta_u[:, zmz].T; bzc = beta_c[:, zmz].T
@@ -136,7 +142,7 @@ for itype, wmo, ident, site in STATIONS:
 
     fig.suptitle(f"{site} {itype} — digitizer-ripple correction on the aerosol backscatter "
                  f"(subtract b_phys from L1 rcs₀; Λ={Lam:.0f} m)", fontweight="bold", fontsize=13)
-    out = D / f"fig_corrected_signal_{site.lower()}_{itype}.png"
+    out = D / f"fig_corrected_signal_{site.lower().replace(' ', '_')}_{itype}.png"
     fig.savefig(out, dpi=145, bbox_inches="tight")
     fig.savefig(REPORT_FIG / out.name, dpi=145, bbox_inches="tight")
     print("  saved", out.name, flush=True)
