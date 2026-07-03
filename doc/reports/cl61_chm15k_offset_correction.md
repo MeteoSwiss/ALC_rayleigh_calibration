@@ -107,7 +107,7 @@ raised. Averaging over the 3–5 km band **and** the full session, however, it i
 | **CHM15k** | negative, all 4 sessions | **−5.4σ** | −18 % (of a *very weak* 1064 nm molecular) |
 | **CL31** | small, stable | — | offset ≳ molecular (no fittable signal → not Rayleigh-calibratable) |
 
-### 2.2 Physical models — two different mechanisms
+### 2.2 Physical models — three distinct mechanisms
 
 ![CL61 model](figs_paper_report/fig_cl61_offset_physical_model.png)
 *Figure 2 — CL61 offset (910 nm, analog): AC-coupling high-pass pulse response. (a) raw P with the
@@ -253,9 +253,13 @@ Significance of the offset is **not** the same as a calibration bias:
   weak 1064 nm molecular; on the full record, removing it shifts the CHM15k Rayleigh **+10.3 %
   (paired, n=11)** and unlocks nights (§2.6) — a *consistent* effect, **not** merely within-scatter
   noise as the earlier 2-night estimate (+11.5 %) suggested. The decisive point is that this shift
-  moves the CHM15k **off** its −0.6 % agreement with the CL61 cloud method and its EARLINET closure
-  (intercomparison −7.1 %), so the **native CHM15k constant is retained**. Operationally the
+  moves the CHM15k **off** its −1.5 % agreement with the CL61 cloud method and its EARLINET closure
+  (intercomparison −6.3 %), so the **native CHM15k constant is retained**. Operationally the
   strong-signal cloud/Kalman path is offset-immune regardless.
+- **CL31 (real offset, cloud-calibrated):** the two-resonance ringing (§2.2) cannot be Rayleigh-fit,
+  but removing it from L1 rcs_0 measurably **improves the CL31↔reference correlation (r 0.51→0.64)**
+  and trims the intercomparison bias (+27.0 %→+22.6 %) — the ripple was a systematic range-pattern
+  decorrelating the CL31; the large residual is its own low-SNR floor.
 
 **Take-away:** a weak-signal electronic offset is present in every ceilometer and measurably shifts
 the Rayleigh fit when removed — but whether *correcting* it is right depends on whether the native
