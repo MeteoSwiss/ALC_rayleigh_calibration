@@ -22,10 +22,16 @@ C_L(Rayleigh) = 1.25 vs C_L(cloud) = 1.43 at Payerne (ratio 0.88). All probe scr
 **Conclusion:** the CL61 vendor β_att carries a systematic **background over-subtraction** whose
 relative impact is largest exactly where the Rayleigh method fits (weak molecular signal,
 2.6–6 km). The liquid-cloud method (strong signal, 0.1–2.4 km) is essentially immune — and it is
-anchored by the CHM15k (−0.6 %) whose own constant closes the AERONET AOD (ratio 0.85, consistent
-with 1 at winter AODs of 0.03). **Use the cloud constant for the CL61; treat the native Rayleigh
-constant as biased low by ≈ 10–15 % until the baseline is handled.** A ≈ −4 % secondary term comes
-from the monthly-CAMS WV over-correction on dry calibration nights.
+anchored by the CHM15k (−0.6 %) whose **cloud/Kalman** constant closes the AERONET AOD (ratio 0.85,
+consistent with 1 at winter AODs of 0.03). **Use the cloud constant for the CL61; treat the native
+Rayleigh constant as biased low by ≈ 10–15 % until the baseline is handled.** A ≈ −4 % secondary
+term comes from the monthly-CAMS WV over-correction on dry calibration nights.
+The hood tests on all three co-located Payerne instruments (§6) show the weak-signal offset is
+**universal**: the CHM15k anchor itself carries a −15…−25 % Rayleigh-window offset (verified as a
+real +11.5 % calibration bias) and the CL31 has no fittable molecular signal at all — but the
+CHM15k *cloud* constant is offset-immune (strong near-range signal), so the anchor stands. The
+takeaway: no ceilometer's native Rayleigh constant is a clean reference; the cloud method's
+near-range immunity is precisely why it is the valid cross-instrument anchor.
 
 ## 1. The signal offset: direct measurement, consistency, and causal test
 
@@ -382,7 +388,57 @@ is the outlier in every respect** (ratio > 1, no WV correlation): its "L1" is co
 Cloudnet, i.e. a different processing chain — supporting the baseline explanation (different
 background handling → different Rayleigh bias).
 
-## 6. Literature context
+## 6. The offset across the three co-located Payerne instruments (CHM15k, CL31, CL61)
+
+Four hood sessions in 2026 (12 May, 26–27 May 24 h, 9 Jun, 23 Jun) covered **all three** Payerne
+ceilometers in turn (per-instrument windows from the operator log). This lets us test whether the
+weak-signal offset is a CL61 quirk or a general ceilometer phenomenon — and, critically, whether
+the **anchor (CHM15k)** carries one. Because the three instruments report `rcs_0` in different
+units (CHM15k counts·s⁻¹·m², CL31 V·m², CL61 m⁻¹sr⁻¹), the offset is compared as a **fraction of
+each instrument's own clear-night molecular signal** at the same heights (median of three clear
+nights, self-consistent units), i.e. the fractional signal bias = the C_L bias for a fit there.
+
+| instrument | hood offset (3–5 km), 4 sessions | fractional bias 3–5 km | molecular lost above | verdict |
+|---|---|---|---|---|
+| **CHM15k** (anchor) | all four negative | **−15 … −25 %** | ~5 km | offset **larger** than CL61 |
+| **CL61** | all four negative | **−11 … −13 %** | ~6.5 km | reproduces §1 |
+| **CL31** | small, stable | offset ≳ molecular | ~7.7 km (max range) | **no molecular signal → not Rayleigh-calibratable** |
+
+![fractional bias](figs_paper_report/fig_hood_fractional_bias.png)
+*Figure 6 — Hood offset as a fraction of each instrument's own clear-night molecular signal
+(median of three clear nights). Orange = Rayleigh window 3–5 km; grey = molecular below 3σ noise.
+All three are negative through the fit window; CHM15k's is the largest; CL31 has essentially no
+molecular signal to fit.*
+
+**6a. The anchor (CHM15k) carries the largest offset — yet stays valid.** The CHM15k hood offset
+is robustly negative across all four sessions and is **−15…−25 %** of its (weak) 3–5 km molecular
+return — larger than CL61's. **Verified as a real calibration bias, not a hood artefact:** removing
+b_dark(z) from the clean-night L1 and re-running the CHM15k Rayleigh calibration shifts C_L by
+**+11.5 %** (per-night +10.3 %, +12.6 %; `_chm15k_offset_verify.py`), in the predicted direction.
+This does **not** undermine the anchor: the CHM15k constant of record is the **cloud/Kalman**
+constant, derived from the *strong near-range* signal (0.1–2.4 km) where the offset is a negligible
+fraction — so the cloud anchor is clean, and CL61-cloud agreeing with it (−0.6 %) remains meaningful.
+The mechanism differs (CHM15k is photon-counting: background/overlap over-subtraction, not the
+CL61's analog AC-coupling undershoot), but the **net effect — a negative weak-signal offset — is
+shared**. The conclusion generalises: *no ceilometer's native Rayleigh constant is a clean
+reference; the cloud method's near-range immunity is exactly why it is the valid cross-instrument
+anchor.*
+
+**6b. CL31 explains its own operational status.** The CL31 offset is small and stable, but its
+molecular return at 3–5 km sits at or below the offset itself (and it reaches only 7.7 km), so a
+molecular fit is impossible — which is precisely why CL31/CL51 are **operationally uncalibrated by
+the Rayleigh method** and rely on the cloud method. The offset is present; the molecular signal to
+fit against is not.
+
+**6c. Solar leak is small in the L1 product.** The 9 Jun session included a deliberate
+solar-hermeticity test (two opaque bin-bags added over the hood 10:34–11:39 UTC). The far-range
+level does not step down materially when bagged (it stays near zero ± noise for CL61), i.e. the
+vendors' background subtraction already removes most of the solar *mean*; high sun mainly inflates
+the shot **noise** (why the 23 Jun midday-summer CL61 window, temp_int 43 °C, is noisy beyond 1 km).
+This supports the thermal (not solar) reading of the temperature dependence in §1f — the clean test
+being the *night* portion of the 24-h window, where there is no sun at all.
+
+## 7. Literature context
 
 The finding has direct published precedent and one genuine novelty:
 - **Kotthaus et al. 2016** (AMT 9, 3769–3791, doi:10.5194/amt-9-3769-2016): the CL31 carries a
@@ -420,7 +476,7 @@ The finding has direct published precedent and one genuine novelty:
   empirically; parametrising it physically makes the correction extrapolable in range and indexable
   in temperature.
 
-## 7. Detecting the offset from clear nights (no hood) - implementation and lessons
+## 8. Detecting the offset from clear nights (no hood) - implementation and lessons
 
 Three formulations were implemented and tested on the 12 Payerne calibration nights
 (`_cl61_intercept_method.py`); the exercise itself is instructive:
@@ -439,7 +495,7 @@ tests. Key insight: the offset must be estimated AT the fit-window altitudes (it
 range-dependent), with the aerosol transmission modelled - shortcuts that assume a flat offset or
 an aerosol-free window fail in ways the table quantifies.
 
-## 8. Recommendations
+## 9. Recommendations
 
 1. **Operations:** keep the **cloud method** as the CL61 constant of record (already the case in
    the fullcal chain); flag the CL61 native Rayleigh constant as biased low ≈ 10–15 %.
