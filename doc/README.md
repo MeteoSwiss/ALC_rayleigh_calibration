@@ -16,19 +16,20 @@ doc/
 
 ## Reference papers
 
-Journal-coded filenames are identified best-effort from the DOI slug; open the PDF for
-the authoritative citation. A `.txt` extract is available for the files marked ✓.
+Filenames carry the first author and/or the journal DOI slug; open the PDF for the
+authoritative citation. A `.txt` extract is available for the files marked ✓.
 
 | File | Reference | Topic | .txt |
 |---|---|---|:--:|
 | `ao-62-4-861.pdf` | Speidel & Vogelmann (2023), *Applied Optics* **62**(4), 861 | Corrected Klett–Fernald algorithm; backscatter-retrieval **sign error** & sensitivity | ✓ |
-| `amt-8-3971-2015.pdf` | Wiegner & Gasteiger (2015), *Atmos. Meas. Tech.* **8**, 3971 | Spectral water-vapour absorption correction (WAPL) — basis of `water_vapor_correction/` | |
-| `amt-12-471-2019.pdf` | *Atmos. Meas. Tech.* **12**, 471 (2019) | Ceilometer attenuated-backscatter / water-vapour validation | |
-| `amt-7-1979-2014.pdf` | *Atmos. Meas. Tech.* **7**, 1979 (2014) | Aerosol lidar / ceilometer retrieval | |
+| `Wiegner - Water-vapor-correction-amt-8-3971-2015.pdf` | Wiegner & Gasteiger (2015), *Atmos. Meas. Tech.* **8**, 3971 | Spectral water-vapour absorption correction (WAPL) — basis of `water_vapor_correction/` | |
+| `Wiegner- Ceilinex-amt-12-471-2019.pdf` | Wiegner et al. (2019), *Atmos. Meas. Tech.* **12**, 471 | CeilInex ceilometer inter-comparison; attenuated-backscatter / water-vapour validation | |
+| `Wiegner-amt-7-1979-2014.pdf` | Wiegner et al. (2014), *Atmos. Meas. Tech.* **7**, 1979 | Aerosol lidar / ceilometer retrieval | |
+| `Kotthaus-amt-9-3769-2016.pdf` | Kotthaus et al. (2016), *Atmos. Meas. Tech.* **9**, 3769 | Recommendations for processing Vaisala CL31 attenuated-backscatter profiles | |
 | `Investigating the seasonal fluctuations of the CHM15K Ceilometer calibration constant.pdf` | — | CHM15k calibration-constant seasonal drift/stability | |
-| `Meteorological Applications - 2025 - Looschelders - Inter‐Instrument Variability of Vaisala CL61 …pdf` | Looschelders et al. (2025), *Meteorol. Appl.* | CL61 inter-instrument variability | |
-| `egusphere-2025-6331.pdf` (+ `-supplement.pdf`) | EGUsphere preprint 2025-6331 | calibration / inter-instrument study (see file) | |
-| `egusphere-2026-948.pdf` | EGUsphere preprint 2026-948 | recent calibration / validation work (see file) | |
+| `Looschelders-Haefelin-Meteorological Applications - 2025 - Looschelders - Inter‐Instrument Variability of Vaisala CL61 …pdf` | Looschelders et al. (2025), *Meteorol. Appl.* | CL61 inter-instrument variability | |
+| `LE-OConnor_egusphere-2025-6331.pdf` (+ `-supplement.pdf`) | O'Connor et al. (2025), EGUsphere preprint 2025-6331 | Liquid-cloud calibration reference (O'Connor cloud method) | |
+| `Laffineur_egusphere-2026-948.pdf` | Laffineur et al. (2026), EGUsphere preprint 2026-948 | recent calibration / validation work (see file) | |
 
 ## Method-description documents
 
