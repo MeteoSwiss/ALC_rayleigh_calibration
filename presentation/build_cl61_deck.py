@@ -148,14 +148,14 @@ txt(s, 8.2, 4.15, 4.75, 2.6, [("Aoste : la convergence Rayleigh–nuage a partir
 s = slide(); title(s, "Le phenomene est universel : les 3 instruments co-localises",
                    "Payerne CHM15k / CL31 / CL61 sous capot (4 sessions) — offset en % du signal moleculaire propre a chaque instrument")
 pic(s, "fig_hood_fractional_bias.png", 0.3, 1.6, 8.7)
-txt(s, 9.15, 1.65, 3.95, 5.4, [
-    ("CHM15k (la reference !)", dict(size=13, bold=True, color=RED)),
-    ("−15…−25 % dans la fenetre 3-5 km — PLUS GRAND que le CL61. Verifie : offset retire → C_L +11.5 % (vrai biais de calibration).", dict(size=11)),
-    ("Mais l'ancre tient", dict(size=13, bold=True, color=BLUE)),
-    ("la constante NUAGE du CHM15k vient du signal fort proche (0.1-2.4 km), immunisee → aucune constante Rayleigh de ceilometre n'est une reference propre.", dict(size=11)),
-    ("CL31 : non calibrable en Rayleigh", dict(size=13, bold=True, color=RGBColor(0x94, 0x67, 0xbd))),
-    ("offset ≳ signal moleculaire a 3-5 km → explique le statut operationnel CL31/CL51.", dict(size=11)),
-    ("Mecanisme different (CHM15k photon-counting = sur-soustraction fond/overlap ; CL61 = undershoot AC), mais effet net partage : offset negatif en signal faible.", dict(size=10.5, color=GREY))])
+txt(s, 9.15, 1.6, 3.95, 5.5, [
+    ("Un offset present partout...", dict(size=13, bold=True, color=CHAR)),
+    ("statistiquement reel : CL61 −12.4σ, CHM15k −5.4σ (donc PAS un artefact de moyennage) — mais ~100× sous le bruit par tir, invisible profil par profil.", dict(size=11)),
+    ("...mais materiel pour le seul CL61", dict(size=13, bold=True, color=RED)),
+    ("CL61 : biais DEMONTRE (recal −26.5 %→−8.3 %, hors du scatter ~5 %).", dict(size=11)),
+    ("CHM15k (ancre) : −18 % du (tres faible) moleculaire 1064 nm a 3-5 km, mais DANS le scatter de calibration (13 %, 4/15 nuits) → pas un biais demontre. Calibration valide (accord EARLINET / CL61-nuage).", dict(size=11, color=BLUE)),
+    ("CL31 : pas de signal moleculaire a fitter (non calibrable Rayleigh).", dict(size=11, color=RGBColor(0x94, 0x67, 0xbd))),
+    ("La taille de l'offset / signal moleculaire decide s'il compte ; l'immunite proche-portee de la methode nuage = ancre robuste.", dict(size=10.5, color=GREY))])
 
 # 11 — litterature
 s = slide(); title(s, "Ce que dit la litterature", "Le phenomene est documente — le modele physique et la quantification C_L sont notre apport")
@@ -188,7 +188,7 @@ txt(s, 0.8, 0.6, 11.7, 0.9, [("Conclusions", dict(size=34, bold=True, font="Camb
 txt(s, 0.8, 1.6, 11.7, 5.5, [
     ("1.  L'ecart Rayleigh–nuage du CL61 (−12 %) est cause aux ⅔ par un offset electronique negatif, mesure directement au telescope couvert (−0.008…−0.027 Mm⁻¹sr⁻¹).", dict(size=15, color=WHITE, after=9)),
     ("2.  La preuve est causale : offset soustrait → ecart −26.5 % → −8.3 % (rampe) / −7.2 % (modele physique), dispersion nuit-a-nuit 0.1 %, et plus de nuits calibrables.", dict(size=15, color=WHITE, after=9)),
-    ("3.  Le phenomene est general : coherent sur tout le reseau CL61 (Lindenberg, Aoste, Uccle) ET universel entre types d'instruments — le CHM15k (ancre) porte lui-meme −15…−25 % (biais verifie +11.5 %), mais sa constante NUAGE reste immunisee.", dict(size=15, color=WHITE, after=9)),
+    ("3.  Le phenomene est general : coherent sur le reseau CL61 (Lindenberg, Aoste, Uccle) ET present dans les 3 types d'instruments (offset reel : CL61 −12.4σ, CHM15k −5.4σ). Mais seul le CL61 est assez grand pour biaiser sa calibration ; le CHM15k reste dans son bruit de calibration (ancre valide).", dict(size=15, color=WHITE, after=9)),
     ("4.  Mecanisme : reponse d'une chaine a couplage AC (undershoot passe-haut), τ_p≈4.7 µs / τ_u≈30.5 µs ; l'afterpulse est exclu par le signe. Dependance temperature modeste, dans l'amplitude (gain APD) ; RC stable.", dict(size=15, color=WHITE, after=9)),
     ("5.  A faire : re-caracterisation hood ~trimestrielle, correction par modele physique, methode residu en routine, dossier Vaisala (baseline restorer).", dict(size=15, color=RGBColor(0xCA,0xDC,0xFC), after=9))])
 

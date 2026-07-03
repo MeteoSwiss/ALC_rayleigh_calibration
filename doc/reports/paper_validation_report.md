@@ -338,13 +338,14 @@ constants — the cloud method is anchored by its −0.6 % agreement with the in
 Note the MATLAB reference implementation applies **no WV correction at all** (and hard-codes
 910 nm), so its historical CL61-Rayleigh constants are not comparable at the 25–30 % level.
 **Multi-instrument hood tests (2026, all three co-located Payerne units; cl61_rayleigh_investigation
-§6):** the weak-signal offset is *universal* — the CHM15k anchor itself carries a −15…−25 %
-Rayleigh-window offset (verified as a real +11.5 % calibration bias by removing the measured
-covered-telescope offset and recalibrating), and the CL31 has no fittable molecular signal at 3–5 km
-at all (explaining its operational non-calibration). Crucially the CHM15k *cloud/Kalman* constant is
-built from the strong near-range signal and is offset-immune, so the −0.6 % anchor stands; the
-lesson is that **no ceilometer's native Rayleigh constant is a clean reference — the cloud method's
-near-range immunity is why it is the valid cross-instrument anchor.**
+§6):** a weak-signal offset is *present in every ceilometer* (significant at −12.4σ for the CL61,
+−5.4σ for the CHM15k), but only the CL61's is large enough relative to its molecular return to bias
+its Rayleigh calibration (the −26.5 %→−8.3 % recalibration shift). For the CHM15k anchor the offset
+is −18 % of the *very weak* 1064 nm molecular at 3–5 km but **within** the calibration's own 13 %
+night-to-night scatter — *not* a demonstrated bias — so the CHM15k constant stands, consistent with
+its −0.6 % agreement here and its EARLINET closure; the CL31 has no fittable molecular signal at all
+(explaining its operational non-calibration). The cloud method's strong-signal near-range immunity
+is why it is the robust cross-instrument anchor regardless.
 
 ### 5.2 910 nm cloud calibrations (Figures 5, 10) — the CL51/CL31 oscillation
 
