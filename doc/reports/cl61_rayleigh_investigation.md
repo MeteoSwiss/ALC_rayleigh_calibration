@@ -40,7 +40,7 @@ atmosphere involved, the window-mean profile **is** the processing offset:
 | 2026-05-12 09:35–14:50 | 5.2 h | 630 | −0.012 | −0.025 | −0.029 |
 | 2026-05-26 11:45 – 05-27 13:15 | 25.5 h | 3054 | −0.013 | −0.008 | −0.042 |
 | 2026-06-09 09:20–11:50 | 2.5 h | 300 | −0.001 | −0.024 | +0.043 |
-| **median profile, 300 m smoothed** | | | **−0.008** | **−0.017** | **−0.027** |
+| **ROBUST: per-gate median of 3 984 pooled profiles, 330 m running median** | | | **−0.008 ± 0.003** | **−0.015 ± 0.007** | **−0.026 ± 0.019** |
 
 (The 2026-05-12 01:35–09:35 period is **discarded**: it precedes the hood installation and
 contains fog/cloud returns.) The offset is reproducible in sign and magnitude at 3–5 km across
@@ -78,15 +78,15 @@ copies of the L1 files, full eprof_v2 recalibration, WV on):
 | | C_L median (common nights) | gap to C_L(cloud) = 1.425 |
 |---|---|---|
 | original | 1.047 | −26.5 % |
-| **offset-corrected** | **1.286** | **−9.8 %** |
+| **offset-corrected (robust profile)** | **1.223** | **−14.2 %** |
 
-Per-night changes +4.0 %, +21.6 %, +22.7 %; the corrected data also yields **more eligible
+Per-night changes +2.1 %, +15.7 %, +21.2 % (robust median profile); the corrected data also yields **more eligible
 nights** (9 vs 7) — windows previously rejected by the |intercept| criterion become admissible,
 confirming the offset as the fit-spoiler. The daytime-measured b_dark thus removes ≈ ⅔ of the
 method discrepancy; the remainder is consistent with the ≈ 40 % larger night-time offset seen in
 §1b — and the 25.5-h hood window confirms it directly: the night offset is ×1.33 the daytime
 value at 3–6 km (−0.016 vs −0.012), so correcting with the night profile would close most of the
-remaining −9.8 %.
+remaining −14.2 % (the daytime profile under-corrects by the ×1.33 factor).
 
 ![hood night](figs_paper_report/fig_cl61_hood_night.png)
 *Figure 2b — Hourly band-mean offset during the 25.5-h hood test (grey shading: night). The

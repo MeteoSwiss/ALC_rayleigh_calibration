@@ -33,9 +33,7 @@ CL_CLOUD = 1.4252
 dk = np.load("C:/DATA/Projects/202606_E-PROFILE_calibration/figs_paper_validation/paper_python/cl61_b_dark.npz")
 rng_d, b_dark = dk["rng"], dk["b_dark"]
 # smooth 300 m (boxcar) and zero the first 300 m (near-range dark is contaminated by the hood)
-k = max(1, int(round(300 / np.median(np.diff(rng_d)))))
-b_s = np.convolve(np.nan_to_num(b_dark), np.ones(k) / k, mode="same")
-b_s[rng_d < 300] = 0.0
+b_s = dk["b_smooth"]   # robust per-gate median (330 m running median), see _cl61_dark_windows
 print(f"b_dark (smoothed): 3 km {b_s[np.argmin(np.abs(rng_d-3000))]:+.4f}  "
       f"5 km {b_s[np.argmin(np.abs(rng_d-5000))]:+.4f}  8 km {b_s[np.argmin(np.abs(rng_d-8000))]:+.4f} Mm-1 sr-1")
 
@@ -79,6 +77,7 @@ def run(root, tag):
 
 orig = run(L1_ROOT, "original")
 corr = run(CORR, "corrected")
+print("CORRALL", {k: round(v, 4) for k, v in sorted(corr.items())})
 common = sorted(set(orig) & set(corr))
 co = np.array([orig[d] for d in common]); cc = np.array([corr[d] for d in common])
 ok = (co < 3 * np.median(co)) & (cc < 3 * np.median(cc))

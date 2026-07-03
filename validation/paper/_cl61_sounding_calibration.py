@@ -62,8 +62,7 @@ def _sounding_wvprof(cams_file, lat, lon, t_start, t_end):
 # ---- offset-corrected archive (rebuild) ----
 dk = np.load("C:/DATA/Projects/202606_E-PROFILE_calibration/figs_paper_validation/paper_python/cl61_b_dark.npz")
 rng_d, b_dark = dk["rng"], dk["b_dark"]
-k = max(1, int(round(300 / np.median(np.diff(rng_d)))))
-b_s = np.convolve(np.nan_to_num(b_dark), np.ones(k) / k, mode="same"); b_s[rng_d < 300] = 0.0
+b_s = dk["b_smooth"]   # robust per-gate median (330 m running median), see _cl61_dark_windows
 CORR = Path(tempfile.mkdtemp(prefix="cl61_corr2_"))
 for ds in NIGHTS:
     src = L1_ROOT / WMO / ds[:4] / ds[4:6] / f"L1_{WMO}_{IDENT}{ds}.nc"

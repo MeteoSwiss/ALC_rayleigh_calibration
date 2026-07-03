@@ -136,7 +136,7 @@ pair **med relbias / log r** is the headline):
 | Payerne | CL31 (cloud) | +4.7 % | 0.31 | +27.1 % | 0.54 | 34 939 |
 | Payerne | CL61 (cloud) | **+4.3 %** | **0.97** | −0.6 % | 0.98 | 70 739 |
 | Payerne | CL61 (Rayleigh, native) | +20.9 % | 0.97 | +13.5 % | 0.99 | 70 739 |
-| Payerne | **CL61 (Rayleigh, offset-corrected)** | **+16.8 %** | 0.97 | **+8.6 %** | 0.98 | 70 740 |
+| Payerne | **CL61 (Rayleigh, offset-corrected)** | **+14.1 %** | 0.97 | **+6.8 %** | 0.98 | 70 740 |
 | Amsterdam | CHM15k B | +15.4 % | 0.97 | +23.7 % | 0.96 | 28 558 |
 | Amsterdam | CHM15k C | **−2.5 %** | **0.97** | −3.5 % | 0.93 | 32 481 |
 | Amsterdam | CHM15k D | **−3.3 %** | **0.97** | −1.0 % | 0.95 | 33 213 |
@@ -307,8 +307,8 @@ measurements on the Payerne CL61 (three covered-telescope windows, May–June 20
 range-dependent **negative signal offset** (−0.008/−0.017/−0.027 Mm⁻¹sr⁻¹ at 3/5/8 km) that
 amounts to −8…−13 % of the molecular signal at the fit windows. **Recalibrating with the measured
 offset removed** moves the per-night Rayleigh constants by +4…+23 % and the median gap to the
-cloud constant from **−26.5 % to −9.8 %**; in the station validation the offset-corrected CL61
-Rayleigh channel reads **+8.6 % vs the CHM15k (from +13.5 % native)** — both variants are shown
+cloud constant from **−26.5 % to −14.2 %**; in the station validation the offset-corrected CL61
+Rayleigh channel reads **+6.8 % vs the CHM15k (from +13.5 % native)** — both variants are shown
 in the Payerne figure and table. The remainder is quantitatively explained: the 25.5-h hood
 window spans a full night and shows the offset is **×1.33 deeper at night** (−0.016 vs −0.012 at
 3–6 km), so the daytime-hood correction under-corrects the night-time Rayleigh fits by exactly

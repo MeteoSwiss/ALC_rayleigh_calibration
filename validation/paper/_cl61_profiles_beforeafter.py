@@ -10,9 +10,7 @@ import matplotlib.pyplot as plt
 from validation.paper._cl61_dark_baseline_probe import mean_profiles, rng_ref, model, CL_CLOUD, CL_RAY
 
 dk = np.load("C:/DATA/Projects/202606_E-PROFILE_calibration/figs_paper_validation/paper_python/cl61_b_dark.npz")
-k = max(1, int(round(300 / np.median(np.diff(dk["rng"])))))
-b_s = np.convolve(np.nan_to_num(dk["b_dark"]), np.ones(k) / k, mode="same")
-b_s[dk["rng"] < 300] = 0.0
+b_s = dk["b_smooth"]
 b = np.interp(rng_ref, dk["rng"], b_s)
 CLEAN = ("20260402", "20260422", "20260424")
 fig, axes = plt.subplots(1, 3, figsize=(16, 6), sharey=True)
