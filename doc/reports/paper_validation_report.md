@@ -310,11 +310,17 @@ offset removed** moves the per-night Rayleigh constants by +4…+23 % and the me
 cloud constant from **−26.5 % to −8.3 %** (linear-ramp offset model b(z)=(a·r+c)·z², fitted in
 the non-range-corrected space); in the station validation the offset-corrected CL61 Rayleigh
 channel reads **+5.3 % vs the CHM15k (from +13.5 % native)** — both variants are shown
-in the Payerne figure and table. The remainder is quantitatively explained: the 25.5-h hood
-window spans a full night and shows the offset is **×1.33 deeper at night** (−0.016 vs −0.012 at
-3–6 km), so the daytime-hood correction under-corrects the night-time Rayleigh fits by exactly
-the residual amount. Across the network the offset's unit-specific sign explains the
-whole CL61 pattern, including Lindenberg's inverted ratio (positive, growing offset).
+in the Payerne figure and table. The offset shape is now given a **physical model** — the pulse
+response of an AC-coupled (high-pass) analog chain, a fast positive lobe minus a slow undershoot
+recovering to zero, with time constants τ_p ≈ 4.7 µs and τ_u ≈ 30.5 µs (the empirical linear ramp
+is its small-range limit; §1e of the investigation). It halves the offset-fit RMSE and recalibrates
+marginally better still (**gap −7.2 %**, night scatter 0.1 %). Pooling the three hood windows over
+a 22–44 °C internal-temperature range shows the offset is **primarily temperature-stable**: the RC
+time constant does not drift and the dependence sits in the undershoot *amplitude* (a modest
+in-session cold/warm ×1.13; the larger ×1.33 day-vs-night contrast partly reflects between-session
+drift), so a single measured b(z) removes most of the bias and periodic hood re-characterisation
+matters more than instantaneous temperature indexing. Across the network the offset's unit-specific
+sign explains the whole CL61 pattern, including Lindenberg's inverted ratio (positive, growing offset).
 
 **Hypotheses tested and excluded for the ~15 % Rayleigh-vs-cloud C_L gap** (Payerne recalibration
 experiments, 2026-07-02): (i) *water vapour is applied and essential in both methods and in the

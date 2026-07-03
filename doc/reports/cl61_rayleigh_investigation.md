@@ -51,10 +51,11 @@ back by z², which stabilises the estimate above ~10 km where β-space smoothing
 The subtraction is always the full range-dependent profile b_dark(z), gate by gate.
 
 **Temporal stability (25.5-h window, 3-hourly blocks, fig_cl61_hood_3hourly):** the noise σ_P is
-constant across all blocks; the 3–6 km offset varies −0.011…−0.018 and correlates with the laser
-temperature (colder → deeper), whose thermostated span is only 0.12 K — the night deepening
-(×1.33) is the visible tail of this temperature dependence; regressing against the wider-ranging
-`temp_int` housekeeping is the designated follow-up for the temperature-indexed LUT.
+constant across all blocks; the 3–6 km offset varies −0.011…−0.018 and correlates with temperature
+(colder → deeper). The `temp_int` regression (§1f) resolves this: the recovery *shape* (RC time
+constant τ_u) is temperature-stable, the dependence sits in the undershoot *amplitude*, and the
+in-session cold/warm ratio is a modest ×1.13 (the larger ×1.33 day-vs-night contrast partly
+reflects between-session drift).
 
 (The 2026-05-12 01:35–09:35 period is **discarded**: it precedes the hood installation and
 contains fog/cloud returns.) The offset is reproducible in sign and magnitude at 3–5 km across
@@ -94,11 +95,12 @@ fixed z² map, removing the offset from the non-range-corrected signal and re-ra
 identical to subtracting b_dark(z) from β_att. Doing so on the calibration nights (corrected
 copies of the L1 files, full eprof_v2 recalibration, WV on):
 
-| | C_L median (common nights) | gap to C_L(cloud) = 1.425 |
-|---|---|---|
-| original | 1.047 | −26.5 % |
-| offset-corrected, nonparametric robust profile | 1.223 | −14.2 % |
-| **offset-corrected, linear-ramp model (a·r+c)·z²** | **1.306** | **−8.3 %** |
+| | C_L median (common nights) | gap to C_L(cloud) = 1.425 | night scatter |
+|---|---|---|---|
+| original | 1.047 | −26.5 % | 5.4 % |
+| offset-corrected, nonparametric robust profile | 1.223 | −14.2 % | — |
+| offset-corrected, linear-ramp model (a·r+c)·z² | 1.306 | −8.3 % | 0.6 % |
+| **offset-corrected, physical model (AC high-pass, §1e)** | **1.322** | **−7.2 %** | **0.1 %** |
 
 Per-night changes +3.5 %, +24.7 %, +20.2 % (linear-ramp model; nonparametric: +2.1/+15.7/+21.2 %); the corrected data also yields **more eligible
 nights** (9 vs 7) — windows previously rejected by the |intercept| criterion become admissible,
@@ -155,6 +157,78 @@ Magnitude closure: explaining C_L(ray)/C_L(cloud) = 0.88 requires a window-mean 
 window range) and the night-sky residual (−0.021). Noise is not a factor: the per-sample σ
 (0.17–0.57 Mm⁻¹sr⁻¹, [dark_measurement_payerne.md](dark_measurement_payerne.md)) averages to
 ≈ 0.02/√N per night; the offset is systematic.
+
+**1e. Physical model of the offset — AC-coupling high-pass pulse response.** The linear ramp of
+§1a is only the mid-range approximation of a richer shape. Smoothing the pooled hood median over
+600 m resolves three regimes in the raw signal P = β_att/z²: a **strong positive near-range lobe**
+(+0.016 at 0.3 km, decaying fast), a **zero-crossing near 1.7 km**, a **negative undershoot
+minimum at ≈ 2.8 km** (−1.0·10⁻³), a **slow recovery** through 3–10 km, and a **flat ≈ 0 baseline
+beyond 11 km**. The sign flip (positive lobe → negative undershoot → recovery to zero) is the
+textbook signature of an **AC-coupled (high-pass) analog chain**. Since the telescope is covered,
+the transient that drives it is the shot-synchronous near-range disturbance (internal reflection +
+electrical pickup + detector recovery), fixed per shot — hence a purely additive baseline b(r). A
+high-pass blocks DC, so its response to that transient is the fast pulse *minus* a slow undershoot
+whose area cancels it:
+
+P(r) = A_p·e^(−r/L_p) − A_u·e^(−r/L_u) + b_∞ , A_p,A_u ≥ 0, L_p ≪ L_u,
+
+with range↔time↔RC mapping r = c·t/2 (a scale L is a time constant τ = 2L/c, c/2 = 1.499·10⁸ m/s).
+Robust fit (soft-L1, 350 m–15 km) to the 3 984-profile median:
+
+| term | amplitude [Mm⁻¹sr⁻¹km⁻²] | scale L | time constant τ | physical origin |
+|---|---|---|---|---|
+| fast **+** lobe | A_p = 1.11·10⁻² | 711 m | **τ_p = 4.7 µs** | near-range transient / afterpulse / detector recovery |
+| slow **−** undershoot | A_u = 2.49·10⁻³ | 4570 m | **τ_u = 30.5 µs** | AC-coupling RC recovery |
+| DC floor | b_∞ ≈ 1·10⁻⁴ | — | — | residual baseline (≈ 0) |
+
+Three checks confirm the mechanism rather than a mere curve fit. **(i) DC-blocking (AC) signature:**
+the two exponential areas balance to within ≈ 20–30 % (A_p·L_p = 7.9 vs A_u·L_u = 11.4, once b_∞
+is folded in) — as expected for a single-pole approximation of a multi-stage chain; a pure high-pass
+integrates to exactly zero. **(ii) Reduction to the earlier work:** Taylor-expanding the slow term
+for r ≪ L_u gives −A_u + (A_u/L_u)·r — the empirical **linear ramp is literally the small-range
+limit of this physical model** (slope A_u/L_u, intercept b_∞−A_u), and τ_u ≈ 30 µs against the
+≈ 100 µs acquisition window is exactly why the undershoot looks quasi-linear over most of the
+profile. **(iii) Better calibration, not just a better fit:** the model halves the offset-fit RMSE
+(5.1·10⁻⁴ vs 1.05·10⁻³ for the linear ramp, R² = 0.69 — the offset is 20× below the per-sample
+noise, so this is the median shape), and recalibrating with it (§1c table) closes the gap slightly
+further (−7.2 % vs −8.3 %) while tightening the night-to-night scatter to 0.1 %.
+
+![physical model](figs_paper_report/fig_cl61_offset_physical_model.png)
+*Figure 4 — Physical model of the CL61 electronic offset. (a) raw (non-range-corrected) offset
+P = β_att/z² with the fitted high-pass pulse response (red) and its two components: fast positive
+lobe (orange) and slow negative undershoot (blue); shading marks the three regimes. (b) the
+range-corrected correction b(z) = P·z² actually applied to L1, physical model vs the clamped
+linear ramp. (c) the two exponential relaxations on a log axis — two straight lines whose slopes
+are the time constants τ_p = 4.7 µs and τ_u = 30.5 µs.*
+
+**1f. Temperature dependence — primarily stable, modest amplitude term.** The three hood windows
+together span an internal-electronics temperature `temp_int` of 22–44 °C (21 K; far wider than the
+thermostated `temperature_laser`, 4.5 K). Binning the pooled profiles by `temp_int` and refitting
+the model per bin isolates the temperature behaviour:
+
+- the **RC time constant τ_u is temperature-stable** (≈ 37 µs, no significant trend) — the recovery
+  *shape* does not change with temperature;
+- the dependence lives in the **undershoot amplitude A_u**, which grows as the electronics cool
+  (≈ −1.5 %/K; −28 % across the 21 K span, pooled) — consistent with the negative temperature
+  coefficient of APD multiplication gain (colder ⇒ higher gain ⇒ larger near-range pulse charge ⇒
+  deeper undershoot);
+- crucially, **within the single 25.5-h session** (where only temperature varies, not the
+  measurement session) the 3–6 km offset deepens only **×1.13 cold-to-warm**, versus ×1.32 for the
+  three pooled windows — the difference is **between-session drift** (the May-12 session is deeper
+  than May-26 at matched temperature). This refines the earlier day-vs-night ×1.33 (an hourly
+  extreme-to-extreme contrast) to a more modest, amplitude-driven temperature term.
+
+The practical consequence is favourable: because the offset is **primarily temperature-independent**,
+a single measured b(z) already removes the bulk of the bias (§1c); a temperature index buys a
+second-order (~10–15 %) refinement for the coldest nights, and — given the between-session drift —
+**periodic re-characterisation matters more than instantaneous temperature indexing**.
+
+![offset vs temperature](figs_paper_report/fig_cl61_offset_vs_temperature.png)
+*Figure 5 — CL61 offset vs internal temperature (three hood windows pooled, 3 984 profiles).
+(a) offset profile per temperature bin; (b) undershoot amplitude A_u (circles) and lobe amplitude
+A_p (triangles) vs temp_int — the undershoot deepens as the unit cools; (c) the RC time constant
+τ_u is temperature-stable; (d) 3–6 km offset vs temperature, pooled (×1.32) vs the weaker
+within-session slope (×1.13) that isolates temperature from session-to-session drift.*
 
 ## 2. Wavelength & spectrum (excluded)
 
@@ -327,9 +401,15 @@ The finding has direct published precedent and one genuine novelty:
 - **Nuances to carry into the paper:** published offsets are of *either* sign (unit/firmware/
   temperature dependent) — our unit's is negative; healthy-unit offsets are "small" in absolute
   terms, so the argument must be (and is, §1) quantitative against the ≈ 10× weaker molecular
-  signal at the fit window. **No published work quantifies the offset-induced C_L bias of a
-  2–6 km molecular fit — that is this study's contribution** (measured offset → +4…+22 %
-  per-night C_L correction → ⅔ of the method gap closed).
+  signal at the fit window. **Two contributions are, to our knowledge, novel:** (i) *no published
+  work quantifies the offset-induced C_L bias of a 2–6 km molecular fit* (measured offset →
+  +4…+22 % per-night C_L correction → ⅔ of the method gap closed); (ii) *a mechanistic model of the
+  offset shape* — the AC-coupling high-pass pulse response (§1e), whose two time constants
+  (τ_p ≈ 4.7 µs, τ_u ≈ 30.5 µs) reproduce the positive-lobe/undershoot/recovery shape and whose
+  slow term reduces to the empirical linear ramp — with the temperature dependence resolved to the
+  undershoot *amplitude* (RC constant stable, §1f). Prior work subtracts the hood profile
+  empirically; parametrising it physically makes the correction extrapolable in range and indexable
+  in temperature.
 
 ## 7. Detecting the offset from clear nights (no hood) - implementation and lessons
 
@@ -354,11 +434,16 @@ an aerosol-free window fail in ways the table quantifies.
 
 1. **Operations:** keep the **cloud method** as the CL61 constant of record (already the case in
    the fullcal chain); flag the CL61 native Rayleigh constant as biased low ≈ 10–15 %.
-2. **Root cause:** raise the negative-baseline finding with Vaisala (background subtraction in the
-   vendor β_att; reproducible as physically negative nightly means at 11–14 km on clear nights).
-   A hood-on dark measurement on a CL61 would separate detector vs processing contributions.
-3. **Rayleigh method hardening:** estimate and remove a per-night baseline from the 10–14 km
-   gates before the molecular fit (turns the −12 % into a correctable term); consider nightly
+2. **Root cause:** raise the negative-baseline finding with Vaisala — the hood tests (§1) show it
+   is an **AC-coupling undershoot recovery** (§1e), i.e. a high-pass baseline artefact after the
+   near-range pulse, not an atmospheric signal. Hardware fix at the source is a DC-restoration /
+   baseline-clamp stage (or a longer AC time constant); short of that, Vaisala publishing the raw
+   signal or the estimated baseline would let users correct it.
+3. **Rayleigh method hardening:** subtract the modelled offset before the molecular fit. Two
+   equivalent routes: (a) the measured hood profile b(z), or (b) its physical parametrisation
+   b(z) = [A_p e^(−r/L_p) − A_u e^(−r/L_u)]·z² (§1e), which is extrapolable in range and lets the
+   amplitude A_u be temperature-indexed for the coldest nights (§1f). Re-characterise by hood test
+   every few months (between-session drift dominates the temperature term). Also consider nightly
    (sounding or CAMS-daily) WV instead of monthly (−4 % and less scatter).
 4. **Closure:** download 2026 AERONET Payerne (L1.5 now, L2 when released) and run
    `_cl61_aeronet_closure.py` for the direct CL61 constant test (script ready, LR from the .lid
