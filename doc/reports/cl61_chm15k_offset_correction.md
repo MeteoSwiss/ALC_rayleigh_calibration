@@ -123,6 +123,30 @@ The **shape contrast** is the diagnostic: the CL61's positive-lobe/undershoot is
 high-pass (AC-coupling) analog chain; the CHM15k's purely-negative relaxation is a photon-counting
 over-subtraction. Both reach the same *net negative weak-signal bias* by different routes.
 
+**A third mechanism — the CL31 (improving on Kotthaus et al. 2016).** Kotthaus et al. (AMT 9, 3769)
+remove the CL31 instrument background P^bgi(r) *empirically* (subtract the measured hood/night
+profile; their Eq. 1, P̂ = P − P^bgi) and explicitly decline to model the transmitter **"ripple"**
+(*"a physical effect … vertically alternating positive and negative bias … correctable based on its
+sensor-specific frequency … but is not addressed here"*). We model it: the CL31 hood offset is the
+**superposition of two under-damped resonances**,
+P(r) = b_∞ + Σ e^(−r/Lₖ)[aₖcos(2πr/Λₖ) + bₖsin(2πr/Λₖ)], each range period mapping to a frequency
+f = c/2Λ. **R² = 0.98** (vs 0.74 for a single sinusoid).
+
+| mode | Λ | L | f = c/2Λ | origin |
+|---|---|---|---|---|
+| fast | 1053 m | 387 m | **142 kHz** | AC-coupling **amplifier ring** — matches Kotthaus's stated 159 kHz high-pass corner |
+| slow | 5080 m | 5354 m | 30 kHz | the transmitter **ripple** (CLT321) |
+
+The 142 vs 159 kHz match confirms the fast mode *is* the amplifier's high-pass resonance. So the
+three instruments have three distinct hardware mechanisms — over-damped undershoot (CL61),
+over-subtraction relaxation (CHM15k), two under-damped resonances (CL31) — a physical model where
+Kotthaus used an empirical profile.
+
+![CL31 model](figs_paper_report/fig_cl31_offset_physical_model.png)
+*Figure 3b — CL31 background as two under-damped resonances (R² = 0.98): the fast AC-coupling
+amplifier ring (142 kHz) dominates the near-range undershoot, the slow transmitter ripple (30 kHz)
+carries the 2–7 km oscillation. σ_P is flat white noise (irreducible — the CL31's low-SNR limit).*
+
 ### 2.3 The correction profiles
 
 ![correction profiles](figs_paper_report/fig_hood_correction_profiles.png)
@@ -170,27 +194,35 @@ Two temperature effects, cleanly separated by this decomposition:
 ### 2.6 Multi-instrument intercomparison — does the correction improve agreement?
 
 Regenerating the Payerne multi-instrument intercomparison (Mar–May 2026, β_att vs the CHM15k
-Rayleigh reference over 500–3000 m) with the offset-corrected Kalman series added as extra channels
-(`_gen_offsetcorr_series.py` → `_run_payerne_fig.py`) tests the corrections end-to-end:
+Rayleigh reference over 500–3000 m) with the offset corrections applied end-to-end. **This runs on
+L1 only** (`dataLevel="L1"` → `read_l1` + the operational calout Kalman constants, matching the
+dashboard / balfrin reprocessing — no L2 anywhere; the offset models are subtracted from L1 rcs_0):
 
 | channel | relbias vs CHM15k (Rayleigh) | r |
 |---|---|---|
-| CL61 (cloud) — trusted anchor | −0.6 % | 0.98 |
-| CL61 (Rayleigh) | +13.5 % | 0.99 |
-| **CL61 (Rayleigh, offset-corr)** | **+1.0 %** | 0.98 |
-| **CHM15k (Rayleigh, offset-corr)** | **−7.1 %** | 1.00 |
+| CL61 (cloud) — trusted anchor | −1.5 % | 0.99 |
+| CL61 (Rayleigh) | +12.6 % | 0.99 |
+| **CL61 (Rayleigh, offset-corr)** | **+0.2 %** | 0.98 |
+| **CHM15k (Rayleigh, offset-corr)** | **−6.3 %** | 1.00 |
+| CL31 (cloud) | +27.0 % | 0.51 |
+| **CL31 (cloud, offset-corr)** | **+22.6 %** | **0.64** |
 
-The result is decisive and **asymmetric**:
-- **Correcting the CL61 works:** its Rayleigh bias collapses from **+13.5 % to +1.0 %**, into
-  agreement with both the CL61 cloud method (−0.6 %) and the CHM15k reference. Full-record
+The result is **asymmetric across the three instruments**:
+- **Correcting the CL61 works:** its Rayleigh bias collapses from **+12.6 % to +0.2 %**, into
+  agreement with both the CL61 cloud method (−1.5 %) and the CHM15k reference. Full-record
   confirmation that the CL61 offset is a real, correctable calibration bias.
-- **Correcting the CHM15k *degrades* the agreement:** it shifts the CHM15k **−7.1 % away** from the
+- **Correcting the CL31 helps but doesn't fix it:** removing the two-resonance ringing (§2.2) from
+  the L1 rcs_0 **improves the correlation r 0.51 → 0.64** (the ripple is a systematic range-pattern
+  that was *decorrelating* the CL31 from the reference) and trims the bias +27.0 % → +22.6 %. The
+  large residual is the CL31's own low-SNR limit (σ_P is white noise, irreducible) — the offset is a
+  contributor, not the whole story.
+- **Correcting the CHM15k *degrades* the agreement:** it shifts the CHM15k **−6.3 % away** from the
   cloud-anchored agreement. This is **not** because the correction does nothing — the CHM15k
   full-period recalibration (Fig 8) shows a real **+10.3 % paired shift** and night-unlocking
   (flag=1 6→13), a magnitude *like the CL61* (+15 %, 3→10). The two instruments are separated not by
   the recalibration *magnitude* but by its **direction relative to the trusted anchor**: the CL61
-  native Rayleigh was biased (+13.5 %) so the correction fixes it, whereas the CHM15k native already
-  agreed with the CL61 cloud method (−0.6 %) so the same correction pushes it off.
+  native Rayleigh was biased (+12.6 %) so the correction fixes it, whereas the CHM15k native already
+  agreed with the CL61 cloud method (−1.5 %) so the same correction pushes it off.
 
 ![payerne intercomparison](figs_paper_report/fig_payerne_intercompare_corr.png)
 *Figure 7 — Payerne multi-instrument intercomparison (Mar–May 2026) with the offset-corrected
