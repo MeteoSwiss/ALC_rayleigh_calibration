@@ -147,6 +147,43 @@ Kotthaus used an empirical profile.
 amplifier ring (142 kHz) dominates the near-range undershoot, the slow transmitter ripple (30 kHz)
 carries the 2–7 km oscillation. σ_P is flat white noise (irreducible — the CL31's low-SNR limit).*
 
+### 2.2b Does the model transfer? — applying it to a second Vaisala (Uccle CL51)
+
+A physical model earns its keep by generalizing. We applied the CL31 approach to the **Uccle CL51**
+(`0-20000-0-06447` A) — a different unit of the same Vaisala single-lens family, at a different site.
+Uccle had **no terminal-hood campaign** (only Payerne did), so the offset was extracted from
+**clear-night per-gate medians** of P = rcs_0/z² (nighttime, cloud-free, cleanest-50 % aerosol, 75 640
+profiles): the *fixed* electronic pattern survives the median while the *variable* atmosphere averages
+to a smooth baseline that a gaussian high-pass (σ ≈ 350 m) removes.
+
+**The two-resonance CL31 model does _not_ transfer.** The CL51 offset is dominated by a **fixed
+40 m (exactly 4 range-gate) ripple**, *undamped* out to >10 km (autocorrelation ≈ 0.99 at
+40/80/120 m; ripple RMS flat at 1.55 from 2–10 km). 40 m = 4× the 10 m gate ⇒ f = c/2Λ =
+**3.75 MHz = f_sample/4** (the 15 MHz range-gate clock) — the signature of a **4-way ADC-interleave /
+digitizer fixed-pattern ripple**, fit by a period-4 model (fundamental + Nyquist harmonic) at
+**R² = 0.98**. This same 40 m ripple is **absent as a coherent feature in the Payerne CL31** (its 40 m
+content is incoherent noise, autocorrelation 0.26, RMS 0.47).
+
+| | Payerne CL31 | Uccle CL51 |
+|---|---|---|
+| dominant offset | two under-damped resonances (1053 m, 5080 m) | fixed **40 m** ripple (f_sample/4) |
+| damping | ring decays by ~1.5 km | **undamped** to >10 km |
+| frequency | 142 kHz + 30 kHz (analog) | **3.75 MHz** (digitizer) |
+| coherent 40 m ripple? | no (noise) | yes (autocorr 0.99) |
+
+This is exactly the picture Kotthaus et al. anticipated: the ripple is a **sensor-specific frequency**.
+Each Vaisala unit imprints its *own* fixed additive pattern — so the *universal* principle is the
+**fixed electronic offset** (their empirical P^bgi), not a universal spectral shape. A physical model
+must be re-fit per unit; there is no single transferable curve. (Caveat: without a hood, Uccle's real
+maritime boundary-layer aerosol dominates <1.8 km, so only the oscillatory ripple is cleanly
+recoverable there — not the smooth near-range offset a hood would isolate.)
+
+![CL51 model](figs_paper_report/fig_cl51_uccle_offset_model.png)
+*Figure 3c — Uccle CL51 offset from clear-night medians (no hood). (a) the fixed 40 m ripple at native
+10 m resolution with the period-4 fit (red); the CL31 (grey) has no coherent ripple. (b) the CL51
+ripple is undamped to 10 km (RMS ≈ 1.55) while the CL31 has none. (c) autocorrelation — a sharp 40 m
+periodicity in the CL51, decaying noise in the CL31.*
+
 ### 2.3 The correction profiles
 
 ![correction profiles](figs_paper_report/fig_hood_correction_profiles.png)
@@ -269,7 +306,9 @@ cloud method's strong-signal, near-range immunity is why it is the robust cross-
 
 ## 4. Reproducibility
 `_hood_binscatter.py` (Fig 1) · `_cl61_offset_physical_model.py` / `_chm15k_offset_physical_model.py`
-(Figs 2–3) · `_hood_correction_profiles.py` (Fig 4) · `_cl61_fullperiod_recal.py` +
+/ `_cl31_offset_physical_model.py` (Figs 2–3b) · `_cl51_uccle_offset_model.py` (Fig 3c, Uccle CL51
+transfer test) · `_hood_correction_profiles.py` (Fig 4) · `_cl61_fullperiod_recal.py` +
 `_cl61_fullperiod_figure.py` (Fig 5, CSV of all 127 days) · `_hood_temperature_leetal.py` (Fig 6) ·
-`_hood_offset_significance.py` (σ) · `_chm15k_offset_verify.py` (13 % scatter check). All read the
-operational L1 archive; the offset models are cached in `cl61_b_dark.npz` / `chm15k_b_dark.npz`.
+`_cloud_offsetcorr_recal.py` (cloud-cal offset-immunity, CL31 + CL51) · `_hood_offset_significance.py`
+(σ) · `_chm15k_offset_verify.py` (13 % scatter check). All read the operational L1 archive; the offset
+models are cached in `cl61_b_dark.npz` / `chm15k_b_dark.npz` / `cl31_b_dark.npz` / `cl51_b_dark.npz`.
