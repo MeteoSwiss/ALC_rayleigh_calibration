@@ -42,6 +42,20 @@ atmosphere involved, the window-mean profile **is** the processing offset:
 | 2026-06-09 09:20–11:50 | 2.5 h | 300 | −0.001 | −0.024 | +0.043 |
 | **ROBUST: per-gate median of 3 984 pooled profiles, 330 m running median** | | | **−0.008 ± 0.003** | **−0.015 ± 0.007** | **−0.026 ± 0.019** |
 
+**Estimation space.** The offset is estimated in the NON-range-corrected space P = β/z², where
+the detector noise is homoscedastic: σ_P = 0.019 Mm⁻¹sr⁻¹km⁻² at 2, 5, 10 and 14 km alike — the
+apparent growth of the β-space scatter with range is exactly σ_P·z² (0.08 → 3.6), i.e. pure
+range-correction amplification, not structure. The per-gate median commutes with z², so the
+median profile is unchanged; the smoothing (330 m running median) is done in P and multiplied
+back by z², which stabilises the estimate above ~10 km where β-space smoothing was erratic.
+The subtraction is always the full range-dependent profile b_dark(z), gate by gate.
+
+**Temporal stability (25.5-h window, 3-hourly blocks, fig_cl61_hood_3hourly):** the noise σ_P is
+constant across all blocks; the 3–6 km offset varies −0.011…−0.018 and correlates with the laser
+temperature (colder → deeper), whose thermostated span is only 0.12 K — the night deepening
+(×1.33) is the visible tail of this temperature dependence; regressing against the wider-ranging
+`temp_int` housekeeping is the designated follow-up for the temperature-indexed LUT.
+
 (The 2026-05-12 01:35–09:35 period is **discarded**: it precedes the hood installation and
 contains fog/cloud returns.) The offset is reproducible in sign and magnitude at 3–5 km across
 the three tests (the short 2.5 h window is the noisiest, ±0.03 at 8 km). In the
