@@ -59,10 +59,15 @@ temperature (colder → deeper), whose thermostated span is only 0.12 K — the 
 (The 2026-05-12 01:35–09:35 period is **discarded**: it precedes the hood installation and
 contains fog/cloud returns.) The offset is reproducible in sign and magnitude at 3–5 km across
 the three tests (the short 2.5 h window is the noisiest, ±0.03 at 8 km). In the
-**non-range-corrected** signal β_att/z² the offset is largest in the first kilometres and decays
-with range — i.e. it is *not* a constant electronic offset amplified by z² but a decaying
-near-signal residual (afterpulse-like, cf. Le et al. 2026 §6), whose z²-weighted tail is what
-survives at the fit altitudes. The per-sample β_att/z² **histograms** (bands 2–4, 4–8, 8–14 km)
+**non-range-corrected** signal P = β_att/z² the offset is a **linear ramp in range**:
+P(r) = a·r + c with a = 1.25·10⁻⁷ Mm⁻¹sr⁻¹km⁻²/m and c = −1.39·10⁻³, zero-crossing at
+**11.1 km** (independent MATLAB fit on the same data: 10.7 km) — b(z) = (a·r+c)·z² reproduces the
+nonparametric values (−0.009/−0.019/−0.025 vs −0.008/−0.014/−0.026 at 3/5/8 km,
+fig_cl61_pspace_linear). A negative offset recovering linearly toward zero is the signature of
+**AC-coupling undershoot recovery** (baseline ramp after the intense near-range pulse) rather
+than afterpulsing, which would give a positive decaying tail — the sign identifies the mechanism
+for this unit. The noise width σ_P, by contrast, IS flat with range (0.019 at 2–14 km): the
+growing β-space scatter is pure z² amplification. The per-sample β_att/z² **histograms** (bands 2–4, 4–8, 8–14 km)
 are single-mode and near-Gaussian with their *centres* displaced negative — the offset is a
 distribution shift, not skewness or outliers: pure detector noise around a negative mean.
 
