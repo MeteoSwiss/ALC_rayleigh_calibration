@@ -47,7 +47,7 @@ def load(ident, t1, t2):
 
 fig = plt.figure(figsize=(15, 9))
 gs = fig.add_gridspec(2, 2, height_ratios=[3, 1], hspace=0.28, wspace=0.22)
-XLIM = 2.5e-7
+XLIM = 1.5e-7
 for k, (inst, (ident, CL, wins)) in enumerate(INST.items()):
     pool, rng = [], None
     for s1, s2 in wins:
