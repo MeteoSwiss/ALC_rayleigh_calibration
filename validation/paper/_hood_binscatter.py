@@ -94,7 +94,7 @@ for k, (inst, (ident, CL, wins)) in enumerate(INST.items()):
     m35 = np.nanmedian(meds[(rng >= 3000) & (rng <= 5000)])
     axh.axvline(m35, color="k", lw=1.8, ls="--", label=f"3-5 km median = {m35:+.2e}")
     noff = int((np.abs(med[np.isfinite(med)]) > HX).sum())
-    axh.set_xlim(-HX, HX); axh.set_xlabel(r"median($\beta/r^2$)  [Mm$^{-1}$sr$^{-1}$ m$^{-2}$]  (100$\times$ zoom)")
+    axh.set_xlim(-HX, HX); axh.set_xlabel(r"median($\beta/r^2$)  [Mm$^{-1}$sr$^{-1}$ m$^{-2}$]")
     axh.set_ylabel("Count of range gates")
     axh.set_title(f"per-gate medians, stacked by 1 km layer ({noff} near-field gates off-scale)", fontsize=9)
     axh.legend(fontsize=8, loc="upper left")
