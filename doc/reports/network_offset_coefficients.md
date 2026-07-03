@@ -119,6 +119,28 @@ showed (ripple removal improved the CL31↔reference correlation 0.51→0.64). I
 cloud-derived calibration constant (the strong-signal O'Connor method is offset-immune — companion §2.7),
 so it is purely an **aerosol-profile** improvement, applied per flagged unit.
 
+### 5b. Worked examples — corrected vs uncorrected signal (`_correctable_signal_figures.py`)
+
+For each correctable station we apply `b_phys` to a full clear day of L1 and compare the attenuated
+backscatter with and without the correction — pcolor (time-height) and clear-day mean profiles.
+
+![Uccle corrected signal](figs_paper_report/fig_corrected_signal_uccle_CL51.png)
+*Figure 3 — **Uccle CL51** (Λ = 40 m, 13 %). Top: full pcolor (a) uncorrected / (b) corrected β_att and
+(c) the clear-day mean profile (the ripple wiggle in grey is flattened in red). Bottom: a
+free-troposphere zoom (2.5–4.5 km) — the fixed 40 m **horizontal banding** in the uncorrected pcolor (d)
+is removed in (e), and the (f) zoom mean profile shows the ripple flattened. On the strong boundary-layer
+signal the correction is invisible (honest); it matters in the weak free troposphere.*
+
+![Diepenbeek corrected signal](figs_paper_report/fig_corrected_signal_diepenbeek_CL51.png)
+*Figure 4 — **Diepenbeek CL51** (Λ = 40 m, 7 %): same layout. The 40 m ripple (grey sawtooth in the
+zoom profile f) is cleanly removed (red).*
+
+![Akrotiri corrected signal](figs_paper_report/fig_corrected_signal_akrotiri_CL31.png)
+*Figure 5 — **Akrotiri CL31** (Λ ≈ 45 m, 2 %): the borderline case. Its free-troposphere signal is
+near-zero (even slightly negative — CL31 background over-subtraction), so the ripple sits on near-noise
+and the correction is marginal; the log-scale mean profile (c) drops out where β_att < 0. This is why
+Akrotiri is right at the correctability threshold (coherence 0.51).*
+
 ## 6. Limitations & honest scope
 
 - Clear-night recovers the **persistent ripple only**; the near-range damped ring (CL31) and smooth
@@ -132,5 +154,6 @@ so it is purely an **aerosol-profile** improvement, applied per flagged unit.
 ## 7. Reproducibility
 `_offset_lib.py` (extraction kernels) · `_cl31_clearnight_vs_hood.py` (Fig 1, validation gate) ·
 `_network_offset_scan.py` (per-instrument clear-night scan → npz cache) · `_network_offset_coeffs.py`
-(Fig 2, refined per-unit coefficients → `network_offset_coeffs.csv`/`.json`). Sample: all usable CL61
-(≥90 d) + one CL51/CL31 per country by data volume.
+(Fig 2, refined per-unit coefficients → `network_offset_coeffs.csv`/`.json`) ·
+`_correctable_signal_figures.py` (Figs 3–5, corrected-vs-uncorrected pcolor + profiles). Sample: all
+usable CL61 (≥90 d) + one CL51/CL31 per country by data volume.
