@@ -153,12 +153,15 @@ a.legend(fontsize=8, loc="upper right"); a.grid(alpha=0.3)
 a.text(850, -1.9, "fast\ndecay", ha="center", fontsize=8, color="#b5651d")
 a.text(6000, -1.9, "slow (quasi-linear) undershoot recovery", ha="center", fontsize=8, color="#1f5fa8")
 a.text(12700, -1.9, "flat", ha="center", fontsize=8, color="0.4")
+a.annotate("internal pulse → +16\n(off-scale, <350 m,\nexcluded from fit)", xy=(300, 4.35),
+           xytext=(1500, 3.3), fontsize=7, color="0.4",
+           arrowprops=dict(arrowstyle="->", color="0.55", lw=0.8))
 
 # (b) beta space (x z^2): the actual correction, model vs empirical linear ramp
 b = ax[1]
 b.axhline(0, color="0.6", lw=0.8)
 b.plot(rng, d["b_dark"], ".", ms=1.6, color="0.8", label=r"hood $\beta_{att}$ (median)")
-b.plot(rng, d["b_smooth"], "-", color="0.35", lw=1.2, label="330 m running median")
+b.plot(rng, Ps * zkm ** 2, "-", color="0.35", lw=1.2, label="600 m running median")
 b.plot(rng, b_phys, "-", color="#d62728", lw=2.4, label=r"physical model $\times z^2$")
 b.plot(rng, np.minimum(lin, 0) * zkm ** 2 * ((rng >= 300) & (rng <= 12000)),
        ":", color="#2ca02c", lw=1.8, label=r"linear-ramp (clamped) $\times z^2$")
@@ -167,17 +170,25 @@ b.set_xlabel("range [m]"); b.set_ylabel(r"$\beta_{att}$ offset  [Mm$^{-1}$sr$^{-
 b.set_title("(b) range-corrected offset = correction applied to L1")
 b.legend(fontsize=8, loc="lower left"); b.grid(alpha=0.3)
 
-# (c) two time constants: |components| on semilog-y are two straight lines
+# (c) two exponential relaxations: each component line vs (data - the OTHER component).
+# Subtracting the slow undershoot from the median leaves the fast lobe (orange dots) -> it
+# DOES follow the fast line; subtracting the fast lobe leaves the slow undershoot (blue dots).
 c = ax[2]
-c.semilogy(rng, np.abs(Ap * np.exp(-rng / Lp)) * 1e3, "-", color="#ff7f0e", lw=2,
-           label=fr"fast: $L_p$={Lp:.0f} m ($\tau_p$={tau_p:.1f} $\mu$s)")
-c.semilogy(rng, np.abs(Au * np.exp(-rng / Lu)) * 1e3, "-", color="#1f77b4", lw=2,
-           label=fr"slow: $L_u$={Lu:.0f} m ($\tau_u$={tau_u:.1f} $\mu$s)")
-c.semilogy(rng, np.abs(Ps - binf) * 1e3, ".", ms=2, color="0.6", label="|median - b$_\\infty$|")
+fastc = Ap * np.exp(-rng / Lp); slowc = Au * np.exp(-rng / Lu)
+c.semilogy(rng, fastc * 1e3, "-", color="#ff7f0e", lw=2,
+           label=fr"fast lobe: $\tau_p$={tau_p:.1f} $\mu$s ($L_p$={Lp:.0f} m)")
+c.semilogy(rng, np.abs(Ps + slowc - binf) * 1e3, ".", ms=2.6, color="#ff7f0e", alpha=0.45,
+           label="median − slow  (isolates fast)")
+c.semilogy(rng, slowc * 1e3, "-", color="#1f77b4", lw=2,
+           label=fr"slow undershoot: $\tau_u$={tau_u:.1f} $\mu$s ($L_u$={Lu:.0f} m)")
+c.semilogy(rng, np.abs(Ps - fastc - binf) * 1e3, ".", ms=2.6, color="#1f77b4", alpha=0.45,
+           label="median − fast  (isolates slow)")
+c.axvspan(0, 500, color="0.5", alpha=0.12)
+c.text(250, 12, "internal\npulse", ha="center", fontsize=7, color="0.35")
 c.set_xlim(0, 15000); c.set_ylim(1e-3, 30)
-c.set_xlabel("range [m]"); c.set_ylabel(r"|component|  [Mm$^{-1}$sr$^{-1}$km$^{-2}$]  $\times10^{3}$")
-c.set_title("(c) two exponential relaxations (slopes = time constants)")
-c.legend(fontsize=8, loc="upper right"); c.grid(alpha=0.3, which="both")
+c.set_xlabel("range [m]"); c.set_ylabel(r"|value|  [Mm$^{-1}$sr$^{-1}$km$^{-2}$]  $\times10^{3}$")
+c.set_title("(c) two relaxations: each followed by data minus the other component")
+c.legend(fontsize=7.5, loc="upper right"); c.grid(alpha=0.3, which="both")
 
 fig.suptitle("Payerne CL61 electronic offset — physical model (AC-coupling high-pass pulse response)",
              fontweight="bold", fontsize=13)

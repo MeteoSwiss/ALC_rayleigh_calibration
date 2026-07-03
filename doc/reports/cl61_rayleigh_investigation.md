@@ -193,13 +193,22 @@ profile. **(iii) Better calibration, not just a better fit:** the model halves t
 noise, so this is the median shape), and recalibrating with it (§1c table) closes the gap slightly
 further (−7.2 % vs −8.3 %) while tightening the night-to-night scatter to 0.1 %.
 
+The fitted fast term (τ_p ≈ 4.7 µs, L_p ≈ 0.7 km) represents the 0.35–2 km positive lobe: with the
+slow undershoot removed, the median follows it to within noise (Fig. 4c, orange). Below ≈ 0.5 km the
+signal is dominated by a **distinct, even faster** feature — a ≈ 1 µs internal reference pulse
+(measured local scale ≈ 130–210 m, decaying to +18 at 0.3 km) — which the fit excludes (it starts at
+350 m) and the correction zeroes; it is the transmitted/internal pulse, not the baseline offset that
+biases the 2–6 km molecular fit, so it is deliberately not modelled.
+
 ![physical model](figs_paper_report/fig_cl61_offset_physical_model.png)
 *Figure 4 — Physical model of the CL61 electronic offset. (a) raw (non-range-corrected) offset
 P = β_att/z² with the fitted high-pass pulse response (red) and its two components: fast positive
 lobe (orange) and slow negative undershoot (blue); shading marks the three regimes. (b) the
-range-corrected correction b(z) = P·z² actually applied to L1, physical model vs the clamped
-linear ramp. (c) the two exponential relaxations on a log axis — two straight lines whose slopes
-are the time constants τ_p = 4.7 µs and τ_u = 30.5 µs.*
+range-corrected correction b(z) = P·z² actually applied to L1 (600 m running median), physical
+model vs the clamped linear ramp. (c) the two exponential relaxations on a log axis: each
+component line (fast τ_p, slow τ_u) is followed by the median with the OTHER component removed
+(dots) — the fast lobe tracks its line once the slow undershoot is subtracted, above the
+internal-pulse near-field (< 0.5 km, shaded) which is excluded from the fit and the correction.*
 
 **1f. Temperature dependence — primarily stable, modest amplitude term.** The three hood windows
 together span an internal-electronics temperature `temp_int` of 22–44 °C (21 K; far wider than the
