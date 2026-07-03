@@ -47,6 +47,7 @@ Analysis & validation reports for the E-PROFILE ALC paper (M. Hervo, MeteoSwiss,
 ### Foundations / robust ensemble calibration
 | Report | Summary |
 |---|---|
+| `calibration_coefficient_convention.md` | **Convention (read first).** Single source of truth for the coefficient — the Wiegner & Geiß (2012) lidar constant `C_L = RCS/β_att` — and how it is named, defined and reported across the code, output files, figures and the other reports |
 | `molecular_window_detection_methods_report.md` | Core methodology: makes molecular-window detection pluggable (7 strategies); recommends `improved` as default, `optimal` for aerosol-rich scenes |
 | `IMPLEMENTATION_SUMMARY.md` | New robust-ensemble calibration modules (multi-window / multi-LR uncertainty) |
 | `INTEGRATION_COMPLETE.md` | Status: robust ensemble calibration integrated into the main workflow |
@@ -63,6 +64,16 @@ Analysis & validation reports for the E-PROFILE ALC paper (M. Hervo, MeteoSwiss,
 | `precision_longrun.md` | Drift-insensitive precision (14 sites): separates noise from drift; `optimal` most precise |
 | `ranking_robust_longrun.md` | Per-instrument MAD-based robust CV of the 7 methods (CHM15k, Mini-MPL tables) |
 
+### E-PROF v2 optimization & network deployment
+| Report | Summary |
+|---|---|
+| `v2_optimization_report.md` | Why clear nights fail the molecular fit, and a tuned **E-PROF v2**: the **scattering-ratio gate** (`max_scattering_ratio = 1.10`) is the dominant binding constraint (leave-one-gate-out recovers 77 % of failed L1-CL61 nights); 24 instruments × L1 + L2 |
+| `network_v2_vs_v11_report.md` | Network-wide validation of optimized **v2 (config C8**, the `eprof_v2` default) vs v1.1 across **148 CHM15k / 11 CL61 / 5 Mini-MPL** streams, both levels, every clear night of 2026 |
+| `cloud_optimization_report.md` | Liquid-cloud calibration gate-config sweep (CL31 / CL51 / CL61): 8 configurations of the O'Connor/Hopkin method scored on valid-calibration count and short-term variability (σ_SD) |
+| `rayleigh_network_diagnosis_report.md` | Rayleigh calibration across the whole network (153 CHM15k + Mini-MPL streams, 2026): C_L time series, problematic-station diagnosis from L1 housekeeping, and L1-vs-L2 outcome |
+| `calibration_outliers_report.md` | Network C_L time series and per-calibration **outlier rate** (2026): drift-aware robust flagging; optimized v2 (C8) vs v1.1, L1 + L2 |
+| `calibration_v2_camsfar_modifications_2026-06-26.md` | June 2026 changes to the Rayleigh + cloud calibration and dashboard (branch `wv-correction`): the evidence behind each change, per-instrument-type validation, and the network-wide redeployment |
+
 ### Calibration stability & variability
 | Report | Summary |
 |---|---|
@@ -71,6 +82,23 @@ Analysis & validation reports for the E-PROFILE ALC paper (M. Hervo, MeteoSwiss,
 | `calibration_short_term_variability_report.md` | Daily/per-night scatter is mostly measurement noise; irreducible instrumental floor 8–20 % |
 | `cl61_calibration_verification_report.md` | CL61 network (9 instruments): Rayleigh vs liquid-cloud, ±WV, ±Kalman, on L1 & L2 |
 | `ambient_noise_report_20260529-30.md` | Ambient (no-hood) noise characterization for CL31 / CL61 / CHM15k at Payerne |
+
+### CL61 investigations (offset & Rayleigh failures)
+| Report | Summary |
+|---|---|
+| `cl61_rayleigh_investigation.md` | Root cause of C_L(Rayleigh) ≠ C_L(cloud) for the CL61: a systematic **background over-subtraction in the vendor β_att** (Payerne +13.5 % Rayleigh vs -0.6 % cloud) |
+| `cl61_chm15k_offset_correction.md` | CL61 & CHM15k **electronic-offset** characterisation and correction from covered-telescope ("hood") dark measurements at Payerne; companion to the root-cause note |
+| `payerne_cl61_detection_report.md` | Does cloud/fog detection explain the CL61 Rayleigh failures? **No** — the CL61 does not over-detect cloud; net yield equals the CHM15k (6/96 nights); the failures are genuinely cloudy nights (CHM15k is the stricter instrument on fog) |
+| `dark_measurement_payerne.md` | Python port of the MATLAB detector-noise / dark-measurement analysis (CL31 / CL61 / CHM15k) on operational Payerne L1: noise floor and detection thresholds (uncovered telescopes → low-altitude noise is an upper bound) |
+
+### Attenuated-backscatter validation (paper)
+| Report | Summary |
+|---|---|
+| `paper_validation_report.md` | Main paper validation write-up — material, methods and results (2026-07-02); operational Python calibration + validation, figures in `figs_paper_report/` |
+| `paper_python_validation.md` | Operational Python β_att validation at the benchmark stations: the dashboard `fullcal_l1_2026` calibration (Rayleigh `eprof_v2` + O'Connor cloud, Kalman-smoothed) reproducing the MATLAB figure layouts, with MATLAB kept as a legacy reference |
+| `l1_vs_l2_validation.md` | L1-vs-L2 calibration validation (`eprof_v2`): native L1 binned to the L2 grid calibrates **identically** to L2 (Rayleigh L1/L2 median 0.985); cloud coefficients physical O(1) |
+| `l1_validation_cscs.md` | L1 β_att validation applying the **CSCS Kalman C_L** directly to the native L1 `rcs_0` (no L2, no vendor files), then WV / wavelength / screening / gridding vs the CHM15k Rayleigh reference |
+| `omb_payerne.md` | Observation-minus-Background spot-check at Payerne (L1 vs CAMS, 2026-05): operational L2 vs Kalman C_L; 910 nm via Ångström interpolation + WV correction, CHM15k native |
 
 ### Water-vapour & wavelength sensitivity
 | Report | Summary |
@@ -81,6 +109,12 @@ Analysis & validation reports for the E-PROFILE ALC paper (M. Hervo, MeteoSwiss,
 | `payerne_cl61_calibration_sensitivity.md` | CL61 Rayleigh vs liquid-cloud sensitivity at Payerne vs colocated CHM15k |
 | `wv_fwhm_literature_review.md` | Laser-emission FWHM review (CL31/CL51/CL61): manufacturer vs measured (Qmini) |
 | `wv_wavelength_sensitivity.md` | Sensitivity of the WV correction to laser wavelength (910.55 vs 910.74 nm) and FWHM |
+
+### Operations & deployment
+| Report | Summary |
+|---|---|
+| `cscs_omb_sens_runbook.md` | CSCS (balfrin) runbook to produce the CAMS 0.4° + OmB + sensitivity products and rebuild the dashboard; every step resumable (must run on CSCS — needs ADS auth + the cluster filesystem) |
+| `ewc_dashboard_deployment.md` | European Weather Cloud deployment of the monitoring dashboard (publish-only): per-night diagnostic images to a public S3 bucket, static HTML on a small VM referencing them by URL (live 2026-06-26) |
 
 Also in `doc/`: **`WATER_VAPOR_AUDIT.md`** — code audit of the Python water-vapour
 two-way-transmission implementation vs MATLAB and ACTRIS-Cloudnet `atmoslib`; verdict:
