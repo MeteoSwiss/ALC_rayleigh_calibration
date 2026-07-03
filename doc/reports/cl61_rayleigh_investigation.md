@@ -420,7 +420,23 @@ constant, derived from the *strong near-range* signal (0.1–2.4 km) where the o
 fraction — so the cloud anchor is clean, and CL61-cloud agreeing with it (−0.6 %) remains meaningful.
 The mechanism differs (CHM15k is photon-counting: background/overlap over-subtraction, not the
 CL61's analog AC-coupling undershoot), but the **net effect — a negative weak-signal offset — is
-shared**. The conclusion generalises: *no ceilometer's native Rayleigh constant is a clean
+shared**. Fitting the CHM15k hood offset in the same non-range-corrected space confirms the
+distinction: it is a **single negative relaxation** P(r) = b_∞ − A·e^(−r/L) (A ≈ 1330 counts s⁻¹,
+L ≈ 2.7 km) that peaks near 1 km and recovers toward zero — with **no positive near-range lobe**,
+so it beats a flat-over-subtraction null (RMSE 381 vs 445 counts s⁻¹) yet is emphatically *not* the
+CL61's positive-lobe/undershoot high-pass response. The lower SNR (offset ≈ 10³ vs per-sample noise
+≈ 3·10⁴ counts s⁻¹) makes this the median shape; the driver — a near-range-derived component the
+photon-counting firmware over-removes — is clearly distinct from the analog AC-coupling undershoot.
+
+![CHM15k physical model](figs_paper_report/fig_chm15k_offset_physical_model.png)
+*Figure 6b — CHM15k covered-telescope offset (photon-counting anchor), same three-panel layout as
+the CL61 (Fig. 4): (a) the raw non-range-corrected offset is purely negative — a single
+exponential relaxation, no positive lobe; the flat-over-subtraction null (green) is rejected;
+(b) the range-corrected correction; (c) the single relaxation the median follows above ~1 km.
+The shape contrast with Fig. 4 is the direct evidence that the two instruments reach the same
+net negative weak-signal bias by different routes (over-subtraction vs AC-coupling).*
+
+The conclusion generalises: *no ceilometer's native Rayleigh constant is a clean
 reference; the cloud method's near-range immunity is exactly why it is the valid cross-instrument
 anchor.*
 
