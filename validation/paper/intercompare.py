@@ -483,12 +483,26 @@ def process(cfg):
         if l2 is None:
             chans.append(None); continue
         beta = l2["beta"].copy()
+        # optional per-channel hood-offset removal: subtract the measured b_dark(z) from L1 rcs_0
+        # (physical model P^bgi x z^2) BEFORE the calibration scaling. Used by the CL61/CHM15k/CL31
+        # offset-corr channels. bdark_scale converts the stored b_phys units to the rcs_0 units
+        # (CL61: 1e-6 Mm->SI; CHM15k & CL31: 1.0, already rcs_0 units).
+        if ch.get("bdark") is not None:
+            _bd = np.load(ch["bdark"])
+            _ragl = l2["alt"] - l2.get("station_alt", 0.0)
+            _sc = ch.get("bdark_scale", 1.0)
+            beta = beta - _sc * np.interp(_ragl, _bd["rng"], _bd["b_phys"], left=0.0, right=0.0)[None, :]
         if level_l1:
-            # APPLY the CSCS calibration to the raw signal: beta_att [Mm^-1 sr^-1] = rcs_0 / C_L * 1e6,
-            # C_L = the calout Kalman lidar constant (same physical constant for Rayleigh and cloud).
-            cal = load_calout_kalman(ch["wmo"], ch["ident"], ch["calib"]) if ch["calib"] != "none" else None
+            # APPLY the calibration to the L1 raw signal: beta_att [Mm^-1 sr^-1] = rcs_0 / C_L * 1e6.
+            # Native channels use the OPERATIONAL calout Kalman C_L (same as the dashboard/balfrin);
+            # offset-corr Rayleigh channels use their recalibrated series via calib_key (same scale,
+            # verified ratio 1.000). Both methods store C_L (a true lidar constant).
+            if ch.get("calib_key"):
+                cal = load_calib_series(ch["calib_key"], "L1")
+            else:
+                cal = load_calout_kalman(ch["wmo"], ch["ident"], ch["calib"]) if ch["calib"] != "none" else None
             if ch["calib"] != "none" and cal is None:
-                print(f"    [skip] {ch['label']}: no calout Kalman ({ch['wmo']}_{ch['ident']} {ch['calib']})")
+                print(f"    [skip] {ch['label']}: no calibration ({ch.get('calib_key') or ch['wmo']+'_'+ch['ident']+' '+ch['calib']})")
                 chans.append(None); continue
             if cal is not None:
                 ck = interp_calib(cal[0], cal[1], l2["time"])

@@ -32,7 +32,7 @@ SITE_NAME = {"payerne": "Payerne", "amsterdam": "Amsterdam", "uccle": "Uccle", "
              "lindenberg": "Lindenberg", "aosta": "Aosta", "camborne": "Camborne", "earlinet": ""}
 # station -> (referenceChannel, lambda_target, MATLAB R file, molaer label, WIGOS for title)
 STATIONS = {
-    "payerne":   dict(ref=0, target=1064.0, mat="R_payerne.mat",    molaer=None, wmo="0-20000-0-06610"),
+    "payerne":   dict(ref=0, target=1064.0, mat="R_payerne.mat",    molaer=None, wmo="0-20000-0-06610", dataLevel="L1"),
     "amsterdam": dict(ref=0, target=1064.0, mat="R_amsterdam.mat",  molaer=None, wmo="0-20000-0-06240"),
     "uccle":     dict(ref=0, target=910.0,  mat="R_cl51_06447.mat", molaer=None, wmo="0-20000-0-06447"),
     "sirta":     dict(ref=0, target=1064.0, mat="R_sirta.mat",      molaer="Mini-MPL (Rayleigh)", wmo="0-250-1001-07151"),
@@ -54,17 +54,28 @@ def run_station(name):
             d["wavelengthModel"] = "molaer"
         chans.append(d)
     if name == "payerne":
-        # second CL61 Rayleigh entry: constants recalibrated after removing the hood-measured
-        # dark offset (cl61_rayleigh_investigation.md 1c) — shown alongside the native series
+        _D = "C:/DATA/Projects/202606_E-PROFILE_calibration/figs_paper_validation/paper_python/"
+        # Offset-corrected channels, ALL applied on the L1 rcs_0 (dataLevel=L1, operational calout):
+        # the physical-model b_dark(z) is subtracted from L1 rcs_0 and, for the Rayleigh channels, the
+        # recalibrated constant (calib_key, same scale as the calout) is used.
+        # CL61 Rayleigh — AC-coupling undershoot; b_phys in Mm^-1 sr^-1 -> 1e-6 to SI rcs_0.
         chans.append(dict(wmo="0-20000-0-06610", ident="C", calib="rayleigh",
                           label="CL61 (Rayleigh, offset-corr)", itype="CL61",
-                          key="0-20000-0-06610_C_rayleigh_offsetcorr"))
-        # CHM15k Rayleigh recalibrated after removing its (photon-counting over-subtraction) hood
-        # offset — to test whether the correction improves the multi-instrument agreement
-        # (cl61_chm15k_offset_correction.md). NB the CHM15k offset is within its calibration scatter.
+                          key="0-20000-0-06610_C_rayleigh_offsetcorr",
+                          calib_key="0-20000-0-06610_C_rayleigh_offsetcorr",
+                          bdark=_D + "cl61_b_dark.npz", bdark_scale=1e-6))
+        # CHM15k Rayleigh — over-subtraction relaxation; b_phys already in rcs_0 (counts/s.m^2).
         chans.append(dict(wmo="0-20000-0-06610", ident="A", calib="rayleigh",
                           label="CHM15k (Rayleigh, offset-corr)", itype="CHM15k",
-                          key="0-20000-0-06610_A_rayleigh_offsetcorr"))
+                          key="0-20000-0-06610_A_rayleigh_offsetcorr",
+                          calib_key="0-20000-0-06610_A_rayleigh_offsetcorr",
+                          bdark=_D + "chm15k_b_dark.npz", bdark_scale=1.0))
+        # CL31 cloud — two-resonance physical model subtracted from rcs_0; SAME (offset-immune) cloud
+        # calout constant (no calib_key), only the profile changes. b_phys already in rcs_0 (V.m^2).
+        chans.append(dict(wmo="0-20000-0-06610", ident="B", calib="cloud",
+                          label="CL31 (cloud, offset-corr)", itype="CL31",
+                          key="0-20000-0-06610_B_cloud",
+                          bdark=_D + "cl31_b_dark.npz", bdark_scale=1.0))
     cfg = dict(wmo=sc["wmo"], start=st["start"], end=st["end"], referenceChannel=sc["ref"],
                channels=chans, lambda_target=sc["target"], alpha=1.0, zMin=500, zMax=3000,
                calibLevel="L1")   # native L1 (binned, eprof_v2 + fixed cloud); falls back to L2 where no L1
