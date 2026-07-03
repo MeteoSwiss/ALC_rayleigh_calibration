@@ -278,6 +278,32 @@ consistent with the cloud/EARLINET anchor. *Open question:* why a real offset bi
 native Rayleigh (vs the anchor) but not the CHM15k's would need an independent absolute Rayleigh
 reference for the CHM15k (e.g. co-located Raman/EARLINET) to resolve.
 
+### 2.7 Does the bias correction change the *cloud* calibration? No — it is offset-immune
+
+The CL31/CL51 are calibrated by the **liquid-cloud (O'Connor) method**, not Rayleigh. We reran that
+calibration on **L1 (operational O'Connor, `_cloud_offsetcorr_recal.py`)** with the electronic-offset
+correction subtracted from rcs_0 — the CL31 two-resonance model and the CL51 40 m ripple respectively
+— over Mar–Jun 2026, paired day-by-day against the native calibration:
+
+| instrument | cloud-days | median C (native) | **median shift (corr − native)** | \|95 pct\| | max \|shift\| |
+|---|---|---|---|---|---|
+| Payerne CL31 | 28 | 3.079 | **−0.00 %** | 2.21 % | 3.10 % |
+| Uccle CL51 | 25 | 1.299 | **+0.01 %** | 0.02 % | 0.02 % |
+
+The cloud-derived constant is **unchanged in the median** for both instruments — the O'Connor method
+integrates the *strong* near-range liquid-cloud return, which dwarfs the weak electronic offset. The
+CL31 offset (two resonances spanning the whole 0.3–2.4 km cloud window) can still perturb an
+*individual* day by up to ~3 % depending on the cloud height relative to the ripple phase, but these
+average to zero; the CL51 ripple-only correction (valid >1.8 km, below which no hood exists) barely
+overlaps the cloud gate at all (max 0.02 %). This is the quantitative basis for treating the
+strong-signal cloud method as the **offset-immune cross-instrument anchor** — the correction is a
+weak-signal (Rayleigh) fix, not a cloud-calibration fix.
+
+![cloud offset-immunity](figs_paper_report/fig_cloud_offsetcorr_recal.png)
+*Figure 7b — Cloud calibration with vs without the offset correction (L1, operational O'Connor). Left:
+the daily and Kalman-smoothed constants overlie almost exactly. Right: per-day shift histograms centre
+on 0 (CL31 median −0.00 %, CL51 +0.01 %). The strong-signal cloud method is offset-immune.*
+
 ---
 
 ## 3. Discussion — which offset matters
