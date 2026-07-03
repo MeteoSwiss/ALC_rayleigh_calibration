@@ -80,17 +80,26 @@ for k, (inst, (ident, CL, wins)) in enumerate(INST.items()):
 
     axh = fig.add_subplot(gs[1, k])
     HX = 2.5e-9                       # zoom ~100x: the offset lives here, far below the per-sample noise
-    axh.hist(med[np.isfinite(med) & (np.abs(med) <= HX)], bins=np.linspace(-HX, HX, 100), color="#6aa0d8")
+    # STACKED histogram of the per-gate medians, split by 1 km altitude layer (which altitudes carry
+    # the negative offset?). Colour = altitude; near-field gates (|median|>HX) go off-scale.
+    edges = np.arange(0, 15001, 1000); nb = len(edges) - 1
+    cmap = matplotlib.cm.turbo
+    stacks, cols = [], []
+    for i in range(nb):
+        ma = (rng >= edges[i]) & (rng < edges[i + 1])
+        v = med[ma]; v = v[np.isfinite(v) & (np.abs(v) <= HX)]
+        stacks.append(v); cols.append(cmap(i / (nb - 1)))
+    axh.hist(stacks, bins=np.linspace(-HX, HX, 70), stacked=True, color=cols, edgecolor="none")
     axh.axvline(0, color="0.5", lw=0.8)
     m35 = np.nanmedian(meds[(rng >= 3000) & (rng <= 5000)])
-    m812 = np.nanmedian(meds[(rng >= 8000) & (rng <= 12000)])
-    axh.axvline(m35, color="#d62728", lw=1.8, label=f"3-5 km median = {m35:+.2e}")
-    axh.axvline(m812, color="#2ca02c", lw=1.4, ls="--", label=f"8-12 km median = {m812:+.2e}")
+    axh.axvline(m35, color="k", lw=1.8, ls="--", label=f"3-5 km median = {m35:+.2e}")
     noff = int((np.abs(med[np.isfinite(med)]) > HX).sum())
     axh.set_xlim(-HX, HX); axh.set_xlabel(r"median($\beta/r^2$)  [Mm$^{-1}$sr$^{-1}$ m$^{-2}$]  (100$\times$ zoom)")
     axh.set_ylabel("Count of range gates")
-    axh.set_title(f"zoom on the per-gate medians ({noff} near-field gates off-scale)", fontsize=9)
+    axh.set_title(f"per-gate medians, stacked by 1 km layer ({noff} near-field gates off-scale)", fontsize=9)
     axh.legend(fontsize=8, loc="upper left")
+    sm = matplotlib.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(0, 15))
+    fig.colorbar(sm, ax=axh, label="altitude [km]", pad=0.01)
 
 fig.suptitle("Terminal hood dark measurements — Payerne CHM15k & CL61 (4 sessions pooled, 2026)\n"
              "per-sample beta/r^2 (2-D histogram) with the per-gate median (black) and its +-3x precision band (red)",
