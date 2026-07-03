@@ -76,6 +76,19 @@ offset. **Pajala** is rejected as too noisy (repro 0.50).*
 *Figure 5 — CL61: 0/10. Several show a reproducible pattern, but it decays with range (undamped ≈ 0.1)
 — the smooth near-range undershoot, which the clear-night high-pass cannot isolate (needs a hood).*
 
+**Clear-day time-height quicklooks — all stations.** For completeness, every station's actual signal
+(a clear day, log β_att, height on the Y axis) is shown below, framed green (correctable) / grey (not):
+
+![CL51 pcolor](figs_paper_report/fig_offset_pcolor_CL51.png)
+*Figure 3b — CL51: clear-day quicklooks, all 11 units.*
+
+![CL31 pcolor](figs_paper_report/fig_offset_pcolor_CL31.png)
+*Figure 4b — CL31: clear-day quicklooks, all 10 units. Note the near-zero (background-over-subtracted)
+free troposphere on several units.*
+
+![CL61 pcolor](figs_paper_report/fig_offset_pcolor_CL61.png)
+*Figure 5b — CL61: clear-day quicklooks, all 10 units.*
+
 The correctable offsets are mostly **short-period gate-locked ripples** (the Vaisala digitizer
 fixed-pattern ripple), whose period is **unit-specific** (40/60/70/80 m) — Kotthaus's "sensor-specific
 frequency". Their amplitude relative to the *mid-range* signal is 1–10 %, but because it is a fixed
@@ -98,24 +111,50 @@ rcs_0_corrected = rcs_0 − b_phys(range)          # then β_att = rcs_0_correct
 ```
 
 `_correctable_signal_figures.py` applies it to a full clear day per station and compares β_att with and
-without the correction (pcolor + clear-day mean profiles). The two flagship cases:
+without the correction (pcolor + clear-day mean profiles; each figure's bottom row zooms **1.5–3.5 km,
+spanning the old 1.8 km cut-off**, so the full-altitude correction is visible). One figure per
+correctable station follows.
+
+**CL51 (4):**
 
 ![Uccle corrected signal](figs_paper_report/fig_corrected_signal_uccle_CL51.png)
-*Figure 6 — **Uccle CL51** (40 m, 9 %). Bottom row zooms **1.5–3.5 km, spanning the old 1.8 km
-cut-off**: the fixed 40 m banding (d) is now removed at **all** altitudes (e), and the zoom mean profile
-(f) is flattened. On the strong boundary-layer signal (top) the correction is invisible — it matters in
-the weak free troposphere.*
+*Figure 6 — **Uccle CL51** (40 m, 9 %). The fixed 40 m banding (d) is removed at **all** altitudes (e),
+the zoom mean profile (f) flattened. On the strong boundary-layer signal (top) the correction is
+invisible — it matters in the weak free troposphere.*
+
+![Diepenbeek corrected signal](figs_paper_report/fig_corrected_signal_diepenbeek_CL51.png)
+*Figure 7 — **Diepenbeek CL51** (40 m, 5 %).*
+
+![Chilbolton corrected signal](figs_paper_report/fig_corrected_signal_chilbolton_alc_CL51.png)
+*Figure 8 — **Chilbolton CL51** (80 m, 1.8 %) — a weaker 8-gate ripple.*
+
+![Kuopio corrected signal](figs_paper_report/fig_corrected_signal_kuopio_vehmasmaki_CL51.png)
+*Figure 9 — **Kuopio CL51** (empirical free-troposphere pattern, 1.5 %).*
+
+**CL31 (6):**
 
 ![Lerwick corrected signal](figs_paper_report/fig_corrected_signal_lerwick_CL31.png)
-*Figure 7 — **Lerwick CL31** (60 m, 10 %) — a large distortion now captured. The CL31 free-troposphere
-β_att is near-zero (even negative, from CL31 background over-subtraction), so the correction sits on
-near-noise; the ripple banding is nonetheless removed.*
+*Figure 10 — **Lerwick CL31** (60 m, 10 %). The CL31 free-troposphere β_att is near-zero (even
+negative, from CL31 background over-subtraction), so the correction sits on near-noise; the ripple
+banding is nonetheless removed.*
 
-The full set of 10 corrected-signal figures (`fig_corrected_signal_<site>_<type>.png`: Uccle,
-Diepenbeek, Chilbolton, Kuopio CL51; Lerwick, Akrotiri, Payerne, Delémont, Evaso, Caen CL31) is in
-`figs_paper_report/`. The correction does **not** change the cloud-derived calibration constant (the
-strong-signal O'Connor method is offset-immune — companion §2.7); it is purely an aerosol-profile
-improvement, per flagged unit.
+![Akrotiri corrected signal](figs_paper_report/fig_corrected_signal_akrotiri_CL31.png)
+*Figure 11 — **Akrotiri CL31** (45 m, 8 %).*
+
+![Payerne corrected signal](figs_paper_report/fig_corrected_signal_payerne_CL31.png)
+*Figure 12 — **Payerne CL31** (70 m, 6 %) — the hood-anchored reference unit.*
+
+![Delemont corrected signal](figs_paper_report/fig_corrected_signal_delemont_CL31.png)
+*Figure 13 — **Delémont CL31** (60 m, 3.8 %).*
+
+![Evaso corrected signal](figs_paper_report/fig_corrected_signal_evaso_CL31.png)
+*Figure 14 — **Evaso CL31** (70 m, 3.6 %) — the tightest split-half agreement (repro 0.98).*
+
+![Caen corrected signal](figs_paper_report/fig_corrected_signal_caen_CL31.png)
+*Figure 15 — **Caen CL31** (70 m, 3.2 %).*
+
+The correction does **not** change the cloud-derived calibration constant (the strong-signal O'Connor
+method is offset-immune — companion §2.7); it is purely an aerosol-profile improvement, per flagged unit.
 
 ## 6. Limitations & honest scope
 
@@ -132,5 +171,7 @@ improvement, per flagged unit.
 `_offset_lib.py` (kernels: clear-night, split-half, gate-fold) · `_cl31_clearnight_vs_hood.py` (Fig 1) ·
 `_network_offset_scan.py` (per-instrument scan → npz cache) · `_network_offset_coeffs.py` (Fig 2 +
 `network_offset_coeffs.csv`) · `_offset_diagnostics.py` (Figs 3–5, split-half audit) ·
-`_correctable_signal_figures.py` (Figs 6–7 + the 10-station set). Sample: all usable CL61 (≥90 d) +
-one CL51/CL31 per country by data volume (+ Uccle CL51 & Payerne CL31 references).
+`_offset_pcolor_diagnostics.py` (Figs 3b–5b, all-station clear-day pcolor quicklooks) ·
+`_correctable_signal_figures.py` (Figs 6–15, one per correctable station). Sample: all usable CL61
+(≥90 d) + one CL51/CL31 per country by data volume (+ Uccle CL51 & Payerne CL31 references).
+All profile/offset plots follow the convention **altitude on the Y axis**.

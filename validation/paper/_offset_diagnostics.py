@@ -53,10 +53,11 @@ for itype in ("CL51", "CL31", "CL61"):
     fig, ax = plt.subplots(nrow, ncol, figsize=(16, 3.0 * nrow), squeeze=False)
     for k, d in enumerate(rows):
         a = ax[k // ncol][k % ncol]
-        rng = d["rng"]; zm = (rng >= ZOOM_LO) & (rng <= ZOOM_HI)
-        a.plot(rng[zm], d["hpa"][zm], "-", lw=0.8, color="#1f77b4", label="half A")
-        a.plot(rng[zm], d["hpb"][zm], "-", lw=0.8, color="#ff7f0e", label="half B")
-        a.axhline(0, color="0.7", lw=0.6)
+        rng = d["rng"]; zm = (rng >= ZOOM_LO) & (rng <= ZOOM_HI); zk = rng / 1000.0
+        # range on the Y axis (convention); the two night-halves as X-value profiles
+        a.plot(d["hpa"][zm], zk[zm], "-", lw=0.8, color="#1f77b4", label="half A")
+        a.plot(d["hpb"][zm], zk[zm], "-", lw=0.8, color="#ff7f0e", label="half B")
+        a.axvline(0, color="0.7", lw=0.6)
         col = "#2ca02c" if d["corr"] else "0.6"
         for s in a.spines.values():
             s.set_color(col); s.set_linewidth(2.4 if d["corr"] else 1.0)
@@ -64,20 +65,18 @@ for itype in ("CL51", "CL31", "CL61"):
         a.set_title(f"{d['site'][:20]}  Λ={d['Lam']:.0f}m amp={d['rel']:.1f}% repro={d['repro']:+.2f}"
                     + (f"  ✔{mode}" if d["corr"] else ""), fontsize=8.2,
                     color=("#1a7a1a" if d["corr"] else "0.25"))
-        a.set_xlim(ZOOM_LO, ZOOM_HI); a.tick_params(labelsize=7)
+        a.set_ylim(ZOOM_LO / 1000, ZOOM_HI / 1000); a.tick_params(labelsize=7)
+        if k % ncol == 0:
+            a.set_ylabel("height [km]", fontsize=8)
         if k == 0:
             a.legend(fontsize=7, loc="upper right")
-        ins = a.inset_axes([0.62, 0.62, 0.36, 0.36])
-        fm = rng <= 8000
-        ins.plot(d["hp"][fm], rng[fm] / 1000, lw=0.5, color="0.4")
-        ins.axvline(0, color="0.7", lw=0.5); ins.set_xticks([]); ins.tick_params(labelsize=5.5); ins.set_ylim(0, 8)
     for k in range(n, nrow * ncol):
         ax[k // ncol][k % ncol].axis("off")
     ncorr = sum(1 for d in rows if d["corr"])
-    fig.suptitle(f"{itype} offset diagnostics — {ncorr}/{n} correctable. Two colours = two independent "
-                 f"halves of the nights; they COINCIDE for a real fixed pattern (green), DIVERGE for "
-                 f"noise/atmosphere (grey). Native high-pass {ZOOM_LO/1000:.1f}–{ZOOM_HI/1000:.1f} km; inset = 0–8 km.",
-                 fontweight="bold", fontsize=11)
+    fig.suptitle(f"{itype} split-half offset diagnostics — {ncorr}/{n} correctable. Two colours = two "
+                 f"independent halves of the nights; they COINCIDE for a real fixed pattern (green frame), "
+                 f"DIVERGE for noise/atmosphere (grey). High-pass offset (x) vs height (y), "
+                 f"{ZOOM_LO/1000:.1f}–{ZOOM_HI/1000:.1f} km.", fontweight="bold", fontsize=11)
     fig.tight_layout(rect=(0, 0, 1, 0.97))
     out = D / f"fig_offset_diagnostics_{itype}.png"
     fig.savefig(out, dpi=140); fig.savefig(REPORT_FIG / out.name, dpi=140)
