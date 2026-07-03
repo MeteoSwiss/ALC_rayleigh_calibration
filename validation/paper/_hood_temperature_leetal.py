@@ -55,6 +55,14 @@ for row, (inst, (ident, CL, wins)) in enumerate(INST.items()):
         if X is not None:
             Xs.append(X); Ts.append(Ti)
     X = np.vstack(Xs); Ti = np.concatenate(Ts); zkm = rng / 1000.0
+    # contamination screen: reject profiles with a COHERENT real return (hood on/off transitions,
+    # cloud/aerosol leaking in before full coverage). Use the MEDIAN over a mid-band (robust to the
+    # photon-counting single-gate spikes that a max-based screen over-flags): dark ~0, a layer >> 0.1.
+    betaMm = (X / CL) * 1e6
+    keep = np.nanmedian(betaMm[:, (rng >= 1500) & (rng <= 4000)], axis=1) < 0.1
+    nrej = (~keep).sum()
+    X, Ti = X[keep], Ti[keep]
+    print(f"  {inst}: screened {nrej} contaminated profiles ({100*nrej/keep.size:.1f}%)")
     P = (X / CL) / zkm[None, :] ** 2                       # beta/r^2 (per-profile), a.u.
     edges = np.quantile(Ti, np.linspace(0, 1, NB + 1))
     norm = plt.Normalize(np.median(Ti[Ti <= edges[1]]), np.median(Ti[Ti >= edges[-2]]))

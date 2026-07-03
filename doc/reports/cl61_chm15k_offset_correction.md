@@ -72,6 +72,20 @@ per bin, the **instrumental bias** μ(β/r²) (per-gate mean) and the **noise** 
 variance) are plotted vs range, coloured by temperature — the decomposition used by Le et al. (2026,
 their fig. f/g).
 
+### 1.6 Contamination screen
+Time-height pcolors of every session (`_hood_pcolor.py`) confirm the covered windows are otherwise
+uniform noise. The one exception is the **first ~1 minute** of a session, when the hood is being
+placed and the still-open telescope catches real atmosphere (e.g. CL61 9 Jun 09:10–09:11 saw a
+cloud/aerosol layer at ~1.3 km, β_att up to 435 vs ~1.5 for clean dark). Because these leak into the
+mean-based μ (not the median-based offset models), profiles with a **coherent** mid-range return
+(median β_att over 1.5–4 km > 0.1 Mm⁻¹sr⁻¹ — robust to photon-counting single-gate spikes) are
+screened out before the temperature analysis (CL61 0.1 %, CHM15k 5.4 %).
+
+![hood pcolor](figs_paper_report/fig_hood_pcolor.png)
+*Figure 0 — Time-height β_att of the four hood sessions (0–6 km), CL61 (top) and CHM15k (bottom);
+green = screened profiles. The windows are uniform dark noise apart from the hood-placement
+transition at each session start.*
+
 ---
 
 ## 2. Results
@@ -152,6 +166,37 @@ Two temperature effects, cleanly separated by this decomposition:
 - **Bias μ** is the offset; its amplitude has a modest temperature dependence (within a single
   session, cold/warm ≈ ×1.13 at 3–6 km; see companion §1f), sitting in the CL61 undershoot
   *amplitude* while the RC time constant τ_u stays fixed.
+
+### 2.6 Multi-instrument intercomparison — does the correction improve agreement?
+
+Regenerating the Payerne multi-instrument intercomparison (Mar–May 2026, β_att vs the CHM15k
+Rayleigh reference over 500–3000 m) with the offset-corrected Kalman series added as extra channels
+(`_gen_offsetcorr_series.py` → `_run_payerne_fig.py`) tests the corrections end-to-end:
+
+| channel | relbias vs CHM15k (Rayleigh) | r |
+|---|---|---|
+| CL61 (cloud) — trusted anchor | −0.6 % | 0.98 |
+| CL61 (Rayleigh) | +13.5 % | 0.99 |
+| **CL61 (Rayleigh, offset-corr)** | **+1.0 %** | 0.98 |
+| **CHM15k (Rayleigh, offset-corr)** | **−7.1 %** | 1.00 |
+
+The result is decisive and **asymmetric**:
+- **Correcting the CL61 works:** its Rayleigh bias collapses from **+13.5 % to +1.0 %**, into
+  agreement with both the CL61 cloud method (−0.6 %) and the CHM15k reference. Full-record
+  confirmation that the CL61 offset is a real, correctable calibration bias.
+- **Correcting the CHM15k does not help — it hurts:** applying its (within-scatter) offset shifts the
+  CHM15k **−7.1 % away** from the cloud-anchored agreement. There was no real bias to remove, so the
+  "correction" only degrades a sound reference — the intercomparison-level confirmation of §3.
+
+![payerne intercomparison](figs_paper_report/fig_payerne_intercompare_corr.png)
+*Figure 7 — Payerne multi-instrument intercomparison (Mar–May 2026) with the offset-corrected
+channels added. (a) median profiles; (b) scatter and (c) difference vs the CHM15k Rayleigh
+reference; (d–g) time-height β_att. CL61 (Rayleigh, offset-corr) collapses onto the cloud/reference
+agreement; CHM15k (Rayleigh, offset-corr) moves away from it.*
+
+**Operational take-away:** apply the offset correction to the **CL61** (and, by the same mechanism,
+CL51/CL31 where a molecular signal exists); do **not** apply it to the CHM15k, whose calibration is
+already sound.
 
 ---
 

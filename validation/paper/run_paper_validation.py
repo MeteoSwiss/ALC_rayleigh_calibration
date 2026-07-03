@@ -59,6 +59,12 @@ def run_station(name):
         chans.append(dict(wmo="0-20000-0-06610", ident="C", calib="rayleigh",
                           label="CL61 (Rayleigh, offset-corr)", itype="CL61",
                           key="0-20000-0-06610_C_rayleigh_offsetcorr"))
+        # CHM15k Rayleigh recalibrated after removing its (photon-counting over-subtraction) hood
+        # offset — to test whether the correction improves the multi-instrument agreement
+        # (cl61_chm15k_offset_correction.md). NB the CHM15k offset is within its calibration scatter.
+        chans.append(dict(wmo="0-20000-0-06610", ident="A", calib="rayleigh",
+                          label="CHM15k (Rayleigh, offset-corr)", itype="CHM15k",
+                          key="0-20000-0-06610_A_rayleigh_offsetcorr"))
     cfg = dict(wmo=sc["wmo"], start=st["start"], end=st["end"], referenceChannel=sc["ref"],
                channels=chans, lambda_target=sc["target"], alpha=1.0, zMin=500, zMax=3000,
                calibLevel="L1")   # native L1 (binned, eprof_v2 + fixed cloud); falls back to L2 where no L1
