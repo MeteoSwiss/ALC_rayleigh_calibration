@@ -48,6 +48,16 @@ def read_file(f, temp_var="temperature_laser"):
     return tt, r, x, cbh, temp
 
 
+def pspace(X, rng):
+    """Non-range-corrected P = rcs_0 / z^2 (homoscedastic-noise space). Gates at z<=0 -> NaN
+    (the CL61 grid starts at range 0 m; a raw 1/z^2 there is +inf and would smear the smoother)."""
+    zkm = rng / 1000.0
+    with np.errstate(divide="ignore", invalid="ignore"):
+        P = X / zkm[None, :] ** 2
+    P[:, ~(zkm > 0)] = np.nan
+    return P
+
+
 def list_files(wmo, ident, months, year="2026"):
     fs = []
     for mm in months:
@@ -57,11 +67,12 @@ def list_files(wmo, ident, months, year="2026"):
 
 def load_clearnight(wmo, ident, months=("03", "04", "05", "06"), year="2026",
                     night=(22, 3), aerosol_keep_pct=50, temp_var="temperature_laser",
-                    aer_lo=1500.0, aer_hi=4000.0, max_profiles=200000):
+                    aer_lo=1500.0, aer_hi=4000.0, max_profiles=200000, file_stride=1):
     """Pool clear-night profiles. Returns dict(rng, X, temp, n_pool, n_kept, n_files) or None."""
     pool_x, pool_t, rng = [], [], None
     n_pool = 0
-    for f in list_files(wmo, ident, months, year):
+    files = list_files(wmo, ident, months, year)[::max(1, file_stride)]
+    for f in files:
         try:
             tt, r, x, cbh, temp = read_file(f, temp_var)
         except Exception:
@@ -84,19 +95,18 @@ def load_clearnight(wmo, ident, months=("03", "04", "05", "06"), year="2026",
     if X.shape[0] > max_profiles:                # cap for memory on very long records
         idx = np.linspace(0, X.shape[0] - 1, max_profiles).astype(int)
         X, T = X[idx], T[idx]
-    zkm = rng / 1000.0
-    P = X / zkm[None, :] ** 2
-    sm = uniform_filter1d(np.nan_to_num(P), 9, axis=1)
+    P = pspace(X, rng)
+    sm = uniform_filter1d(np.nan_to_num(P, nan=0.0, posinf=0.0, neginf=0.0), 9, axis=1)
     aer = np.nanmedian(sm[:, (rng >= aer_lo) & (rng <= aer_hi)], axis=1)
-    keep = aer < np.nanpercentile(aer, aerosol_keep_pct)
+    thr = np.nanpercentile(aer, aerosol_keep_pct)
+    keep = aer <= thr                             # <= so ties at the median are not all dropped
     return dict(rng=rng, X=X[keep], temp=T[keep], n_pool=n_pool, n_kept=int(keep.sum()),
-                n_files=len(list_files(wmo, ident, months, year)))
+                n_files=len(files))
 
 
 def offset_stats(X, rng):
     """Per-gate robust median of P=rcs_0/z^2 and its MAD-based precision."""
-    zkm = rng / 1000.0
-    P = X / zkm[None, :] ** 2
+    P = pspace(X, rng)
     Pmed = np.nanmedian(P, axis=0)
     Pmad = 1.4826 * np.nanmedian(np.abs(P - Pmed[None, :]), axis=0)
     N = np.isfinite(P).sum(axis=0)
@@ -129,7 +139,7 @@ def dominant_period(hp, rng, dr, lo, hi, pmin=20.0, pmax=1500.0):
     pk = [p for p in pk if pmin <= lag[p] <= pmax]
     rms = float(np.sqrt(np.nanmean(hp[m] ** 2)))
     if not pk:
-        return np.nan, float(np.max(ac[good])), rms
+        return np.nan, np.nan, rms          # no coherent period (e.g. CL61: smooth offset, no ripple)
     p0 = pk[int(np.argmax(ac[pk]))]
     return float(lag[p0]), float(ac[p0]), rms
 
