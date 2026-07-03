@@ -184,9 +184,13 @@ The result is decisive and **asymmetric**:
 - **Correcting the CL61 works:** its Rayleigh bias collapses from **+13.5 % to +1.0 %**, into
   agreement with both the CL61 cloud method (−0.6 %) and the CHM15k reference. Full-record
   confirmation that the CL61 offset is a real, correctable calibration bias.
-- **Correcting the CHM15k does not help — it hurts:** applying its (within-scatter) offset shifts the
-  CHM15k **−7.1 % away** from the cloud-anchored agreement. There was no real bias to remove, so the
-  "correction" only degrades a sound reference — the intercomparison-level confirmation of §3.
+- **Correcting the CHM15k *degrades* the agreement:** it shifts the CHM15k **−7.1 % away** from the
+  cloud-anchored agreement. This is **not** because the correction does nothing — the CHM15k
+  full-period recalibration (Fig 8) shows a real **+10.3 % paired shift** and night-unlocking
+  (flag=1 6→13), a magnitude *like the CL61* (+15 %, 3→10). The two instruments are separated not by
+  the recalibration *magnitude* but by its **direction relative to the trusted anchor**: the CL61
+  native Rayleigh was biased (+13.5 %) so the correction fixes it, whereas the CHM15k native already
+  agreed with the CL61 cloud method (−0.6 %) so the same correction pushes it off.
 
 ![payerne intercomparison](figs_paper_report/fig_payerne_intercompare_corr.png)
 *Figure 7 — Payerne multi-instrument intercomparison (Mar–May 2026) with the offset-corrected
@@ -194,9 +198,16 @@ channels added. (a) median profiles; (b) scatter and (c) difference vs the CHM15
 reference; (d–g) time-height β_att. CL61 (Rayleigh, offset-corr) collapses onto the cloud/reference
 agreement; CHM15k (Rayleigh, offset-corr) moves away from it.*
 
+![chm15k full period](figs_paper_report/fig_chm15k_fullperiod_recal.png)
+*Figure 8 — CHM15k full-record recalibration with/without the offset correction. The paired shift
+(+10.3 %) and night-unlocking mirror the CL61 — so the recalibration alone does not distinguish the
+two instruments; only the intercomparison (Fig 7) does, via the sign relative to the cloud anchor.*
+
 **Operational take-away:** apply the offset correction to the **CL61** (and, by the same mechanism,
-CL51/CL31 where a molecular signal exists); do **not** apply it to the CHM15k, whose calibration is
-already sound.
+CL51/CL31 where a molecular signal exists); **retain the native CHM15k** constant — the one
+consistent with the cloud/EARLINET anchor. *Open question:* why a real offset biases the CL61's
+native Rayleigh (vs the anchor) but not the CHM15k's would need an independent absolute Rayleigh
+reference for the CHM15k (e.g. co-located Raman/EARLINET) to resolve.
 
 ---
 
@@ -206,16 +217,18 @@ Significance of the offset is **not** the same as a calibration bias:
 - **CL61 (material):** the offset biases the 910 nm Rayleigh fit — a demonstrated −26.5 %→−8.3 %
   recalibration shift on the curated nights (companion §1c), +15 % on the full-record paired nights,
   and it unlocks 3→10 good nights. The correction is worth applying.
-- **CHM15k (not material):** the offset is real (−5.4σ) and is −18 % of the *very weak* 1064 nm
-  molecular return at 3–5 km, but the CHM15k Rayleigh constant itself calibrates on only 4/15 clear
-  nights and scatters **13 %** night-to-night, so the +11.5 % offset-removal shift is *within* that
-  scatter — **not a demonstrated calibration bias**. The CHM15k constant stands, consistent with its
-  −0.6 % agreement with the CL61 cloud method and its EARLINET closure. The strong-signal cloud/
-  Kalman path is offset-immune regardless.
+- **CHM15k (real offset, but correction not warranted):** the offset is real (−5.4σ) and −18 % of the
+  weak 1064 nm molecular; on the full record, removing it shifts the CHM15k Rayleigh **+10.3 %
+  (paired, n=11)** and unlocks nights (§2.6) — a *consistent* effect, **not** merely within-scatter
+  noise as the earlier 2-night estimate (+11.5 %) suggested. The decisive point is that this shift
+  moves the CHM15k **off** its −0.6 % agreement with the CL61 cloud method and its EARLINET closure
+  (intercomparison −7.1 %), so the **native CHM15k constant is retained**. Operationally the
+  strong-signal cloud/Kalman path is offset-immune regardless.
 
-**Take-away:** a weak-signal electronic offset is present in every ceilometer, but whether it matters
-is set by its size *relative to that instrument's molecular return*. It matters for the CL61's 910 nm
-Rayleigh calibration; it is within the noise for the CHM15k; the CL31 cannot Rayleigh-fit at all. The
+**Take-away:** a weak-signal electronic offset is present in every ceilometer and measurably shifts
+the Rayleigh fit when removed — but whether *correcting* it is right depends on whether the native
+Rayleigh was biased against a trusted anchor. It was for the CL61 (correct it); it was not for the
+CHM15k, whose native agrees with the cloud method (retain it); the CL31 cannot Rayleigh-fit at all. The
 cloud method's strong-signal, near-range immunity is why it is the robust cross-instrument anchor.
 
 ## 4. Reproducibility
