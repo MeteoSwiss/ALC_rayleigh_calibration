@@ -33,7 +33,11 @@ CL_CLOUD = 1.4252
 dk = np.load("C:/DATA/Projects/202606_E-PROFILE_calibration/figs_paper_validation/paper_python/cl61_b_dark.npz")
 rng_d, b_dark = dk["rng"], dk["b_dark"]
 # smooth 300 m (boxcar) and zero the first 300 m (near-range dark is contaminated by the hood)
-b_s = dk["b_smooth"]   # robust per-gate median (330 m running median), see _cl61_dark_windows
+# LINEAR-RAMP model (P-space fit, see fig_cl61_pspace_linear): b(z) = (a*r + c)*z^2,
+# applied over its fit validity (0.3-12 km) and clamped to <= 0 (no positive "correction"
+# above the 11.1 km zero-crossing where the *z^2 extrapolation is unsafe).
+b_s = np.minimum(dk["b_linfit"], 0.0)
+b_s[(rng_d < 300) | (rng_d > 12000)] = 0.0
 print(f"b_dark (smoothed): 3 km {b_s[np.argmin(np.abs(rng_d-3000))]:+.4f}  "
       f"5 km {b_s[np.argmin(np.abs(rng_d-5000))]:+.4f}  8 km {b_s[np.argmin(np.abs(rng_d-8000))]:+.4f} Mm-1 sr-1")
 

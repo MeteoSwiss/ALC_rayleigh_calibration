@@ -97,9 +97,10 @@ copies of the L1 files, full eprof_v2 recalibration, WV on):
 | | C_L median (common nights) | gap to C_L(cloud) = 1.425 |
 |---|---|---|
 | original | 1.047 | −26.5 % |
-| **offset-corrected (robust profile)** | **1.223** | **−14.2 %** |
+| offset-corrected, nonparametric robust profile | 1.223 | −14.2 % |
+| **offset-corrected, linear-ramp model (a·r+c)·z²** | **1.306** | **−8.3 %** |
 
-Per-night changes +2.1 %, +15.7 %, +21.2 % (robust median profile); the corrected data also yields **more eligible
+Per-night changes +3.5 %, +24.7 %, +20.2 % (linear-ramp model; nonparametric: +2.1/+15.7/+21.2 %); the corrected data also yields **more eligible
 nights** (9 vs 7) — windows previously rejected by the |intercept| criterion become admissible,
 confirming the offset as the fit-spoiler. The daytime-measured b_dark thus removes ≈ ⅔ of the
 method discrepancy; the remainder is consistent with the ≈ 40 % larger night-time offset seen in
