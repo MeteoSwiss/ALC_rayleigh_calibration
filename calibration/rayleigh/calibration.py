@@ -516,21 +516,35 @@ def calibrate_rayleigh(
             )
         lam0_nm, fwhm_nm = laser_spectrum_for(info.instrument_type.value, nominal_wl_nm)
         prof = cams_water_vapor_profile(cams_file, info.latitude, info.longitude, t_start, t_end)
-        if prof is not None:
-            h_wv, n_wv = prof
-            wv_alt_grid = info.altitude + data.range_alc        # ASL, aligned to range_alc
-            t2_wv = two_way_wv_transmission(
-                wv_alt_grid, info.altitude, h_wv, n_wv,
-                Path(options.abs_cs_lookup_table), lam0_nm, fwhm_nm,
+        if prof is None:
+            # CAMS file present but no usable WV profile for the night: a 910 nm night
+            # is NEVER calibrated WV-free (same strictness as the cloud method), so
+            # flag -4 like a missing CAMS file. 1064/532 nm never enter this block.
+            logger.warning(f"CAMS WV profile unusable ({cams_file}); "
+                           "skipping WV-required 910 nm night")
+            return CalibrationResult(
+                lidar_constant=-1, flag=-4, uncertainty=0,
+                message="CAMS water-vapor profile unusable",
             )
-            # Remove WV absorption from the measured range-corrected signal so the
-            # downstream fit / Klett / lidar-constant recover a WV-free CL:
-            #   rcs / T2_wv = CL * beta_tot * T2_scattering.
-            if t2_wv.shape[0] == data.rcs.shape[1]:
-                data.rcs = data.rcs / t2_wv[None, :]
-                logger.info(f"WV correction applied to RCS (median T2_wv={np.nanmedian(t2_wv):.3f})")
-            else:
-                logger.warning("WV transmission length mismatch; correction skipped")
+        h_wv, n_wv = prof
+        wv_alt_grid = info.altitude + data.range_alc        # ASL, aligned to range_alc
+        t2_wv = two_way_wv_transmission(
+            wv_alt_grid, info.altitude, h_wv, n_wv,
+            Path(options.abs_cs_lookup_table), lam0_nm, fwhm_nm,
+        )
+        if t2_wv.shape[0] != data.rcs.shape[1]:
+            # Grid mismatch means the correction cannot be applied -> same no-fallback
+            # rule: refuse to calibrate rather than emit a WV-biased constant.
+            logger.warning("WV transmission length mismatch; 910 nm night not calibrated")
+            return CalibrationResult(
+                lidar_constant=-1, flag=-4, uncertainty=0,
+                message="WV transmission grid mismatch",
+            )
+        # Remove WV absorption from the measured range-corrected signal so the
+        # downstream fit / Klett / lidar-constant recover a WV-free CL:
+        #   rcs / T2_wv = CL * beta_tot * T2_scattering.
+        data.rcs = data.rcs / t2_wv[None, :]
+        logger.info(f"WV correction applied to RCS (median T2_wv={np.nanmedian(t2_wv):.3f})")
 
     logger.info(f"Time elapsed: {timing.time() - start_time:.1f}s")
 

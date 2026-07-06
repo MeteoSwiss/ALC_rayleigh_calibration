@@ -20,10 +20,11 @@ and publishes it to the **European Weather Cloud** (EWC). The aerosol/thermodyna
 from a daily **CAMS** download.
 
 ```
-cron (DISABLED) -> ops/run_daily.sh -> ops/ops_daily.py
-  (15:00, off)      (glue: config.sh,      1. fetch CAMS for D-1        (ADS download, retried)
-                     venv, flock, log,      2. calibrate D-1 network     (scripts/run_all_l1_2026.py --sens --omb)
-                     alert mail)            3. update_opcoeff            (extract_l2_opcoeff.py -> operational_coefficients.csv)
+cron 0 15 * * * -> ops/run_daily.sh -> ops/ops_daily.py
+  (15:00, live)      (glue: config.sh,      0. refresh census            (scripts/refresh_census.py, merge-only)
+                     venv, flock, log,      1. fetch CAMS for D-1        (ADS download, retried; all regional boxes)
+                     alert mail)            2. calibrate D-1 network     (scripts/run_all_l1_2026.py --sens --omb)
+                                            3. update_opcoeff            (extract_l2_opcoeff.py -> operational_coefficients.csv)
                                             4. dashboard (incremental)   (scripts/build_dashboard.py --changed-only)
                                             5. publish to EWC            (ops/publish.sh: images->S3, HTML->web VM)
                                             6. heartbeat                 (.last_success)
@@ -51,9 +52,9 @@ The whole calibration + dashboard tree was relocated under
 | `ALC_L1_ROOT` | `/data/zue/E_PROFILE/ALC/L1_FILES` | E-PROFILE L1 input: `<wmo>/<year>/<month>/L1_<wmo>_<ident><YYYYMMDD>.nc` |
 | `ALC_L2_DIR` | `/data/zue/E_PROFILE/ALC/L2_FILES` | L2 archive (station name/country + operational `calibration_constant_0`) |
 | `ALC_CAMS_DIR` | `/data/zue/E_PROFILE/ALC/CAMS` | CAMS cache: `CAMS_Beta_<YYYYMMDD>.nc`, fetched daily |
+| `ALC_CAMS_DIR_FALLBACK` | *(unset)* | Optional coarser CAMS archive (e.g. 1°) tried per-month when the primary (0.4°) lacks a month — used by the cloud WV correction **and** OmB; both L137 model levels |
 | `ALC_OPCOEFF_CSV` | `/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.0/operational_coefficients.csv` | operational L2 constants for the dashboard %-of-operational ratio |
 | `ALC_OLDRAY_DIR` | `/data/pay/REM/ACQ/E_PROFILE_ALC/Calibration/rayleigh` | **v1.0** (old operational) Rayleigh overlay source (raw `2025/` + `2026/` yearly NetCDFs) |
-| `ALC_V13_DIR` | `/data/zue/E_PROFILE/ALC/Calibration/rayleigh-test-v13` | **v13** test Rayleigh overlay source (`2025/`, `2026/` NetCDFs) |
 | `ALC_CENSUS` | `$ALC_REPO/validation/scope_l1_2026_census.json` | station census (wmo/ident/type/lat/lon) = dashboard manifest |
 | `PATH` (prepend) | `/data/zue/E_PROFILE/ALC/Calibration/tools/bin` | AWS CLI v2 installed off the slow NFS home, for `publish.sh` |
 
@@ -77,6 +78,10 @@ plus the previous `ALC_BACKFILL_DAYS` (`5`) not-yet-processed days — a self-he
 outage. Processed days are recorded in `$ALC_DASHBOARD_DIR/.processed_days`; CAMS-missing days are
 retried on the next run.
 
+0. **Refresh the census** (once per run, before the day loop): `scripts/refresh_census.py` scans
+   `$ALC_L1_ROOT` and merges what it finds into `$ALC_CENSUS` — new streams appended, existing ones
+   never dropped (coverage/metadata refreshed, atomic write) — so a newly installed station is
+   calibrated the same day. Best-effort: a census failure is logged and never blocks the run.
 1. **Fetch CAMS** (`calibration.io.cams.ensure_cams_file`, 3 retries, isolated so a network failure is
    one log line). Downloads `CAMS_Beta_<D>.nc` covering the night (`D-1`..`D`) from the ADS if missing.
 2. **Calibrate the day** across the network:
@@ -96,7 +101,7 @@ Then, **once**, if any day was processed:
 5. **Dashboard** (`scripts/build_dashboard.py --fullcal $ALC_FULLCAL_DIR --out $ALC_DASHBOARD_DIR
    --changed-only [--l2dir ...] [--opcoeff ...]`): re-renders only station pages whose `<key>_cal.csv`
    changed since the last build (marker `$ALC_DASHBOARD_DIR/.last_build`); the summary always rebuilds.
-   The v1.0/v13 Rayleigh overlays and `--opcoeff` ratios are wired in here.
+   The v1.0 Rayleigh overlay and `--opcoeff` ratios are wired in here.
 6. **Publish** (`ops/publish.sh`) when `ALC_PUBLISH=1` and the build succeeded — see section 5.
    Publish failure is **non-fatal** (logged + flagged in the heartbeat).
 7. **Heartbeat** `$ALC_DASHBOARD_DIR/.last_success` (UTC) records `ran=...`, `cams_missing=...`,
@@ -192,12 +197,12 @@ Built by `scripts/build_dashboard.py` -> `monitoring/{index,render,charts}.py`, 
   ratio, OmB map), a sortable per-(station,method) table with value sparklines, country filters.
 - **Station page (`stations/<key>.html`)**, per method (rayleigh / cloud):
   - **Calibration time series** (`charts.series_timeseries`): our calibrated constant +/- uncertainty,
-    the operational constant line (from `--opcoeff`), and on the **Rayleigh** series two overlays —
-    **v1.0** (black `x`, from `ALC_OLDRAY_DIR`) and **v13** (red `x`, from `ALC_V13_DIR`). Both are
-    `visible="legendonly"` — **hidden until you click them in the legend**. Overlays are read fresh
-    each build from yearly `ALC_calibration_<key><YYYY>.nc` files (recursive glob over `2025/`+`2026/`),
-    taking `lidar_constant` where `calibration_method == 0` (`render.py::_load_oldray`, called for both
-    dirs).
+    the operational constant line (from `--opcoeff`), and on the **Rayleigh** series one overlay —
+    **v1.0** (black `x`, from `ALC_OLDRAY_DIR`), `visible="legendonly"` — **hidden until you click it
+    in the legend**. The overlay is read fresh each build from yearly
+    `ALC_calibration_<key><YYYY>.nc` files (recursive glob over `2025/`+`2026/`), taking
+    `lidar_constant` where `calibration_method == 0` (`render.py::_load_oldray`). (The v13/v1.0.2
+    test overlay was retired and removed from the code in 2026-07.)
   - **Per-calibration diagnostic viewer** (keyboard-navigable: left/right valid cals, Ctrl+left/right
     all days, up/down change station), with a QC-flag widget (flags persisted in the browser; export
     via the widget).
@@ -206,29 +211,41 @@ Built by `scripts/build_dashboard.py` -> `monitoring/{index,render,charts}.py`, 
 
 ---
 
-## 7. CAMS dependency + non-EU-station limitation
+## 7. CAMS dependency + regional boxes (out-of-Europe stations)
 
 The Rayleigh (molecular + water-vapor) and liquid-cloud + OmB calibrations need a daily CAMS
-model-level file (`CAMS_Beta_<YYYYMMDD>.nc`). Download config (`calibration/io/download_cams_beta.py`):
+model-level file. Download config (`calibration/io/download_cams_beta.py`):
 
-- **Area** `ALC_CAMS_AREA = "80,-30,27,45"` (N,W,S,E) — a single Europe+Arctic box (lat **27–80 N**,
-  lon **-30–45 E**), **0.4 deg** grid (the ADS pre-interpolates to 0.4 deg and ignores the `grid`
-  keyword). North edge 80 N includes Hopen (76.5 N). ~**540 MB/day**.
+- **Default area** `ALC_CAMS_AREA = "80,-30,27,45"` (N,W,S,E) — the Europe+Arctic box (lat
+  **27–80 N**, lon **-30–45 E**), **0.4 deg** grid (the ADS pre-interpolates to 0.4 deg and ignores
+  the `grid` keyword). North edge 80 N includes Hopen (76.5 N). ~**540 MB/day**. Keeps the legacy
+  un-suffixed name `CAMS_Beta_<YYYYMMDD>.nc`.
 - **Variables**: `aerbackscatgnd532` / `aerbackscatgnd1064` (aerosol attenuated backscatter, for OmB) +
   `t`, `q`, `z`, `lnsp` (temperature, specific humidity, geopotential, ln surface pressure — for the
   molecular/water-vapor correction). Model levels `1` + `38..137`; forecast lead times 3,6,...,24 h.
 - A file lacking aerosol backscatter is re-downloaded (when `auto_download`) so it is OmB-usable;
   partial/corrupt downloads are deleted so a later run retries cleanly.
 
-**Non-EU-station limitation.** The box covers ~421 of the 427 census stations. Stations **outside** the
-box have **no `q`** (specific humidity) coverage -> **no water-vapor correction** -> they are
-**currently not calibrated** (910 nm must never be calibrated without a valid matching CAMS — no
-fallback; see "Critical operational constraints" in the top-level `README.md`).
+**Regional boxes (implemented 2026-06/07).** The census stations outside the Europe box are served by
+small dedicated boxes (`CAMS_REGIONS` in `download_cams_beta.py`, each padded ~1.5 deg around the
+cluster, a few MB/day): `namerica_west` (Edmonton), `ontario` (Western/London ON), `caribbean`
+(Bonaire), `newzealand` (Lauder + Auckland). Each station is routed by lat/lon via `region_for()`
+(the SMALLEST containing small box wins; else the Europe box; else no domain). Regional files are
+suffixed `CAMS_Beta_<region>_<YYYYMMDD>.nc` and are both produced (prefetch + auto-download) and
+consumed (`calibration.io.cams`) under that name. The `cams_point_too_far` guard (flag **-10**)
+ensures a station can never silently pick up data from a wrong box's edge cell. The small boxes are
+**lean** (`t/q/z/lnsp` only, no aerosol backscatter): out-of-Europe stations get the full Rayleigh +
+cloud **calibration** but **no OmB** product. A station outside every box stays uncalibrated
+(flag -10) until a region is added to `CAMS_REGIONS` — one dict entry; the prefetch cron and the
+calibration routing pick it up automatically.
 
-*Proposed remedy (not yet implemented):* (a) allow a graceful **no-WV calibration** with a **quality
-flag** for instruments/conditions where WV is negligible, and (b) add a **few REGIONAL CAMS boxes**
-(e.g. per remote station cluster) rather than one global box — a global 0.4 deg box would be
-prohibitively large. Until then, out-of-box stations remain uncalibrated.
+The **910 nm WV rule** is strict everywhere: a night whose CAMS file is missing, unusable or too far
+is flagged (-4 / -10) and **never calibrated WV-free** (enforced in `calibration/rayleigh/calibration.py`
+and `calibration/cloud/calibration.py`; hardened 2026-07 — the former silent WV-free fallback on an
+unusable WV profile is fixed).
+
+A prefetch cron (`2 6 * * *`, `ops/prefetch_cams.sh` → `scripts/prefetch_cams.py`) downloads ALL the
+day's boxes shortly after the CAMS forecast lands, so no ADS round-trip blocks the 15:00 run.
 
 ---
 
@@ -238,8 +255,12 @@ prohibitively large. Until then, out-of-box stations remain uncalibrated.
 
 | When (server time) | Job | Status |
 |---|---|---|
-| `0 15 * * *` | `.../ALC_calibration_v2.0_code/ops/run_daily.sh` (this ALC daily pipeline) | **DISABLED** — line commented `#DISABLED_MIGRATION_20260627` |
-| `18 18 * * *` | `cd /proj/pay/E-PROFILE/Calibration_codes/dev/rayleigh_calibration && <pyenv 3.12.12>/bin/python -m rayleigh_calibration.main > cron.log 2>&1` (v13 test Rayleigh calibration; feeds the v13 overlay) | **active** (recently fixed: `netCDF4` 1.7.4 now installed in pyenv `3.12.12`) |
+| `0 15 * * *` | `.../ALC_calibration_v2.0_code/ops/run_daily.sh` (this ALC daily pipeline) | **active** (re-enabled after the 2026-06 migration checks) |
+| `2 6 * * *` | `.../ALC_calibration_v2.0_code/ops/prefetch_cams.sh` (pre-download the day's CAMS boxes) | **active** |
+
+> The former `18 18 * * *` v13 test-Rayleigh cron (repo `/proj/pay/E-PROFILE/Calibration_codes/dev/rayleigh_calibration`)
+> fed the v1.0.2 dashboard overlay, which was retired and removed from the code in 2026-07 —
+> **delete that crontab line**; nothing consumes its output anymore.
 
 Camera-image thinning runs under user **`rem`** (`sudo /bin/su - rem`, then `crontab -l`):
 
@@ -247,15 +268,11 @@ Camera-image thinning runs under user **`rem`** (`sudo /bin/su - rem`, then `cro
 |---|---|---|
 | `30 3 * * *` | `/home/pay/users/rem/scripts/thin_old_cameras.sh` | thins Kloten/Geneva camera images older than 100 days under `/mnt/amaroc_data/PROD`: zips all images per day, keeps 1/view/5 min decompressed, deletes the rest. **Frees inodes on the NAS** (the operational reason the ALC tree was moved off it). |
 
-**Re-enabling the ALC daily run.** `crontab -e` and uncomment the line (remove the
-`#DISABLED_MIGRATION_20260627 ` prefix) so it reads:
-```
-0 15 * * * /data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.0_code/ops/run_daily.sh
-```
-Before re-enabling, confirm: (a) `ops/config.sh` points at the `/data/zue` tree (it does) and a fresh
-shell exports the right `ALC_DASHBOARD_DIR` (see the section 11 caveat), (b) the venv activates and ADS
-credentials work, and (c) 15:00 is after yesterday's L1 + CAMS are available (L1 is delivered the next
-morning). Validate with a manual `python ops/ops_daily.py --day <yesterday>` first.
+**If the daily cron ever has to be re-enabled** (e.g. after a future migration), confirm first:
+(a) `ops/config.sh` points at the `/data/zue` tree and a fresh shell exports the right
+`ALC_DASHBOARD_DIR` (see the section 11 caveat), (b) the venv activates and ADS credentials work,
+and (c) the schedule is after yesterday's L1 + CAMS are available (L1 is delivered the next
+morning; 15:00 is fine). Validate with a manual `python ops/ops_daily.py --day <yesterday>` first.
 
 ---
 
@@ -300,7 +317,7 @@ morning). Validate with a manual `python ops/ops_daily.py --day <yesterday>` fir
 
 ---
 
-## 11. Verification caveats (read before re-enabling)
+## 11. Verification caveats
 
 - The **newest** daily log (`ops/logs/daily_*.log`, a manual run at 15:25Z 2026-06-28) printed
   `dashboard=/mnt/amaroc_data/alc_calib` — the **old NAS** path, not the relocated
@@ -312,6 +329,7 @@ morning). Validate with a manual `python ops/ops_daily.py --day <yesterday>` fir
 - Everything else in this doc was verified against the live code/config on 2026-06-28: paths in
   `ops/config.sh`; the pipeline in `ops/ops_daily.py` + `run_daily.sh` + `publish.sh`; the regression
   guard and caches in `run_all_l1_2026.py` + `calibration/incremental.py`; bucket mode in
-  `monitoring/{index,render,config}.py`; the v1.0/v13 overlays in `charts.py` + `render.py`; the CAMS
-  box/vars in `download_cams_beta.py`; the cron table (`hem` + `rem`); netCDF4 1.7.4 in pyenv 3.12.12;
-  and the `rem` `noclobber` / `sudo` constraints.
+  `monitoring/{index,render,config}.py`; the v1.0 overlay in `charts.py` + `render.py`; the CAMS
+  boxes/vars/routing in `download_cams_beta.py`; the cron table (`hem` + `rem`);
+  and the `rem` `noclobber` / `sudo` constraints. (Section 7 + the cron table re-verified 2026-07-06
+  against `download_cams_beta.py`, `ops/ops_daily.py` and `ops/prefetch_cams.sh`.)

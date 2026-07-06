@@ -25,10 +25,21 @@ to the cache (de-duplicating by date), and re-derives the snapshot from the cach
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
+
+
+def _savez_atomic(path: Path, **arrays) -> None:
+    """np.savez via a temp file + os.replace: these caches hold the station's FULL
+    accumulated history and are rewritten on every daily update, so a crash mid-write
+    must never leave a corrupt (unloadable) archive behind."""
+    path = Path(path)
+    tmp = path.with_name(path.stem + ".tmp.npz")
+    np.savez(tmp, **arrays)
+    os.replace(tmp, path)
 
 
 # ----------------------------------------------------------------------------
@@ -115,8 +126,8 @@ def sens_cache_update(key_dir: Path, day_result) -> None:
         # else: z grid changed (range-grid change) -> start a fresh cache
     order = np.argsort(dates)
     Path(key_dir).mkdir(parents=True, exist_ok=True)
-    np.savez(p, z_ctr=z, dates=dates[order].astype("datetime64[D]"),
-             bmin_night=bn[:, order], bmin_day=bd[:, order], wavelength=wl)
+    _savez_atomic(p, z_ctr=z, dates=dates[order].astype("datetime64[D]"),
+                  bmin_night=bn[:, order], bmin_day=bd[:, order], wavelength=wl)
 
 
 def sens_cache_aggregate(key_dir: Path, start: Optional[str] = None, end: Optional[str] = None):
@@ -200,7 +211,8 @@ def omb_cache_update(key_dir: Path, res) -> None:
             keep = ~np.isin(old_t, part["time_cams"])
             part["time_cams"] = np.concatenate([old_t[keep], part["time_cams"]])
             part["cams_beta"] = np.concatenate([c["cams_beta"][:, keep], part["cams_beta"]], axis=1)
-            # z_cams kept as a running per-level mean weighted by column count
+            # z_cams: the newest part's level grid is kept as-is (the CAMS level heights
+            # vary by <~1% between days, negligible for the aggregate profiles)
             for k in list(part["srcs"]):
                 part[f"bias__{k}"] = np.concatenate([c[f"bias__{k}"][:, keep], part[f"bias__{k}"]], axis=1)
                 part[f"obsint__{k}"] = np.concatenate([c[f"obsint__{k}"][:, keep], part[f"obsint__{k}"]], axis=1)
@@ -224,7 +236,7 @@ def omb_cache_update(key_dir: Path, res) -> None:
     if "cloud_base" in part:
         part["cloud_base"] = part["cloud_base"][order]
     Path(key_dir).mkdir(parents=True, exist_ok=True)
-    np.savez(p, **part)
+    _savez_atomic(p, **part)
 
 
 def omb_cache_aggregate(key_dir: Path, start: Optional[str] = None, end: Optional[str] = None):

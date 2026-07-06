@@ -68,18 +68,17 @@ Everything is driven by `ALC_*` env vars in `ops/config.sh` — the single file 
     **Do NOT use** the GPU partitions `debug`, `short`, `short-shared`, `normal`, `normal-shared`,
     `lowprio`, `preemptible`, `production`. If a job seems to need a GPU, **stop and ask first**.
 
-## Rayleigh overlays (dashboard)
+## Rayleigh overlay (dashboard)
 
-Station time-series charts show two extra Rayleigh overlays, both **hidden by default**
-(`visible="legendonly"`, appear only when clicked in the legend), reloaded fresh each build via
+Station time-series charts show one extra Rayleigh overlay, **hidden by default**
+(`visible="legendonly"`, appears only when clicked in the legend), reloaded fresh each build via
 `monitoring/render.py::_load_oldray`:
 
 - **v1.0** (operational) from `ALC_OLDRAY_DIR=/data/pay/REM/ACQ/E_PROFILE_ALC/Calibration/rayleigh`
   (year subdirs `2025/`,`2026/`; the RAW `ALC_calibration_<key><YYYY>.nc`, NOT the `kalman/` subdir).
-- **v1.0.2** (was "v13", a rewrite of v1.0) from `ALC_V13_DIR`. Produced by hem's cron
-  `18 18 * * *` running `rayleigh_calibration.main` (repo
-  `/proj/pay/E-PROFILE/Calibration_codes/dev/rayleigh_calibration`). Needs `netCDF4` in pyenv
-  3.12.12.
+
+The v1.0.2 / "v13" test overlay (`ALC_V13_DIR`) was retired 2026-07 and removed from code and
+docs; hem's `18 18 * * *` cron that produced it should be deleted from the server crontab.
 
 ## CAMS domains (regional boxes)
 
@@ -92,6 +91,25 @@ affiliates fall outside it and are served by their own **small** boxes (file
 ahead of the 15:00 calibration. The water-vapour correction is **mandatory** for 910 nm instruments —
 a degraded no-WV mode is rejected (it worsens results); a 910 nm night without usable CAMS is flagged,
 never calibrated WV-free.
+
+## Multiple-scattering & water-vapour source (cloud calibration)
+
+- **MS correction (2026-07)**: the O'Connor/Hopkin η(cloud-base) tables are now the **PVC (Hogan 2006)
+  tables at droplet radius a_G = 5.5 µm** (the Cloudnet-measured calibration-scene size, 11 µm
+  diameter; alpha = 10 /km), replacing the legacy Hopkin / fitted 8 µm ladder. Each Vaisala type has
+  its **own** table — CL31's wider 0.83 mrad FOV gets a stronger correction; CL61 has its own table
+  (no longer borrows CL51). At low cloud base η ≈ 0.95 (was 0.83) → ~9 % lower C for low clouds (the
+  bulk of calibration scenes). Derivation/validation: `validation/multiple_scattering_eta.py`,
+  `doc/reports/multiple_scattering_check.md`.
+- **WV humidity source**: operational default is **CAMS model levels (L137)** (`wv_source='cams'`,
+  dense in the boundary layer). An ERA5 path exists (`wv_source='era5'` + a prefetched Earth Data Hub
+  cache from `scripts/prefetch_era5_edh.py`) but is **research-only** — the Hub's ERA5 is a 19-level
+  pressure subset (~4 levels below 3 km → coarser BL than CAMS). ERA5 model levels aren't efficiently
+  available (EDH lacks them; ARCO-ERA5 model levels are chunked whole-field → multi-TB for per-station
+  time-series; ECMWF Polytope `class=ea` blocked). So CAMS model levels stay operational.
+- **OmB + WV CAMS resolution**: monthly **0.4°** (`ALC_CAMS_DIR`) with a per-month **1° fallback**
+  (`ALC_CAMS_DIR_FALLBACK`) for months the 0.4° download has not covered — both are L137 model levels,
+  so vertical resolution is preserved. Applies to the cloud WV correction and OmB alike.
 
 ## Working preferences (user hervo63)
 

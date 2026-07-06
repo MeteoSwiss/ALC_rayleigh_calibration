@@ -127,12 +127,14 @@ class CloudCalConfig:
     n_consecutive: int = 5
     consistency_range: float = 10.0
     temp_threshold: float = -20.0
+    # MATLAB legacy gate (kept for set_defaults() parity only; superseded by
+    # window_correction_threshold below and no longer used by the filters).
     window_threshold: float = 90.0
-    # Window-transmission handling: instead of rejecting profiles below window_threshold, CORRECT the
-    # backscatter for the (two-way) window transmission T -> beta / (T/100)^2, and only reject when
-    # T < window_correction_threshold (so badly-degraded windows where the correction is unreliable
-    # are still dropped). Recovers dirty-window sites that the hard 90 % gate excludes entirely.
-    apply_window_correction: bool = True
+    # Window-transmission handling: the reported window transmission is an arbitrary
+    # manufacturer-scaled diagnostic, and the true window attenuation is absorbed by the
+    # calibration coefficient itself — so the signal is NOT corrected for it (the legacy
+    # beta / (T/100)^2 correction would double-count). Profiles are only REJECTED when
+    # T < window_correction_threshold (window so degraded the signal is untrustworthy).
     window_correction_threshold: float = 50.0
     energy_threshold: float = 90.0
     attenuation_factor: float = 20.0
@@ -140,7 +142,7 @@ class CloudCalConfig:
     apply_transmission_correction: bool = True
     aerosol_lidar_ratio_low: float = 20.0
     aerosol_lidar_ratio_high: float = 70.0
-    apply_wv_correction: bool = False
+    apply_wv_correction: bool = True
     cams_folder: str = "A:\\CAMS\\"
     abs_cs_lookup_table: str = ""
     station_latitude: float = float("nan")
@@ -150,6 +152,23 @@ class CloudCalConfig:
     # cfgrib + ADS credentials in ~/.cdsapirc.
     auto_download_cams: bool = False
     cams_download_scope: str = "day"
+    # Fallback CAMS folder tried when the primary cams_folder lacks the month's file (e.g. a 0.4 deg
+    # archive backed up by a 1 deg archive for months the 0.4 deg download has not covered). Both are
+    # ECMWF/IFS MODEL levels (L137), so the water-vapour vertical resolution is preserved either way.
+    cams_folder_fallback: str = ""
+
+    # Humidity source for the water-vapour two-way transmission (910 nm only).
+    #   'cams'  -> CAMS MODEL levels (L137) at the nearest grid point (OPERATIONAL DEFAULT; reads
+    #              cams_folder, with cams_folder_fallback for missing months). Dense in the boundary
+    #              layer, where most of the sub-cloud water vapour sits.
+    #   'era5'  -> a PREFETCHED ERA5 profile cache (era5_cache), a NetCDF of all stations' q/t/z on
+    #              ERA5 PRESSURE levels (built by scripts/prefetch_era5_edh.py from the DestinE Earth
+    #              Data Hub). RESEARCH option only (ERA5-vs-CAMS WV comparison): the Hub's ERA5 is a
+    #              19-level pressure subset (~4 levels below 3 km) -> coarser boundary layer than the
+    #              CAMS model levels, so it is NOT used operationally. ERA5-only: a station/time with
+    #              no cache profile is NOT calibrated (raises -> flag -4), like a missing CAMS WV.
+    wv_source: str = "cams"
+    era5_cache: str = ""
 
     # NB: aerosol_lidar_ratio is NOT defined in MATLAB set_defaults(); the runner sets it
     # to 50. apply_transmission_correction uses it, so it must be provided when that flag
@@ -781,6 +800,63 @@ def _cams_levels_all_times(
     return time_num, z_model, T, nw
 
 
+_ERA5_CACHE_DATA: dict = {}
+
+
+def _era5_levels_all_times(era5_cache: str, latitude: float, longitude: float):
+    """Per-step ERA5 humidity profile at the station nearest (lat, lon), from a prefetched cache.
+
+    Mirrors the return contract of :func:`_cams_levels_all_times` so ``compute_wv_transmission`` is
+    source-agnostic:
+
+        time_num : (n_t,)          MATLAB datenum (days; datenum(1970,1,1)=719529)
+        z_asl    : (n_lev, n_t)    geopotential height [m ASL]
+        T        : (n_lev, n_t)    temperature [K]
+        nw       : (n_lev, n_t)    water-vapour number density [m^-3]
+
+    The cache (built offline by ``scripts/prefetch_era5_edh.py`` from the DestinE Earth Data Hub)
+    is a NetCDF with dims (station, time, level), coords ``lat``/``lon`` per station, ``time``
+    (datetime64), ``level`` (pressure [hPa]), and variables ``q`` [kg/kg], ``t`` [K],
+    ``z`` [geopotential m^2/s^2]. Cached in-process per file (one station stream reads it once).
+    ERA5-only policy: a missing cache, a too-far nearest station (> ~0.75 deg), or an all-NaN
+    profile RAISES, so the caller flags the night uncalibrated (flag -4) — never a WV-free run.
+    """
+    from ..water_vapor_correction.water_vapor import KB, EPS, G0
+    if not era5_cache or not Path(era5_cache).is_file():
+        raise FileNotFoundError(
+            f"ERA5 water-vapour cache not found: {era5_cache!r} (wv_source='era5' needs the "
+            f"prefetched cache from scripts/prefetch_era5_edh.py)")
+    key = str(era5_cache)
+    cached = _ERA5_CACHE_DATA.get(key)
+    if cached is None:
+        import xarray as xr
+        with xr.open_dataset(era5_cache) as ds:
+            cached = (
+                np.asarray(ds["lat"].values, float), np.asarray(ds["lon"].values, float),
+                np.asarray(ds["level"].values, float), np.asarray(ds["time"].values),
+                np.asarray(ds["q"].values, float), np.asarray(ds["t"].values, float),
+                np.asarray(ds["z"].values, float))
+        _ERA5_CACHE_DATA[key] = cached
+    slat, slon, level, times, q, T, z = cached
+    dlon = ((slon - longitude + 180.0) % 360.0) - 180.0
+    dist = np.sqrt((slat - latitude) ** 2 + dlon ** 2)
+    si = int(np.argmin(dist))
+    if dist[si] > 0.75:
+        raise ValueError(
+            f"No ERA5 cache profile near station ({latitude:.2f},{longitude:.2f}); "
+            f"nearest cached point {dist[si]:.2f} deg away")
+    qs, Ts, zs = q[si], T[si], z[si]              # each (time, level)
+    if not np.any(np.isfinite(qs) & np.isfinite(Ts) & np.isfinite(zs)):
+        raise ValueError(
+            f"ERA5 cache profile all-NaN at station ({latitude:.2f},{longitude:.2f})")
+    P = level[None, :] * 100.0                     # (1, level) Pa
+    Pw = qs * P / (EPS + (1.0 - EPS) * qs)         # water-vapour partial pressure [Pa]
+    nw = Pw / (KB * Ts)                            # number density [m^-3]
+    height = zs / G0                               # geopotential height [m ASL]
+    dn = times.astype("datetime64[s]").astype("float64") / 86400.0 + 719529.0
+    return dn, height.T, Ts.T, nw.T                # (n_t,), (n_lev,n_t) x3
+
+
 def compute_wv_transmission(data: CeiloData, config: CloudCalConfig) -> NDArray:
     """Port of ``compute_wv_transmission``: two-way WV transmission (range x time).
 
@@ -815,29 +891,42 @@ def compute_wv_transmission(data: CeiloData, config: CloudCalConfig) -> NDArray:
     abs_cs_wl, abs_cs_height, abscs_full = load_abs_cross_section(Path(lut_path))
     # abscs_full: (n_wl, n_height)
 
-    # --- CAMS T/RH -> nw and geopotential, all time steps ---
-    cams_path = ensure_cams_file(
-        config.cams_folder, cams_date,
-        auto_download=getattr(config, "auto_download_cams", False),
-        scope=getattr(config, "cams_download_scope", "day"),
-        latitude=data.station_latitude, longitude=data.station_longitude,
-    )
-    if cams_path is None:
-        raise FileNotFoundError(
-            f"No CAMS file for {cams_date} in {config.cams_folder} "
-            f"(looked for monthly CAMS_Beta_{cams_date[:6]}.nc or daily CAMS_Beta_{cams_date[:8]}.nc)"
+    # --- Humidity source (T/q/z -> nw and geopotential height), all time steps ---
+    # The rest of this routine is source-agnostic: it only needs the per-step model times
+    # (MATLAB datenum), geopotential HEIGHT [m ASL] and water-vapour number density [m^-3].
+    if str(getattr(config, "wv_source", "cams")).lower() == "era5":
+        # Prefetched ERA5 profile cache (all stations, pressure levels; built offline from the
+        # DestinE Earth Data Hub). ERA5-only: a station/time with no usable profile raises ->
+        # flag -4 (not calibrated), exactly like a missing CAMS WV correction.
+        time_cams, cams_z, _cams_T, nw_all = _era5_levels_all_times(
+            config.era5_cache, data.station_latitude, data.station_longitude)
+    else:
+        _cams_kw = dict(
+            auto_download=getattr(config, "auto_download_cams", False),
+            scope=getattr(config, "cams_download_scope", "day"),
+            latitude=data.station_latitude, longitude=data.station_longitude,
         )
-    cams_file = str(cams_path)
-    from ..water_vapor_correction.water_vapor import cams_point_too_far
-    if cams_point_too_far(cams_file, data.station_latitude, data.station_longitude):
-        # Regional CAMS has no data at this station (e.g. New Zealand): the nearest grid point is
-        # at the domain edge, thousands of km away -> a bogus WV correction. Fail loudly so the
-        # runner emits flag -10 ('Closest CAMS data too far') instead of a false success.
-        raise ValueError(
-            f"Closest CAMS data too far from station "
-            f"({data.station_latitude:.2f},{data.station_longitude:.2f}); station outside CAMS domain")
-    time_cams, cams_z, _cams_T, nw_all = _cams_levels_all_times(
-        cams_file, data.station_latitude, data.station_longitude)
+        cams_path = ensure_cams_file(config.cams_folder, cams_date, **_cams_kw)
+        if cams_path is None and getattr(config, "cams_folder_fallback", ""):
+            # Month absent from the primary archive (e.g. the 0.4 deg set) -> fall back to the coarser
+            # 1 deg archive (also L137 model levels), so the month still calibrates instead of -4.
+            cams_path = ensure_cams_file(config.cams_folder_fallback, cams_date, **_cams_kw)
+        if cams_path is None:
+            raise FileNotFoundError(
+                f"No CAMS file for {cams_date} in {config.cams_folder} "
+                f"(nor fallback {config.cams_folder_fallback or '-'}); looked for monthly "
+                f"CAMS_Beta_{cams_date[:6]}.nc or daily CAMS_Beta_{cams_date[:8]}.nc")
+        cams_file = str(cams_path)
+        from ..water_vapor_correction.water_vapor import cams_point_too_far
+        if cams_point_too_far(cams_file, data.station_latitude, data.station_longitude):
+            # Regional CAMS has no data at this station (e.g. New Zealand): the nearest grid point is
+            # at the domain edge, thousands of km away -> a bogus WV correction. Fail loudly so the
+            # runner emits flag -10 ('Closest CAMS data too far') instead of a false success.
+            raise ValueError(
+                f"Closest CAMS data too far from station "
+                f"({data.station_latitude:.2f},{data.station_longitude:.2f}); station outside CAMS domain")
+        time_cams, cams_z, _cams_T, nw_all = _cams_levels_all_times(
+            cams_file, data.station_latitude, data.station_longitude)
 
     # A monthly CAMS file holds ~248 (3-hourly) steps, but one daily ceilometer file spans
     # ~1 day. The nearest-time interpolation at the end only ever selects the CAMS steps that
@@ -973,35 +1062,81 @@ def _interp1_nearest_extrap_cols(x: NDArray, Y: NDArray, xi: NDArray) -> NDArray
 # ===========================================================================
 #  apply_multiple_scattering_correction
 # ===========================================================================
+# Multiple-scattering factor eta(cloud-base height) for the O'Connor/Hopkin method, computed with
+# the Photon Variance-Covariance model of Hogan (2006) -- a line-for-line port of the reference
+# multiscatter 1.2.11 small_angle.c ('original' algorithm, incl. Eloranta's exact double scattering
+# and within-gate multiple scattering; validated digit-level against the reference binary) -- for
+# each instrument's receiver FOV / divergence / wavelength at droplet equivalent-area RADIUS
+# a_G = 5.5 um (11 um diameter) and in-cloud extinction alpha = 10 /km.
+#
+# a_G = 5.5 um is the Cloudnet-MEASURED effective radius of the clouds the O'Connor method actually
+# calibrates on (drizzle-free homogeneous warm stratocumulus -- ~2 um smaller than the general cloud
+# population), and it is what the beta-vs-CHM15k closure selects as best across CL61/CL51/CL31 (report
+# sections 9-10). It SUPERSEDES the legacy Hopkin ladder / fitted a_G = 8 um: at low cloud base eta
+# rises to ~0.95 (was ~0.83), removing an over-correction of the most common (low-cloud) calibration
+# scenes; the correction is slightly stronger aloft. Each Vaisala type now has its OWN table -- CL31's
+# wider 0.83 mrad FOV collects more forward-scattered light than the 0.56 mrad CL51/CL61, so it gets a
+# stronger correction (it no longer borrows the CL51 table). CHM15k / Mini-MPL / MPL use the same
+# a_G = 5.5 um for consistency (they are never cloud-calibrated operationally -- their reference is the
+# Rayleigh method and cloud calibration on them warns about detector saturation).
+# Derivation, validation and figures: validation/multiple_scattering_eta.py and
+# doc/reports/multiple_scattering_check.md.
 _ETA_CL31 = np.array([
-    [0.250, 0.82854], [0.375, 0.82371], [0.625, 0.81608], [0.875, 0.80811],
-    [1.125, 0.79969], [1.375, 0.79027], [1.625, 0.78227], [1.875, 0.77480],
-    [2.125, 0.76710], [2.375, 0.76088]])
+    [0.250, 0.93354], [0.375, 0.91224], [0.625, 0.87665], [0.875, 0.84739],
+    [1.125, 0.82263], [1.375, 0.80128], [1.625, 0.78259], [1.875, 0.76604],
+    [2.125, 0.75126], [2.375, 0.73795]])
 _ETA_CL51 = np.array([
-    [0.250, 0.82881], [0.375, 0.82445], [0.625, 0.81752], [0.875, 0.81021],
-    [1.125, 0.80241], [1.375, 0.79356], [1.625, 0.78595], [1.875, 0.77877],
-    [2.125, 0.77100], [2.375, 0.76400]])
+    [0.250, 0.95276], [0.375, 0.93630], [0.625, 0.90781], [0.875, 0.88331],
+    [1.125, 0.86186], [1.375, 0.84282], [1.625, 0.82573], [1.875, 0.81027],
+    [2.125, 0.79618], [2.375, 0.78327]])
+_ETA_CL61 = np.array([
+    [0.250, 0.95368], [0.375, 0.93759], [0.625, 0.90966], [0.875, 0.88566],
+    [1.125, 0.86462], [1.375, 0.84593], [1.625, 0.82916], [1.875, 0.81397],
+    [2.125, 0.80012], [2.375, 0.78742]])
+_ETA_CHM15K = np.array([
+    [0.250, 0.98139], [0.375, 0.97512], [0.625, 0.96241], [0.875, 0.95051],
+    [1.125, 0.93943], [1.375, 0.92904], [1.625, 0.91925], [1.875, 0.90999],
+    [2.125, 0.90122], [2.375, 0.89287], [2.750, 0.88110], [3.250, 0.86655],
+    [3.750, 0.85318]])
+_ETA_MINIMPL = np.array([
+    [0.250, 0.98243], [0.375, 0.97661], [0.625, 0.96440], [0.875, 0.95288],
+    [1.125, 0.94218], [1.375, 0.93214], [1.625, 0.92266], [1.875, 0.91367],
+    [2.125, 0.90512], [2.375, 0.89697], [2.750, 0.88546], [3.250, 0.87119],
+    [3.750, 0.85803]])
+_ETA_MPL = np.array([
+    [0.250, 0.98831], [0.375, 0.98667], [0.625, 0.98228], [0.875, 0.97700],
+    [1.125, 0.97144], [1.375, 0.96590], [1.625, 0.96052], [1.875, 0.95533],
+    [2.125, 0.95032], [2.375, 0.94547], [2.750, 0.93847], [3.250, 0.92954],
+    [3.750, 0.92105]])
 
 
 def apply_multiple_scattering_correction(
     beta: NDArray, range_data: NDArray, config: CloudCalConfig) -> NDArray:
-    """Port of ``apply_multiple_scattering_correction`` (beta *= eta(range))."""
+    """beta *= eta(range): multiple-scattering correction of the O'Connor method.
+
+    CL31/CL51/CL61 each use their OWN PVC table (Hogan 2006) at the measured calibration-scene
+    droplet radius a_G = 5.5 um (see the tables above): the CL31's wider 0.83 mrad FOV gives a
+    stronger correction than the 0.56 mrad CL51/CL61, and the CL61's slightly larger divergence
+    (0.28 vs 0.21 mrad) gives it a marginally weaker correction than the CL51. This replaces the
+    pre-2026-07 legacy Hopkin ladder (a_G = 8 um, CL61 borrowing the CL51 table). CHM15k, Mini-MPL
+    and MPL use their own PVC tables -- the MATLAB applied NO correction for them (ones()). Unknown
+    instrument types get no correction, which restores the MATLAB 'otherwise' behaviour."""
     range_km = range_data / 1000.0
     inst = config.instrument.upper()
-    if inst == "CL31":
-        eta = _ETA_CL31
-    elif inst in ("CL51", "CL61"):
-        eta = _ETA_CL51
-    else:
-        eta = np.array([[0.250, 0.82881], [2.375, 0.76400]])
-
-    if eta.shape[0] > 2:
-        factor_profile = _interp1_linear_extrap(eta[:, 0], eta[:, 1], range_km)
-    else:
-        # MATLAB: length(eta_correction) is the larger matrix dim (here columns=2),
-        # so for the 2-row 'otherwise' table length()==2 -> ones(). But CL31/51/61 use
-        # the 10x2 table where length()==10 -> interp. We branch on row count here.
-        factor_profile = _interp1_linear_extrap(eta[:, 0], eta[:, 1], range_km)
+    tables = {
+        "CL31": _ETA_CL31,
+        "CL51": _ETA_CL51,
+        "CL61": _ETA_CL61,
+        "CHM15K": _ETA_CHM15K,
+        "CHM8K": _ETA_CHM15K,
+        "MINI-MPL": _ETA_MINIMPL,
+        "MINIMPL": _ETA_MINIMPL,
+        "MPL": _ETA_MPL,
+    }
+    eta = tables.get(inst)
+    if eta is None:
+        return beta.copy()
+    factor_profile = _interp1_linear_extrap(eta[:, 0], eta[:, 1], range_km)
     return beta * factor_profile[:, None]
 
 
@@ -1028,11 +1163,11 @@ def _interp1_linear_extrap(x: NDArray, y: NDArray, xi: NDArray) -> NDArray:
 def apply_instrument_filters(
     beta: NDArray, data: CeiloData, config: CloudCalConfig
 ) -> Tuple[NDArray, Dict[str, int]]:
-    """Quality-flag / window / energy filtering (vectorised over profiles). The window step now
-    CORRECTS the backscatter for the two-way window transmission (beta / (T/100)^2) instead of a hard
-    reject at window_threshold, dropping only profiles below window_correction_threshold."""
+    """Quality-flag / window / energy filtering (vectorised over profiles). Window transmission is
+    a reject-only gate (T < window_correction_threshold): the reported value is an arbitrary
+    manufacturer scale and the calibration coefficient absorbs the real window attenuation, so no
+    beta correction is applied (the legacy beta / (T/100)^2 correction double-counted it)."""
     beta_filtered = beta.copy()
-    n_profiles = beta.shape[1]
     stats = {"window_rejected": 0, "energy_rejected": 0, "quality_flag_rejected": 0}
 
     def _alive():
@@ -1050,20 +1185,14 @@ def apply_instrument_filters(
             stats["quality_flag_rejected"] = int(np.sum(bad & _alive()))
             beta_filtered[:, bad] = np.nan
 
-    # 2. Window transmission: correct (two-way), reject only below the correction threshold.
+    # 2. Window transmission: reject-only gate (no beta correction, see docstring).
     if data.window_transmission is not None and data.window_transmission.size:
         wt = np.asarray(data.window_transmission, dtype=float)
-        thr = float(getattr(config, "window_correction_threshold", config.window_threshold))
+        thr = float(config.window_correction_threshold)
         with np.errstate(invalid="ignore"):
             reject = wt < thr                                          # NaN -> False (kept), as before
         stats["window_rejected"] = int(np.sum(reject & _alive()))
         beta_filtered[:, reject] = np.nan
-        if getattr(config, "apply_window_correction", True):
-            corr = np.ones(n_profiles)
-            with np.errstate(invalid="ignore"):
-                ok = (wt >= thr) & (wt > 0)                            # finite, kept profiles only
-            corr[ok] = (wt[ok] / 100.0) ** 2
-            beta_filtered /= corr[np.newaxis, :]
 
     # 3. Laser energy.
     if data.laser_energy is not None and data.laser_energy.size:
@@ -1632,8 +1761,17 @@ def liquid_cloud_calibration_from_data(data: CeiloData, config: CloudCalConfig) 
 
     # The liquid-cloud (O'Connor/Hopkin) calibration is the PRIMARY method for the 910 nm
     # ceilometers (CL31/CL51/CL61) — including the CL31/CL51, which cannot be Rayleigh-calibrated.
-    # It also runs for CHM15k / Mini-MPL. No suitability warning here: the only genuine warning is
-    # _beta_conversion_factor's unrecognized-units fallback.
+    # The photon-counting instruments (CHM15k/CHM8k, Mini-MPL, MPL) SATURATE in the strong
+    # liquid-cloud return, so their integrated backscatter is biased low and the derived
+    # coefficient is unreliable — warn whenever the cloud method is run on them (their
+    # reference method is the Rayleigh calibration).
+    if str(getattr(config, "instrument", "")).upper() in (
+            "CHM15K", "CHM8K", "MINI-MPL", "MINIMPL", "MPL"):
+        warnings.warn(
+            f"{config.instrument}: photon-counting detector saturates in liquid clouds; "
+            "the cloud-calibration coefficient is unreliable (biased by detector "
+            "non-linearity). Use the Rayleigh calibration for this instrument type.",
+            UserWarning)
 
     # --- Optional pre-averaging (time/range) to speed up high-res files ---
     # Applied BEFORE the WV correction and the per-profile filters (the costly steps),
@@ -1691,6 +1829,10 @@ def liquid_cloud_calibration_from_data(data: CeiloData, config: CloudCalConfig) 
         res = create_empty_results()
         res.config = config
         res.filter_stats = filter_stats
+        # The failed-calibration path is exactly where the dominant-rejection flag
+        # (-22..-26) is derived from these stats — they must survive the early return.
+        res.cloud_stats = cloud_stats
+        res.consistency_stats = consistency_stats
         res.S_apparent = S_apparent
         res.S_consistent = S_consistent
         res.trans2_wv = data.trans2_wv

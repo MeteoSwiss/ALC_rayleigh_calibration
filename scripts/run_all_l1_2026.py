@@ -100,6 +100,14 @@ L1_ROOT = Path(os.environ.get("ALC_L1_ROOT", "D:/E-PROFILE_L1_2026"))
 CENSUS = Path(os.environ.get("ALC_CENSUS", str(REPO / "validation" / "scope_l1_2026_census.json")))
 OUT = Path(os.environ.get("ALC_FULLCAL_DIR", "C:/DATA/Projects/202606_E-PROFILE_calibration/fullcal_l1_2026"))
 CAMS = Path(os.environ.get("ALC_CAMS_DIR", "D:/CAMS"))
+# OmB CAMS resolution: the primary monthly archive (0.4 deg, ALC_CAMS_DIR) with a per-month fallback
+# to a coarser 1 deg archive (ALC_CAMS_DIR_FALLBACK) for months the 0.4 deg download has not covered.
+_CAMS_FB = os.environ.get("ALC_CAMS_DIR_FALLBACK", "")
+CAMS_FALLBACK = Path(_CAMS_FB) if _CAMS_FB else None
+# Humidity source for the cloud WV correction: 'cams' (default) or 'era5' (prefetched Earth Data Hub
+# cache at ALC_ERA5_CACHE; used for the 2025-2026 reprocessing). OmB keeps using CAMS regardless.
+WV_SOURCE = os.environ.get("ALC_WV_SOURCE", "cams")
+ERA5_CACHE = os.environ.get("ALC_ERA5_CACHE", "")
 WV_LUT = REPO / "calibration" / "data" / "abs_cross_wv_910nm.nc"   # bundled 910 nm WV LUT
 EPOCH = datetime(1970, 1, 1)
 
@@ -293,6 +301,8 @@ def _do_cloud(s, start, end):
                 nc_file=str(fp), instrument=s["type"], apply_wv_correction=True,
                 apply_transmission_correction=True, aerosol_lidar_ratio=50.0,
                 cams_folder=str(CAMS), abs_cs_lookup_table=str(WV_LUT),
+                cams_folder_fallback=(str(CAMS_FALLBACK) if CAMS_FALLBACK else ""),
+                wv_source=WV_SOURCE, era5_cache=ERA5_CACHE,
                 station_latitude=s["lat"], station_longitude=s["lon"],
                 average_time_s=30.0, average_range_m=10.0,   # finer cadence -> more valid cloud cals
             ))
@@ -601,9 +611,19 @@ def _do_omb(s, start, end, kalman_rows):
     kmap = _kalman_map(kalman_rows, method)
     if not kmap:
         return None  # no calibrated C_L -> skip (don't fabricate 'ours' from the default constant)
-    cams = find_cams_file(CAMS, end.strftime("%Y%m%d"))
-    if cams is None or not _has_backscatter(cams):
-        return None  # needs the 0.4 deg CAMS-with-backscatter download first
+    # OmB CAMS: prefer the 0.4 deg monthly archive (ALC_CAMS_DIR); fall back to the coarser 1 deg
+    # archive (ALC_CAMS_DIR_FALLBACK) for months the 0.4 deg set does not yet cover. Both must carry
+    # aerosol backscatter (aerbackscatgnd532/1064) to be usable for OmB.
+    cams = None
+    for _folder in (CAMS, CAMS_FALLBACK):
+        if _folder is None:
+            continue
+        _c = find_cams_file(_folder, end.strftime("%Y%m%d"))
+        if _c is not None and _has_backscatter(_c):
+            cams = _c
+            break
+    if cams is None:
+        return None  # no CAMS-with-backscatter (0.4 deg or 1 deg fallback) for this month
     data = _load_l1_window(s, start, end)
     if data is None:
         return None
