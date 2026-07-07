@@ -1,7 +1,8 @@
-"""dashboard_to_calib.py — feed the operational DASHBOARD calibration (fullcal_l1_2026) into the
-paper-validation report.
+"""dashboard_to_calib.py — feed the operational calibration output (the CSCS calout, same directory
+as intercompare.CALOUT) into the paper-validation report.
 
-The dashboard (scripts/run_all_l1_2026.py) calibrates every stream from the native L1 archive over
+Source directory: $ALC_VAL_CALOUT (default E_PROFILE_calout_2025_2026) — the network calibration run
+(scripts/run_all_l1_2026.py, on CSCS) that calibrates every stream from the native L1 archive over
 2025-2026 and writes, per stream <WMO>_<ident>:
     <key>_cal.csv     date, method, flag, cal_value, uncertainty, ...   (raw per-night/day)
     <key>_kalman.csv  method, date, kalman, kalman_std                  (E-PROFILE best estimate)
@@ -23,6 +24,7 @@ Usage:  python -m validation.paper.dashboard_to_calib
 """
 from __future__ import annotations
 import csv
+import os
 import sys
 from pathlib import Path
 
@@ -33,7 +35,12 @@ except Exception:
 
 from validation.paper.calib_benchmark import BENCHMARK, key_of
 
-FC = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/fullcal_l1_2026")
+# Read from the SAME operational calibration output as intercompare.CALOUT (env-overridable) so the
+# report's Kalman constants and the CALOUT the L1 pipeline reads can never drift apart. CL61-Rayleigh
+# is absent here by design (the native-signal molecular fit fails) and stays sourced from
+# calib_benchmark (L2_monthly): write_channel skips channels with no series, preserving those files.
+FC = Path(os.environ.get(
+    "ALC_VAL_CALOUT", "C:/DATA/Projects/202606_E-PROFILE_calibration/E_PROFILE_calout_2025_2026"))
 CALIB = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/figs_paper_validation/paper_python/calib")
 CALIB.mkdir(parents=True, exist_ok=True)
 

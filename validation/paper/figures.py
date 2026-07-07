@@ -76,10 +76,12 @@ def _median_iqr(B):
 
 
 def _truncate_noise_floor(med, nz, z, zmin, nprof, minfrac=0.20):
-    """Keep up to the first altitude above zMin where the median is no longer positive (or the
-    coverage too thin). The median is only shown where MORE THAN 20 % of the profiles contribute —
-    otherwise a handful of profiles could define the curve."""
-    good = np.isfinite(med) & (med > 0) & (nz >= max(10, minfrac * nprof))
+    """Keep up to the first altitude above zMin where the median stops being defined or the
+    coverage gets too thin. On the LINEAR profile axis the median is shown even where it goes
+    NEGATIVE (a channel whose median dips below zero has hit its noise/offset floor — that is the
+    information, not something to hide); only the >20 %-coverage safeguard truncates the curve, so a
+    handful of profiles can never define it."""
+    good = np.isfinite(med) & (nz >= max(10, minfrac * nprof))
     keep = np.ones(med.size, bool)
     bad = np.where(~good & (z > zmin))[0]
     if bad.size:
@@ -115,6 +117,7 @@ def fig_multi_alc(R, cfg, out_png, title, zmax_plot=6000):
     ncom = int(common.sum())
     synced = ncom > 0
     xmax_seen = 0.0
+    xmin_seen = 0.0
     for k in range(nch):
         B = R["beta"][k][:, zmask]
         if synced:
@@ -127,10 +130,29 @@ def fig_multi_alc(R, cfg, out_png, title, zmax_plot=6000):
         m3 = keep & np.isfinite(q3) & (q3 > 0)
         axp.plot(q3[m3], zc[m3], ":", color=c, lw=1.0)
         axp.plot(med[keep], zc[keep], "-", color=c, lw=1.8, label=R["channels"][k]["label"])
+        if keep.any() and np.isfinite(med[keep]).any():
+            xmin_seen = min(xmin_seen, float(np.nanmin(med[keep])))   # let the axis show negative medians
+        # overlap-UNcorrected twin (CHM15k): dashed median in the same colour, same common-hour
+        # sample and truncation, so the effect of the temperature-dependent overlap correction
+        # (below ~700 m) is directly visible against the corrected solid line.
+        Bn = R.get("beta_noovl", [None] * nch)[k]
+        if Bn is not None:
+            Bn = Bn[:, zmask]
+            if synced:
+                Bn = Bn[common]
+            medn, _, _, nzn = _median_iqr(Bn)
+            keepn = _truncate_noise_floor(medn, nzn, zc, zmin, Bn.shape[0])
+            axp.plot(medn[keepn], zc[keepn], "--", color=c, lw=1.4,
+                     label=R["channels"][k]["label"] + " (no overlap corr)")
         if m3.any():
             xmax_seen = max(xmax_seen, float(np.nanpercentile(q3[m3], 98)))
     axp.axhline(zmin, ls="--", color="k", lw=0.8); axp.axhline(zmax, ls="--", color="k", lw=0.8)
-    axp.set_xlim(0, xmax_seen * 1.05 if xmax_seen > 0 else 1.0); axp.set_ylim(0, zmax_plot)
+    # clamp the profile axis to +/-2 Mm^-1 sr^-1: keep the median's zero-crossing / negative dip visible
+    # without letting an extreme excursion (e.g. the CL31 diving to ~-4) stretch the whole panel.
+    axp.set_xlim(max(-2.0, xmin_seen * 1.05), min(2.0, xmax_seen * 1.05) if xmax_seen > 0 else 1.0)
+    if xmin_seen < 0:
+        axp.axvline(0, color="0.6", lw=0.8, ls="-")     # mark beta_att = 0 when negative medians are shown
+    axp.set_ylim(0, zmax_plot)
     axp.grid(alpha=0.3); axp.set_xlabel(r"$\beta_{att}$ [Mm$^{-1}$ sr$^{-1}$]"); axp.set_ylabel("Altitude a.g.l. [m]")
     axp.set_title("(a) Median (solid) $\\pm$ IQR (dotted)  %s-%s\n%s"
                   % (_fmt_my(cfg["start"]), _fmt_my(cfg["end"]),

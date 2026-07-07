@@ -1,18 +1,28 @@
 """
-discrepancy_analysis.py — quantitative probes behind the "when can the results differ" section of
-the paper-validation report:
+discrepancy_analysis.py — quantitative probes behind the "where do the differences come from"
+section of the paper-validation report (all on the uniform L1 pipeline of run_paper_validation):
 
-  A1. Payerne CL61 Rayleigh vs cloud calibration series (the -43% relbias case): how thin is the
-      Rayleigh series, what constant ratio does the Kalman hold, and how it drifts.
-  A2. Uccle CL51 (and CL31) cloud-calibration oscillations: period, amplitude, seasonal cycle.
+  A1. Payerne CL61 Rayleigh vs cloud calibration series: how thin is the Rayleigh series, what
+      constant ratio does the Kalman hold, and how it drifts.
+  A2. Uccle CL51 (and CL31/CL61) cloud-calibration oscillations: period, amplitude, seasonal cycle.
   B1. Day/night + seasonal splits of the intercomparison statistics per station/channel
       (post-hoc masks on the hourly synchronized matrices; no reprocessing).
   B2. Mini-MPL 532->1064 Angstrom-exponent sensitivity (analytic on the median profile).
+  B3. Altitude-band dependence of the bias (500-1000 / 1000-2000 / 2000-3000 m): separates
+      near-range/overlap-type mechanisms (bias largest low) from conversion/noise mechanisms
+      (bias growing where the aerosol fraction shrinks).
+  B4. Monthly evolution of the median relative bias: a flat line is a scale-like (calibration)
+      offset; a seasonal cycle points at the 910 nm WV residual / laser-wavelength drift; a drift
+      or step points at an instrument change.
+
+Each station is processed ONCE through run_paper_validation.run_site (module-level cache) and the
+B-probes are post-hoc masks/bands on the synchronized science matrices — so every number here is
+exactly the paper pipeline, only split.
 
 Outputs figures to OUT (landscape) + a JSON with the numbers used by the report.
 Usage: python -m validation.paper.discrepancy_analysis [csv|full]
   csv  = A1+A2 only (fast, no station reprocessing)
-  full = everything (runs the 4 benchmark stations through intercompare.process)
+  full = everything (runs the 7 benchmark stations through the L1 pipeline once)
 """
 from __future__ import annotations
 import csv as _csv
@@ -168,31 +178,51 @@ def cl51_oscillation(res):
 
 
 # ---------------------------------------------------------------------------
+# Shared station cache: each station runs ONCE through the uniform L1 pipeline
+# (run_paper_validation.run_site), all B-probes reuse the synchronized matrices.
+# ---------------------------------------------------------------------------
+STATIONS = ["payerne", "amsterdam", "uccle", "sirta", "lindenberg", "aosta", "camborne"]
+_SITE_CACHE = {}
+
+
+def _get_site(name):
+    """(R, cfg) from the paper pipeline, computed once per process."""
+    if name not in _SITE_CACHE:
+        import warnings
+        warnings.filterwarnings("ignore")
+        from validation.paper import run_paper_validation as RPV
+        out = RPV.run_site(name)
+        _SITE_CACHE[name] = (out[0], out[1]) if out is not None else (None, None)
+    return _SITE_CACHE[name]
+
+
+def _channel_colors(R):
+    from validation.paper import figures as FIG
+    return FIG.channel_colors(R["channels"])
+
+
+# ---------------------------------------------------------------------------
 # B1. day/night + seasonal splits of the synchronized matrices
 # ---------------------------------------------------------------------------
 def daynight_seasonal(res):
-    import warnings
-    warnings.filterwarnings("ignore")
-    from validation.paper import run_paper_validation as RPV
     from validation.paper import intercompare as IC
     from calibration.sensitivity.noise import solar_elevation
     splits = {}
-    stations = ["payerne", "amsterdam", "uccle", "sirta", "lindenberg", "aosta", "camborne"]
-    fig, axes = plt.subplots(2, len(stations), figsize=(5.0 * len(stations), 8.5))
-    for col, name in enumerate(stations):
-        R, cfg = RPV.run_station(name)
+    fig, axes = plt.subplots(2, len(STATIONS), figsize=(5.0 * len(STATIONS), 8.5))
+    for col, name in enumerate(STATIONS):
+        R, cfg = _get_site(name)
         if R is None:
             continue
         z = np.asarray(R["altGrid"]) - R["station"]["altitude"]
         zmask = (z >= cfg["zMin"]) & (z <= cfg["zMax"])
         tt = np.asarray(R["time_sync"]).astype("datetime64[s]")
-        hours = tt.astype("datetime64[h]").astype(int) % 24
         elev = solar_elevation(tt, R["station"]["lat"], R["station"]["lon"])
         isday = elev > 5.0
         month = (tt.astype("datetime64[M]").astype(int) % 12) + 1
         seas = {"DJF": np.isin(month, (12, 1, 2)), "MAM": np.isin(month, (3, 4, 5)),
                 "JJA": np.isin(month, (6, 7, 8)), "SON": np.isin(month, (9, 10, 11))}
         iref = cfg["referenceChannel"]; ref = R["beta"][iref]
+        cols = _channel_colors(R)
         st = {}
         for k, ch in enumerate(R["channels"]):
             if k == iref:
@@ -207,12 +237,14 @@ def daynight_seasonal(res):
         # panel: med relbias (top) + log r (bottom) per channel for day/night/season
         cats = ["all", "day", "night", "DJF", "MAM", "JJA", "SON"]
         labels = list(st.keys())
+        ccols = [cols[k] for k, ch in enumerate(R["channels"]) if k != iref]
         w = 0.8 / max(len(labels), 1)
         for row, met, ylab in ((0, "medrelbias_pct", "med relbias [%]"), (1, "r_log", "log r")):
             ax = axes[row][col]
             for j, lb in enumerate(labels):
                 v = [st[lb].get(cat, {}).get(met, np.nan) for cat in cats]
-                ax.bar(np.arange(len(cats)) + j * w, v, w, label=lb if row == 0 else None)
+                ax.bar(np.arange(len(cats)) + j * w, v, w, color=ccols[j],
+                       label=lb if row == 0 else None)
             ax.set_xticks(np.arange(len(cats)) + 0.4 - w / 2); ax.set_xticklabels(cats, fontsize=8)
             ax.grid(alpha=0.3, axis="y"); ax.set_ylabel(ylab)
             if row == 0:
@@ -226,6 +258,105 @@ def daynight_seasonal(res):
 
 
 # ---------------------------------------------------------------------------
+# B3. altitude-band dependence of the bias — WHERE in the profile does it sit?
+# A near-range mechanism (overlap, incomplete offset removal) is largest in the lowest band and
+# fades aloft; a conversion/noise mechanism (532->1064 molaer, 910->1064 in clean air, SNR floor)
+# GROWS with altitude as the aerosol fraction shrinks; a pure calibration-scale offset is flat.
+# ---------------------------------------------------------------------------
+BANDS = ((500.0, 1000.0), (1000.0, 2000.0), (2000.0, 3000.0))
+
+
+def altitude_bands(res):
+    from validation.paper import intercompare as IC
+    out = {}
+    fig, axes = plt.subplots(1, len(STATIONS), figsize=(4.6 * len(STATIONS), 5.5))
+    for col, name in enumerate(STATIONS):
+        R, cfg = _get_site(name)
+        if R is None:
+            continue
+        z = np.asarray(R["altGrid"]) - R["station"]["altitude"]
+        iref = cfg["referenceChannel"]; ref = R["beta"][iref]
+        cols = _channel_colors(R)
+        st = {}
+        ax = axes[col]
+        xb = np.arange(len(BANDS))
+        labels = [ch["label"] for k, ch in enumerate(R["channels"]) if k != iref]
+        w = 0.8 / max(len(labels), 1)
+        j = 0
+        for k, ch in enumerate(R["channels"]):
+            if k == iref:
+                continue
+            vals = []
+            for z0, z1 in BANDS:
+                zm = (z >= z0) & (z <= z1)
+                s = IC._stats(R["beta"][k], ref, zm)
+                vals.append(s["medrelbias_pct"])
+            st[ch["label"]] = {f"{int(z0)}-{int(z1)}m": v for (z0, z1), v in zip(BANDS, vals)}
+            ax.bar(xb + j * w, vals, w, color=cols[k], label=ch["label"])
+            j += 1
+        out[name] = st
+        ax.set_xticks(xb + 0.4 - w / 2)
+        ax.set_xticklabels([f"{int(z0/100)/10}-{int(z1/100)/10} km" for z0, z1 in BANDS], fontsize=8)
+        ax.axhline(0, color="k", lw=0.8)
+        ax.grid(alpha=0.3, axis="y"); ax.set_ylabel("med relbias [%]"); ax.set_title(name)
+        ax.legend(fontsize=7)
+    res["altitude_bands"] = _to_jsonable(out)
+    fig.suptitle("Where in the profile does the bias sit? median relative bias per altitude band"
+                 " (near-range mechanisms fade aloft; conversion/noise mechanisms grow)", fontweight="bold")
+    fig.tight_layout(rect=(0, 0, 1, 0.94))
+    fig.savefig(OUT / "fig_report_altitude_bands.png", dpi=160); plt.close(fig)
+    print("altitude_bands: done", list(out.keys()))
+
+
+# ---------------------------------------------------------------------------
+# B4. monthly evolution of the median relative bias — WHEN does it move?
+# Flat = scale-like (calibration constant); seasonal cycle = 910 nm WV residual / laser-wavelength
+# drift (cf. A2 oscillations); drift/step = instrument or processing change.
+# ---------------------------------------------------------------------------
+def monthly_bias(res):
+    from validation.paper import intercompare as IC
+    out = {}
+    fig, axes = plt.subplots(1, len(STATIONS), figsize=(4.6 * len(STATIONS), 5.0))
+    for col, name in enumerate(STATIONS):
+        R, cfg = _get_site(name)
+        if R is None:
+            continue
+        z = np.asarray(R["altGrid"]) - R["station"]["altitude"]
+        zmask = (z >= cfg["zMin"]) & (z <= cfg["zMax"])
+        tt = np.asarray(R["time_sync"]).astype("datetime64[M]")
+        months = np.unique(tt)
+        iref = cfg["referenceChannel"]; ref = R["beta"][iref]
+        cols = _channel_colors(R)
+        ax = axes[col]
+        st = {}
+        for k, ch in enumerate(R["channels"]):
+            if k == iref:
+                continue
+            mv = []
+            for m in months:
+                sel = tt == m
+                s = IC._stats(R["beta"][k][sel], ref[sel], zmask)
+                mv.append(s["medrelbias_pct"] if s["n"] > 200 else np.nan)   # skip thin months
+            st[ch["label"]] = {str(m): v for m, v in zip(months, mv)}
+            ax.plot(months.astype("datetime64[D]"), mv, "o-", color=cols[k], lw=1.5, ms=4,
+                    label=ch["label"])
+        out[name] = st
+        ax.axhline(0, color="k", lw=0.8)
+        ax.grid(alpha=0.3); ax.set_ylabel("med relbias [%]"); ax.set_title(name)
+        ax.legend(fontsize=7)
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b%y"))
+        for lab in ax.get_xticklabels():
+            lab.set_rotation(45); lab.set_fontsize(7)
+    res["monthly_bias"] = _to_jsonable(out)
+    fig.suptitle("When does the bias move? monthly median relative bias vs the site reference"
+                 " (flat = scale-like; seasonal = WV/laser-drift residual; step = instrument change)",
+                 fontweight="bold")
+    fig.tight_layout(rect=(0, 0, 1, 0.93))
+    fig.savefig(OUT / "fig_report_monthly_bias.png", dpi=160); plt.close(fig)
+    print("monthly_bias: done", list(out.keys()))
+
+
+# ---------------------------------------------------------------------------
 # B2. Mini-MPL Angstrom-exponent sensitivity (analytic on the median profiles)
 # ---------------------------------------------------------------------------
 def minimpl_alpha(res):
@@ -233,11 +364,8 @@ def minimpl_alpha(res):
     beta_aer(1064) = beta_aer(532) / 2^alpha. Changing alpha rescales beta_aer by 2^(1-alpha)
     relative to the alpha=1 reference, so the relbias moves by ~f_aer * (2^(1-alpha) - 1) where
     f_aer is the aerosol fraction of the (already converted) Mini-MPL signal in the stats band."""
-    import warnings
-    warnings.filterwarnings("ignore")
-    from validation.paper import run_paper_validation as RPV
     from validation.paper import intercompare as IC
-    R, cfg = RPV.run_station("sirta")
+    R, cfg = _get_site("sirta")
     if R is None:
         print("minimpl_alpha: no sirta"); return
     z = np.asarray(R["altGrid"]) - R["station"]["altitude"]
@@ -300,9 +428,12 @@ def main(mode="csv"):
     cl51_oscillation(res)
     if mode == "full":
         daynight_seasonal(res)
+        altitude_bands(res)
+        monthly_bias(res)
         minimpl_alpha(res)
     RESULTS.write_text(json.dumps(_to_jsonable(res), indent=1))
     print("wrote", RESULTS)
+    print("DISCREPANCY_ANALYSIS_DONE", flush=True)
 
 
 if __name__ == "__main__":

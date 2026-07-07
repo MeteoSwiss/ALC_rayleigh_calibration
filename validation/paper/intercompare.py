@@ -24,19 +24,30 @@ from calibration.io.cams import ensure_cams_file
 from calibration.cloud.calibration import INSTRUMENT_CAL_DEFAULT
 from calibration.water_vapor_correction.water_vapor import (
     cams_water_vapor_profile, two_way_wv_transmission, laser_spectrum_for, in_water_vapor_band,
-    cams_point_too_far)
+    cams_point_too_far, cams_temperature_pressure_profile)
 from calibration.rayleigh.atmosphere import load_standard_atmosphere, calculate_molecular_properties
 from calibration.config import InstrumentType
 
 REPO = Path(__file__).resolve().parents[2]
 L2_MONTHLY = Path("A:/E-PROFILE_L2_monthly")
 CALIB = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/figs_paper_validation/paper_python/calib")
+# CAMS for the WV + molecular (Rayleigh) profiles: 0.4 deg monthly primary, 1 deg monthly fallback for
+# months the 0.4 deg archive has not covered yet (both L137 model levels). Env-overridable.
 CAMS = "D:/CAMS"
+CAMS_04 = Path(os.environ.get("ALC_VAL_CAMS_04", "D:/CAMS_Monthly_04"))
+CAMS_1DEG = Path(os.environ.get("ALC_VAL_CAMS_1DEG", "D:/CAMS"))
+_G0, _RD, _LAPSE = 9.80665, 287.058, 0.0065   # std gravity, dry-air gas const, std lapse rate
 # --- L1 data path (validate by applying the CSCS calibration to the raw range-corrected signal) ---
 # rcs_0 is read from the native daily L1 archive and turned into attenuated backscatter with
 # beta_att [Mm^-1 sr^-1] = rcs_0 / C_L * 1e6, where C_L is the CSCS Kalman lidar constant from the
 # calout <key>_kalman.csv. (No L2 product, no raw vendor files.) Both env-overridable.
 L1_ROOT = Path(os.environ.get("ALC_VAL_L1_ROOT", "D:/E-PROFILE_L1_2026"))
+# Per-gate SNR>=3 detection gate at L1 read (in _l1_day, on the native profiles retimed to hourly).
+# DEFAULT OFF: the SNR gate keeps only gates whose noisy beta exceeds 3-sigma -> conditions on positive
+# noise -> biases the retained median HIGH at altitude, instrument-dependently. The validation therefore
+# reads the UNGATED signal (symmetric noise averages out in the median); detection limits are reported
+# separately as a sensitivity profile, not as a censoring gate. Re-enable with ALC_VAL_L1_SNR=1.
+L1_SNR_GATE = os.environ.get("ALC_VAL_L1_SNR", "0") != "0"
 CALOUT = Path(os.environ.get(
     "ALC_VAL_CALOUT", "C:/DATA/Projects/202606_E-PROFILE_calibration/E_PROFILE_calout_2025_2026"))
 WV_LUT = REPO / "calibration" / "data" / "abs_cross_wv_910nm.nc"
@@ -179,8 +190,10 @@ def interp_calib(dd, val, t):
 
 # --------------------------------------------------------------------------- L1 reading (rcs_0)
 def _l1_day(fp):
-    """Read ONE daily L1 file and median-retime rcs_0 / cloud_base_height / vertical_visibility to its
-    hourly grid (keeps memory bounded over 2 years). Returns (grid, rcs_h, cbh_h, vv_h, range) or None."""
+    """Read ONE daily L1 file and median-retime rcs_0 / cloud_base_height / vertical_visibility /
+    internal temperature to its hourly grid (keeps memory bounded over 2 years). temp_int is
+    converted K->degC for the CHM15k overlap correction. Returns (grid, rcs_h, cbh_h, vv_h, temp_h,
+    range) or None."""
     try:
         with Dataset(fp) as nc:
             tu = getattr(nc.variables["time"], "units", "days since 1970-01-01")
@@ -193,10 +206,12 @@ def _l1_day(fp):
                 return None
             cbh = _read2d(nc, "cloud_base_height", t.size, rng.size)
             vv = _read1d(nc, "vertical_visibility", t.size)
+            temp = _read1d(nc, "temp_int", t.size) - 273.15   # internal temperature K -> degC (NaN if absent)
     except Exception:
         return None
-    grid, (rcsh, cbhh, vvh) = retime_hourly(t, [rcs, cbh, vv], min_cov_s=MIN_AVG_S, snr_idx=(0,))
-    return grid, rcsh, cbhh, vvh, rng
+    grid, (rcsh, cbhh, vvh, temph) = retime_hourly(t, [rcs, cbh, vv, temp], min_cov_s=MIN_AVG_S,
+                                                   snr_idx=((0,) if L1_SNR_GATE else ()))
+    return grid, rcsh, cbhh, vvh, temph, rng
 
 
 def read_l1(wmo, ident, start, end, workers=16):
@@ -230,18 +245,19 @@ def read_l1(wmo, ident, start, end, workers=16):
     parts = []
     with ThreadPoolExecutor(max_workers=workers) as ex:
         for res in ex.map(_l1_day, files):
-            if res is None or res[4].size != nR:   # skip unreadable / different range grid
+            if res is None or res[5].size != nR:   # skip unreadable / different range grid
                 continue
-            parts.append(res[:4])
+            parts.append(res[:5])
     if not parts:
         return None
     time = np.concatenate([p[0] for p in parts])
     rcs = np.concatenate([p[1] for p in parts], axis=0)
     cbh = np.concatenate([p[2] for p in parts], axis=0)
     vv = np.concatenate([p[3] for p in parts])
+    temp = np.concatenate([p[4] for p in parts])
     o = np.argsort(time)
     return dict(time=time[o], alt=meta["rng"] + meta["salt"], beta=rcs[o], calc=None,
-                qf=np.zeros(rcs.shape, dtype="f8")[o], cbh=cbh[o], vv=vv[o],
+                qf=np.zeros(rcs.shape, dtype="f8")[o], cbh=cbh[o], vv=vv[o], temp_int=temp[o],
                 station_alt=meta["salt"], lat=meta["lat"], lon=meta["lon"],
                 wavelength=meta["wl"], itype="", wmo=wmo, ident=ident)
 
@@ -284,8 +300,7 @@ def apply_wv(beta, l2, lam0, fwhm):
     info = {"months": [], "months_excluded": [], "median_t2": []}
     for p in months.unique():
         sel = np.asarray(months == p)
-        ds0 = f"{p.year}{p.month:02d}01"
-        cams = ensure_cams_file(Path(CAMS), ds0, auto_download=False)
+        cams = find_cams_month(p.year, p.month)          # 0.4 deg primary, 1 deg fallback
         if cams is None:
             out[sel, :] = np.nan
             info["months_excluded"].append(str(p)); continue
@@ -338,6 +353,72 @@ def wavelength_correct(beta, l2, lam, target, alpha, model):
         return bmt[None, :] + beta_aer / wl_corr
     wl_corr = (lam / target) ** (-alpha)
     return beta / wl_corr
+
+
+# ---------------------------------------------------------- CAMS molecular (optimal wavelength conv.)
+def find_cams_month(year, month):
+    """Monthly CAMS file for (year,month): 0.4 deg primary (CAMS_04), 1 deg fallback (CAMS_1DEG)."""
+    ds = f"{year}{month:02d}01"
+    f = ensure_cams_file(CAMS_04, ds, auto_download=False)
+    if f is None:
+        f = ensure_cams_file(CAMS_1DEG, ds, auto_download=False)
+    return f
+
+
+def _mol_att_cams(cams_file, lat, lon, tstart, tend, alt_asl, station_alt, wavelength_nm):
+    """Molecular attenuated backscatter beta_mol*T2_mol [Mm^-1 sr^-1] on the instrument grid from the
+    CAMS T/p profile (nearest grid point, night-mean). BELOW the lowest CAMS level (elevated / valley
+    stations where the CAMS grid-cell surface sits above the real station -- Aosta ~ +1627 m) T and p
+    are extrapolated HYDROSTATICALLY with the standard lapse rate, not held constant: constant-fill
+    underestimates the air density (hence beta_mol) by up to ~20 % over Aosta's below-grid gates.
+    Returns None if CAMS has no usable profile there."""
+    prof = cams_temperature_pressure_profile(cams_file, lat, lon, tstart, tend)
+    if prof is None:
+        return None
+    h_cams, t_cams, p_cams = np.asarray(prof[0], "f8"), np.asarray(prof[1], "f8"), np.asarray(prof[2], "f8")
+    if h_cams.size < 2 or not np.all(np.isfinite([h_cams[0], t_cams[0], p_cams[0]])):
+        return None
+    T = np.interp(alt_asl, h_cams, t_cams, left=np.nan, right=np.nan)
+    P = np.interp(alt_asl, h_cams, p_cams, left=np.nan, right=np.nan)
+    below = alt_asl < h_cams[0]
+    if below.any():
+        dz = h_cams[0] - alt_asl[below]                              # metres below the lowest level (>0)
+        Tb = t_cams[0] + _LAPSE * dz                                 # standard lapse -> warmer downward
+        T[below] = Tb
+        P[below] = p_cams[0] * (Tb / t_cams[0]) ** (_G0 / (_RD * _LAPSE))   # barometric w/ lapse rate
+    if not np.isfinite(T).any():
+        return None
+    mol = calculate_molecular_properties(T, P, alt_asl - station_alt, wavelength_nm * 1e-9)
+    return mol.beta_mol * mol.transmission * 1e6
+
+
+def wavelength_correct_molecular(beta, l2, lam, target, alpha):
+    """Optimal 910->target conversion: WV-corrected beta in, analytic molecular (Rayleigh) from CAMS
+    T/p removed, Angstrom (lam/target)^alpha applied to the AEROSOL RESIDUAL only, molecular re-added at
+    the target line:  beta_target = beta_mol_att|target + [beta - beta_mol_att|lam] * (lam/target)^alpha.
+    Per month (0.4 deg CAMS, 1 deg fallback); a month with no CAMS falls back to the US-std molecular."""
+    if not np.isfinite(lam) or abs(lam - target) < 1.0:
+        return beta
+    t = l2["time"]
+    months = pd.PeriodIndex(pd.to_datetime(t), freq="M")
+    alt_asl = np.asarray(l2["alt"], "f8")
+    z_agl = alt_asl - l2["station_alt"]
+    f = (lam / target) ** alpha
+    out = beta.copy()
+    for p in months.unique():
+        sel = np.asarray(months == p)
+        cf = find_cams_month(p.year, p.month)
+        bml = bmt = None
+        if cf is not None:
+            tstart = np.datetime64(f"{p.year}-{p.month:02d}-01") - np.timedelta64(1, "D")
+            tend = np.datetime64(f"{p.year}-{p.month:02d}-01") + np.timedelta64(40, "D")
+            bml = _mol_att_cams(cf, l2["lat"], l2["lon"], tstart, tend, alt_asl, l2["station_alt"], lam)
+            bmt = _mol_att_cams(cf, l2["lat"], l2["lon"], tstart, tend, alt_asl, l2["station_alt"], target)
+        if bml is None or bmt is None:              # no CAMS this month -> US-std molecular
+            bml = _molecular_beta(z_agl, l2["station_alt"], lam)
+            bmt = _molecular_beta(z_agl, l2["station_alt"], target)
+        out[sel, :] = bmt[None, :] + (beta[sel, :] - bml[None, :]) * f
+    return out
 
 
 # --------------------------------------------------------------------------- screening

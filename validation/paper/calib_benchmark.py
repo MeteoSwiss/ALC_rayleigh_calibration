@@ -59,7 +59,7 @@ def _ch(wmo, ident, itype, calib, label, lat, lon, alt, raw=None):
 PAY = (46.8137, 6.9425, 491.0)
 CL61_PAY_RAW = "A:/CL61_PAY"   # native Vaisala CL61 (the L2 product has no daily files + bad lat/lon)
 BENCHMARK = {
-    "payerne": dict(start="20260301", end="20260531", calStart="20250101", calEnd="20260630", channels=[
+    "payerne": dict(start="20260301", end="20260630", calStart="20250101", calEnd="20260630", channels=[
         _ch("0-20000-0-06610", "A", "CHM15k", "rayleigh", "CHM15k (Rayleigh)", *PAY),
         _ch("0-20000-0-06610", "B", "CL31", "cloud", "CL31 (cloud)", *PAY),
         _ch("0-20000-0-06610", "C", "CL61", "cloud", "CL61 (cloud)", *PAY, raw=CL61_PAY_RAW),
@@ -68,13 +68,13 @@ BENCHMARK = {
         # on the E-PROFILE L2 product, so the Rayleigh coefficient keeps the L2_monthly source.
         _ch("0-20000-0-06610", "C", "CL61", "rayleigh", "CL61 (Rayleigh)", *PAY),
     ]),
-    "amsterdam": dict(start="20260301", end="20260531", calStart="20250101", calEnd="20260630", channels=[
+    "amsterdam": dict(start="20260301", end="20260630", calStart="20250101", calEnd="20260630", channels=[
         _ch("0-20000-0-06240", "A", "CHM15k", "rayleigh", "CHM15k A", 52.317, 4.8037, 6.0),
         _ch("0-20000-0-06240", "B", "CHM15k", "rayleigh", "CHM15k B", 52.317, 4.8037, 6.0),
         _ch("0-20000-0-06240", "C", "CHM15k", "rayleigh", "CHM15k C", 52.317, 4.8037, 6.0),
         _ch("0-20000-0-06240", "D", "CHM15k", "rayleigh", "CHM15k D", 52.317, 4.8037, 6.0),
     ]),
-    "uccle": dict(start="20260301", end="20260531", calStart="20250101", calEnd="20260630", channels=[
+    "uccle": dict(start="20260301", end="20260630", calStart="20250101", calEnd="20260630", channels=[
         _ch("0-20000-0-06447", "A", "CL51", "cloud", "CL51 (cloud)", 50.8, 4.35, 100.0),
         _ch("0-20000-0-06447", "B", "CL61", "cloud", "CL61 (cloud)", 50.8, 4.35, 100.0),
         _ch("0-20000-0-06447", "B", "CL61", "rayleigh", "CL61 (Rayleigh)", 50.8, 4.35, 100.0),
@@ -85,26 +85,28 @@ BENCHMARK = {
         _ch("0-20000-0-07145", "A", "Mini-MPL", "rayleigh", "Mini-MPL (Rayleigh)", 48.71, 2.21, 156.0),
     ]),
     # New CL61 + CHM15k same-site pairs (Rayleigh CHM15k reference vs CL61 cloud + Rayleigh).
-    "lindenberg": dict(start="20250101", end="20260623", calStart="20250101", calEnd="20260630", channels=[
+    "lindenberg": dict(start="20250101", end="20260630", calStart="20250101", calEnd="20260630", channels=[
         _ch("0-20000-0-10393", "0", "CHM15k", "rayleigh", "CHM15k (Rayleigh)", 52.21, 14.12, 123.0),
         _ch("0-20000-0-10393", "C", "CL61", "cloud", "CL61 (cloud)", 52.21, 14.12, 123.0),
         _ch("0-20000-0-10393", "C", "CL61", "rayleigh", "CL61 (Rayleigh)", 52.21, 14.12, 123.0),
     ]),
-    "aosta": dict(start="20250101", end="20260623", calStart="20250101", calEnd="20260630", channels=[
+    "aosta": dict(start="20250101", end="20260630", calStart="20250101", calEnd="20260630", channels=[
         _ch("0-380-5-1", "0", "CHM15k", "rayleigh", "CHM15k (Rayleigh)", 45.74, 7.36, 560.0),
         _ch("0-380-5-1", "B", "CL61", "cloud", "CL61 (cloud)", 45.74, 7.36, 560.0),
         _ch("0-380-5-1", "B", "CL61", "rayleigh", "CL61 (Rayleigh)", 45.74, 7.36, 560.0),
     ]),
-    "camborne": dict(start="20250101", end="20260623", calStart="20250101", calEnd="20260630", channels=[
+    "camborne": dict(start="20250101", end="20260630", calStart="20250101", calEnd="20260630", channels=[
         _ch("0-20000-0-03808", "A", "CHM15k", "rayleigh", "CHM15k (Rayleigh)", 50.22, -5.33, 87.0),
         _ch("0-20000-0-03808", "C", "CL61", "cloud", "CL61 (cloud)", 50.22, -5.33, 87.0),
         _ch("0-20000-0-03808", "C", "CL61", "rayleigh", "CL61 (Rayleigh)", 50.22, -5.33, 87.0),
     ]),
     # EARLINET CHM15k references (for earlinet.py): Leipzig (lei/ari), Cabauw (cbw), Magurele (ino).
+    # Magurele hosts TWO co-located CHM15k units (A = TUB170068, B = TUB170064) — both are compared.
     "earlinet": dict(start="20250101", end="20260630", channels=[
         _ch("0-20000-0-10471", "0", "CHM15k", "rayleigh", "Leipzig CHM (lei/ari)", 51.35, 12.43, 125.0),
         _ch("0-20000-0-06348", "A", "CHM15k", "rayleigh", "Cabauw CHM (cbw)", 51.97, 4.93, 1.0),
-        _ch("0-20008-0-INO", "B", "CHM15k", "rayleigh", "Magurele CHM (ino)", 44.35, 26.03, 93.0),
+        _ch("0-20008-0-INO", "B", "CHM15k", "rayleigh", "Magurele CHM B (ino)", 44.35, 26.03, 93.0),
+        _ch("0-20008-0-INO", "A", "CHM15k", "rayleigh", "Magurele CHM A (ino_a)", 44.35, 26.03, 93.0),
     ]),
 }
 
