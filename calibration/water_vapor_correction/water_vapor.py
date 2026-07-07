@@ -145,6 +145,14 @@ def cams_nearest_offset_deg(cams_file, latitude: float, longitude: float):
     offset_deg = max(|dlat|, |dlon wrapped to +-180|); grid_spacing_deg = max(lat,lon spacing)."""
     import xarray as xr
     with xr.open_dataset(cams_file) as ds:
+        if _is_station_format(ds):
+            # Per-station MARS file: report the distance to the nearest station (an exact
+            # match), so the out-of-domain guard never trips for a station we extracted.
+            k = _nearest_station_index(ds, latitude, longitude)
+            slat = float(np.asarray(ds["lat"].values)[k])
+            slon = float(np.asarray(ds["lon"].values)[k])
+            return (max(abs(latitude - slat),
+                        abs(((longitude - slon + 180.0) % 360.0) - 180.0)), 0.1)
         lats = np.asarray(ds["latitude"].values, dtype=float)
         lons = np.asarray(ds["longitude"].values, dtype=float)
     glat = float(lats[np.abs(lats - latitude).argmin()])
@@ -172,6 +180,23 @@ def cams_point_too_far(cams_file, latitude: float, longitude: float) -> bool:
     except Exception:
         return False   # never let the guard itself break a calibration
     return off > max(1.0, 1.5 * sp)
+
+
+def _is_station_format(ds) -> bool:
+    """True for the per-station MARS extraction (global attr ``format='mars_wv_station_v1'``):
+    a ``station`` dimension carrying ``lat``/``lon``, instead of a regular latitude x longitude
+    grid. Lets the same readers consume both the gridded CAMS_Beta_*.nc and the MARS files."""
+    return "station" in getattr(ds, "dims", {})
+
+
+def _nearest_station_index(ds, latitude: float, longitude: float) -> int:
+    """Index of the station nearest (latitude, longitude). Profiles are extracted AT the
+    station locations, so this is an exact match; the cos-weighted metric is only a
+    tie-break / safety net for a slightly-off request coordinate."""
+    lats = np.asarray(ds["lat"].values, dtype=float)
+    lons = np.asarray(ds["lon"].values, dtype=float)
+    dlon = ((lons - longitude + 180.0) % 360.0) - 180.0
+    return int(np.nanargmin((lats - latitude) ** 2 + (dlon * np.cos(np.radians(latitude))) ** 2))
 
 
 def _cams_levels(
@@ -204,7 +229,15 @@ def _cams_levels(
 
     ds = xr.open_dataset(cams_file)
     try:
-        sub = ds.sel(latitude=latitude, longitude=longitude, method="nearest")
+        # Two supported layouts reduce to the same (level,) column of T/q + surface z/lnsp
+        # over the time window; only the spatial pick differs. Gridded CAMS_Beta: nearest
+        # grid cell. Per-station MARS (mars_wv_station_v1): nearest station, with z a scalar
+        # (orography) and lnsp a per-station time series rather than level-broadcast fields.
+        station_fmt = _is_station_format(ds)
+        if station_fmt:
+            sub = ds.isel(station=_nearest_station_index(ds, latitude, longitude))
+        else:
+            sub = ds.sel(latitude=latitude, longitude=longitude, method="nearest")
         tmask = (sub.time.values >= t_start) & (sub.time.values <= t_end)
         if not np.any(tmask):
             it = int(np.abs(sub.time.values - (t_start + (t_end - t_start) / 2)).argmin())
@@ -215,8 +248,12 @@ def _cams_levels(
         level = np.asarray(ds["level"].values, dtype=int)                 # model level numbers
         T = np.asarray(sub["t"].mean("time").values, dtype=float)         # [level] K
         q = np.asarray(sub["q"].mean("time").values, dtype=float)         # [level] kg/kg
-        z_raw = np.asarray(sub["z"].mean("time").values, dtype=float)     # surface geopotential (one finite level)
-        lnsp = np.asarray(sub["lnsp"].mean("time").values, dtype=float)   # ln surface pressure (one finite level)
+        if station_fmt:
+            z_raw = np.atleast_1d(np.asarray(sub["z"].values, dtype=float))              # scalar orography
+            lnsp = np.atleast_1d(np.asarray(sub["lnsp"].mean("time").values, dtype=float))
+        else:
+            z_raw = np.asarray(sub["z"].mean("time").values, dtype=float)  # surface geopotential (one finite level)
+            lnsp = np.asarray(sub["lnsp"].mean("time").values, dtype=float)  # ln surface pressure (one finite level)
     finally:
         ds.close()
 

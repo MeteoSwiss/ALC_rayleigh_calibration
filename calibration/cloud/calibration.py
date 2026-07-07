@@ -708,58 +708,75 @@ def _cams_levels_all_times(
     behaviour without assuming a particular loop position.
     """
     with Dataset(cams_file, "r") as nc:
-        lon_m = np.asarray(nc.variables["longitude"][:], dtype="float64")
-        lat_m = np.asarray(nc.variables["latitude"][:], dtype="float64")
-        level = np.asarray(nc.variables["level"][:], dtype="float64")
-        time_raw = np.asarray(nc.variables["time"][:], dtype="float64")
+        if "station" in nc.dimensions:
+            # Per-station MARS format (mars_wv_station_v1): t/q are (time, station, level),
+            # lnsp (time, station), z (station) static orography. Pick the nearest station
+            # (an exact match) and read its column; the L137 integration below is identical.
+            lat_m = np.asarray(nc.variables["lat"][:], dtype="float64")
+            lon_m = np.asarray(nc.variables["lon"][:], dtype="float64")
+            level = np.asarray(nc.variables["level"][:], dtype="float64")
+            t_cf = np.asarray(nc.variables["time"][:], dtype="float64")   # seconds since 1970-01-01
+            dlon = ((lon_m - longitude + 180.0) % 360.0) - 180.0
+            si = int(np.argmin((lat_m - latitude) ** 2 + dlon ** 2))
+            n_lev = level.size
+            n_t = t_cf.size
+            T = np.asarray(nc.variables["t"][:, si, :], dtype="float64").T           # (level, time)
+            q = np.asarray(nc.variables["q"][:, si, :], dtype="float64").T
+            lnsp = np.asarray(nc.variables["lnsp"][:, si], dtype="float64").ravel()  # (time,)
+            z_surf = np.full(n_t, float(np.asarray(nc.variables["z"][si])), dtype="float64")  # static
+            time_num = t_cf / 86400.0 + 719529.0   # datenum(1970,1,1) = 719529
+        else:
+            lon_m = np.asarray(nc.variables["longitude"][:], dtype="float64")
+            lat_m = np.asarray(nc.variables["latitude"][:], dtype="float64")
+            level = np.asarray(nc.variables["level"][:], dtype="float64")
+            time_raw = np.asarray(nc.variables["time"][:], dtype="float64")
 
-        li = int(np.argmin(np.abs(lon_m - longitude)))
-        ai = int(np.argmin(np.abs(lat_m - latitude)))
-        n_lev = level.size
-        n_t = time_raw.size
+            li = int(np.argmin(np.abs(lon_m - longitude)))
+            ai = int(np.argmin(np.abs(lat_m - latitude)))
+            n_lev = level.size
+            n_t = time_raw.size
 
-        # ncread(...,'t',[li,ai,1,1],[1,1,n_lev,n_t]) -> squeeze -> (n_lev, n_t)
-        # netCDF4 variable dims are (time, level, latitude, longitude) in this file;
-        # index accordingly and transpose to (level, time).
-        tvar = nc.variables["t"]
-        qvar = nc.variables["q"]
-        zvar = nc.variables["z"]
-        spvar = nc.variables["lnsp"]
-        dim_names = tvar.dimensions  # e.g. ('time','level','latitude','longitude')
+            # ncread(...,'t',[li,ai,1,1],[1,1,n_lev,n_t]) -> squeeze -> (n_lev, n_t)
+            # netCDF4 variable dims are (time, level, latitude, longitude) in this file;
+            # index accordingly and transpose to (level, time).
+            tvar = nc.variables["t"]
+            qvar = nc.variables["q"]
+            zvar = nc.variables["z"]
+            spvar = nc.variables["lnsp"]
+            dim_names = tvar.dimensions  # e.g. ('time','level','latitude','longitude')
 
-        def _read_profile(var):
-            # Slice the NetCDF variable DIRECTLY so only this station's (level, time) column
-            # is read from disk. Never materialise the full 4-D (time, level, lat, lon) array
-            # via var[:] -- that is multi-GB for a monthly CAMS file and was the cause of the
-            # ~10 GB/worker RSS growth (freed numpy memory is not returned to the OS).
-            axes = {nm: k for k, nm in enumerate(dim_names)}
-            idx = [slice(None)] * len(dim_names)
-            idx[axes["longitude"]] = li
-            idx[axes["latitude"]] = ai
-            sub = np.asarray(var[tuple(idx)], dtype="float64")  # remaining dims: level, time (orig order)
-            remaining = [nm for nm in dim_names if nm in ("level", "time")]
-            lev_pos = remaining.index("level")
-            sub = np.moveaxis(sub, lev_pos, 0)  # (level, time)
-            return sub
+            def _read_profile(var):
+                # Slice the NetCDF variable DIRECTLY so only this station's (level, time) column
+                # is read from disk. Never materialise the full 4-D (time, level, lat, lon) array
+                # via var[:] -- that is multi-GB for a monthly CAMS file and was the cause of the
+                # ~10 GB/worker RSS growth (freed numpy memory is not returned to the OS).
+                axes = {nm: k for k, nm in enumerate(dim_names)}
+                idx = [slice(None)] * len(dim_names)
+                idx[axes["longitude"]] = li
+                idx[axes["latitude"]] = ai
+                sub = np.asarray(var[tuple(idx)], dtype="float64")  # remaining dims: level, time (orig order)
+                remaining = [nm for nm in dim_names if nm in ("level", "time")]
+                lev_pos = remaining.index("level")
+                sub = np.moveaxis(sub, lev_pos, 0)  # (level, time)
+                return sub
 
-        T = _read_profile(tvar)
-        q = _read_profile(qvar)
+            T = _read_profile(tvar)
+            q = _read_profile(qvar)
 
-        # z, lnsp are surface fields stored at a single (top) level slot.
-        # MATLAB reads them at level index 1 (start=1,count=1) for all times.
-        def _read_surface(var):
-            axes = {nm: k for k, nm in enumerate(dim_names)}
-            idx = [slice(None)] * len(dim_names)
-            idx[axes["longitude"]] = li
-            idx[axes["latitude"]] = ai
-            idx[axes["level"]] = 0  # MATLAB start index 1 -> python 0 (first level slot)
-            sub = np.asarray(var[tuple(idx)], dtype="float64")  # read only the column; remaining dim: time
-            return sub.ravel()
+            # z, lnsp are surface fields stored at a single (top) level slot.
+            # MATLAB reads them at level index 1 (start=1,count=1) for all times.
+            def _read_surface(var):
+                axes = {nm: k for k, nm in enumerate(dim_names)}
+                idx = [slice(None)] * len(dim_names)
+                idx[axes["longitude"]] = li
+                idx[axes["latitude"]] = ai
+                idx[axes["level"]] = 0  # MATLAB start index 1 -> python 0 (first level slot)
+                sub = np.asarray(var[tuple(idx)], dtype="float64")  # read only the column; remaining dim: time
+                return sub.ravel()
 
-        z_surf = _read_surface(zvar)     # (n_t,) surface geopotential [m^2/s^2]
-        lnsp = _read_surface(spvar)      # (n_t,) ln surface pressure
-
-    time_num = time_raw / 24.0 + 693962.0  # datenum(1900,1,1) = 693962
+            z_surf = _read_surface(zvar)     # (n_t,) surface geopotential [m^2/s^2]
+            lnsp = _read_surface(spvar)      # (n_t,) ln surface pressure
+            time_num = time_raw / 24.0 + 693962.0  # datenum(1900,1,1) = 693962
 
     # L137 a/b coefficients indexed by level NUMBER (param_137_levels(:,1)).
     A = _A137
