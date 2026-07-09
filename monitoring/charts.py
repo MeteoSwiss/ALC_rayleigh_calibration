@@ -230,6 +230,44 @@ def icao_altitude_map(keystats: pd.DataFrame) -> go.Figure:
     return fig
 
 
+def instrument_count_over_time(activity: list) -> go.Figure:
+    """Stacked monthly count of ACTIVE instruments over time, coloured by instrument type. An
+    instrument (station key) is 'active' in a month if it has >=1 calibration day that month.
+
+    ``activity`` is the list embedded for the client filter: [{key, itype, country, months:[YYYYMM,...]}].
+    filter.js recomputes this same figure client-side from that list when the country/type filter
+    changes (country filtering changes per-month counts, so a simple restyle won't do)."""
+    from collections import defaultdict
+    counts: dict = defaultdict(lambda: defaultdict(int))   # month -> itype -> distinct-key count
+    months_set: set = set()
+    types_present: set = set()
+    for r in (activity or []):
+        t = str(r.get("itype", "") or "")
+        types_present.add(t)
+        for m in set(r.get("months", []) or []):
+            counts[m][t] += 1
+            months_set.add(m)
+    if not months_set:
+        fig = go.Figure()
+        fig.update_layout(**{**_LAYOUT, "height": 320}, title="Active instruments over time — no data")
+        return fig
+    months = sorted(months_set)
+    x = [pd.to_datetime(m + "01", format="%Y%m%d", errors="coerce") for m in months]
+    order = [t for t in config.TYPE_ORDER if t in types_present] + \
+            sorted(types_present - set(config.TYPE_ORDER) - {""})
+    fig = go.Figure()
+    for t in order:
+        y = [counts[m].get(t, 0) for m in months]
+        if not any(y):
+            continue
+        fig.add_trace(go.Bar(x=x, y=y, name=t, marker_color=config.TYPE_COLORS.get(t, "#888"),
+                             hovertemplate="%{x|%Y-%m}<br>" + t + ": %{y} instruments<extra></extra>"))
+    fig.update_layout(**{**_LAYOUT, "height": 320}, barmode="stack",
+                      title="Active instruments over time (by type)", yaxis_title="# instruments",
+                      legend=dict(orientation="h", y=-0.2, font=dict(size=11)))
+    return fig
+
+
 def success_by_type_method(by_tm: pd.DataFrame) -> go.Figure:
     """Grouped bar: success rate per instrument type, one bar per method."""
     fig = go.Figure()
@@ -361,8 +399,7 @@ def cl_median_iqr_by_station(d: pd.DataFrame, itype: str) -> go.Figure:
 
 def series_timeseries(g_m: pd.DataFrame, kal_m: pd.DataFrame, method: str,
                       op_df: pd.DataFrame | None = None,
-                      oldray_df: pd.DataFrame | None = None,
-                      v13_df: pd.DataFrame | None = None) -> go.Figure:
+                      oldray_df: pd.DataFrame | None = None) -> go.Figure:
     """Calibration value over time for ONE method: successes + uncertainty + Kalman best estimate,
     plus (optional) the daily OPERATIONAL calibration constant from the L2 files as a black line,
     and (optional, Rayleigh only) the OLD operational Rayleigh calibration as black 'x' markers.
@@ -386,12 +423,6 @@ def series_timeseries(g_m: pd.DataFrame, kal_m: pd.DataFrame, method: str,
             x=orr["datetime"], y=orr["value"], mode="markers", name="v1.0",
             marker=dict(symbol="x", size=7, color="#000000"), visible="legendonly",
             hovertemplate="%{x|%Y-%m-%d}<br>old Rayleigh=%{y:.3e}<extra></extra>"))
-    if v13_df is not None and len(v13_df):
-        vrr = v13_df.sort_values("datetime")
-        fig.add_trace(go.Scatter(
-            x=vrr["datetime"], y=vrr["value"], mode="markers", name="v1.0.2",
-            marker=dict(symbol="x", size=7, color="#d62728"), visible="legendonly",
-            hovertemplate="%{x|%Y-%m-%d}<br>v1.0.2 Rayleigh=%{y:.3e}<extra></extra>"))
     if len(ok):
         fig.add_trace(go.Scatter(
             x=ok["datetime"], y=ok["cal_value"], mode="markers",
@@ -515,6 +546,41 @@ def monitoring_timeseries(hk_df: pd.DataFrame, itype: str | None = None) -> go.F
     if has_temp:
         lay["yaxis2"] = dict(title="temperature [degC]", overlaying="y", side="right", showgrid=False)
     fig.update_layout(**lay)
+    return fig
+
+
+def daily_availability_bar(status_df: pd.DataFrame) -> go.Figure | None:
+    """Cloudnet-style daily instrument-health strip: one cell per day over the whole record, coloured
+    by quality (pass / warning / error), with record gaps shown as 'no data'. Hover gives the day's
+    decoded reporting string; clicking a day drives the diagnostic viewer (wired in diag.js via the
+    'fig-avail' id). Returns None when the stream has no decoded status history.
+
+    Built from <key>_status.csv (date, quality, summary). The bar spans the full record (not the
+    period selector) so it reads like Cloudnet's multi-year availability strip."""
+    if status_df is None or not len(status_df):
+        return None
+    d = status_df.copy()
+    d["dt"] = pd.to_datetime(d["date"].astype(str), format="%Y%m%d", errors="coerce")
+    d = d.dropna(subset=["dt"]).sort_values("dt")
+    if not len(d):
+        return None
+    qmap = dict(zip(d["dt"], d["quality"].astype(str)))
+    smap = (dict(zip(d["dt"], d["summary"].astype(str))) if "summary" in d.columns else {})
+    full = pd.date_range(d["dt"].min(), d["dt"].max(), freq="D")   # fill gaps -> nodata
+    quals = [qmap.get(t, "nodata") or "nodata" for t in full]
+    colors = [config.quality_color(q) for q in quals]
+    labels = [config.QUALITY_LABELS.get(q, q) for q in quals]
+    summ = [(smap.get(t, "") if t in qmap else "No data") or "" for t in full]
+    fig = go.Figure(go.Bar(
+        x=list(full), y=[1] * len(full), width=86400000.0,   # 1 day in ms -> contiguous cells
+        marker=dict(color=colors, line=dict(width=0)),
+        customdata=[[lab, ss] for lab, ss in zip(labels, summ)],
+        hovertemplate="%{x|%Y-%m-%d}<br><b>%{customdata[0]}</b><br>%{customdata[1]}<extra></extra>"))
+    fig.update_layout(**{**_LAYOUT, "height": 130, "margin": dict(l=10, r=10, t=36, b=34)},
+                      title="Daily data availability & instrument status",
+                      bargap=0, showlegend=False,
+                      yaxis=dict(visible=False, range=[0, 1], fixedrange=True),
+                      xaxis=dict(title="", type="date"))
     return fig
 
 

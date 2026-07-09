@@ -440,18 +440,92 @@ _HK_SOURCES = {
 }
 _HK_TEMP = {"temp_optics", "temp_internal", "temp_detector"}             # K -> degC
 
+# --- Instrument STATUS (decoded warnings/errors + availability) -------------
+# Per-day Cloudnet-style health for the station-page availability bar. Columns come from
+# calibration.status.decode.DayStatus.to_row() (quality/coverage/gaps/flag counts + summary).
+STATUS_FIELDS = ["date", "quality", "n_profiles", "coverage_pct", "gap_hours",
+                 "n_alarm_h", "n_warn_h", "flags_json", "summary"]
+# CL61 /status subsystem fields (raw-file names). NOT yet in E-PROFILE L1 -> read
+# opportunistically so the decoder activates automatically if/when they appear as flat vars.
+_CL61_STATUS_VARS = (
+    "Transmitter_overall", "Transmitter_light_source", "Transmitter_light_source_power",
+    "Receiver_overall", "Receiver_solar_saturation", "Receiver_voltage", "Receiver_memory",
+    "Optics_unit_overall", "Optics_unit_tilt_angle", "Window_condition", "Window_blocking",
+    "Servo_drive_overall", "Device_overall", "Maintenance_overall", "Measurement_status",
+    "Datacom_overall", "Inside_heater",
+)
 
-def _do_hk(s, start, end):
-    """Per-day daily-mean housekeeping (laser/optics/temperature) for one stream. Cheap: opens each
-    L1 file but reads ONLY the small 1-D HK variables (never the rcs matrix). Runs for every
-    instrument type and every day with data, independent of calibration -> the monitoring panel."""
+
+def _read_time_epoch(nc):
+    """L1 profile times as epoch seconds (the L1 'time' is 'days since 1970'); None if absent."""
+    tv = nc.variables.get("time")
+    if tv is None:
+        return None
+    import netCDF4
+    raw = np.atleast_1d(np.asarray(tv[:]))
+    units = getattr(tv, "units", "days since 1970-01-01 00:00:00")
+    cal = getattr(tv, "calendar", "standard")
+    try:
+        dts = netCDF4.num2date(raw, units, cal, only_use_cftime_datetimes=False,
+                               only_use_python_datetimes=True)
+        base = datetime(1970, 1, 1)
+        return [(d - base).total_seconds() for d in np.atleast_1d(dts)]
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _read_error_string(var):
+    """Vaisala error_string per profile, robust to vlen-str / 2-D char / numeric storage."""
+    a = np.asarray(var[:])
+    if a.dtype.kind == "S" and a.ndim == 2:            # 2-D char array (time, strlen)
+        import netCDF4
+        try:
+            return [str(x).strip() for x in netCDF4.chartostring(a).ravel()]
+        except Exception:  # noqa: BLE001
+            return ["".join(c.decode("ascii", "ignore") if isinstance(c, bytes) else str(c)
+                            for c in row).strip() for row in a]
+    if a.dtype.kind in ("S", "U", "O"):                # 1-D string / vlen
+        return [(x.decode() if isinstance(x, bytes) else str(x)).strip() for x in a.ravel()]
+    return [float(x) for x in a.ravel()]               # numeric (float holding the int)
+
+
+def _read_status_values(nc, itype):
+    """(per-profile scalar status word, CL61 status dict) for one L1 day.
+
+    CHM15k/CHM8k -> error_ext (numeric); Vaisala CL31/CL51 -> error_string; CL61 ->
+    error_string if present plus any /status subsystem fields exposed as flat vars
+    (future E-PROFILE). Returns (values_or_None, cl61_dict_or_None)."""
+    up = str(itype or "").upper()
+    if up.startswith("CHM"):
+        if "error_ext" in nc.variables:
+            return list(np.asarray(nc.variables["error_ext"][:], dtype=float).ravel()), None
+        return None, None
+    values = None
+    if "error_string" in nc.variables:
+        values = _read_error_string(nc.variables["error_string"])
+    cl61 = None
+    if up == "CL61":
+        present = {nm: np.asarray(nc.variables[nm][:]).ravel()
+                   for nm in _CL61_STATUS_VARS if nm in nc.variables}
+        cl61 = present or None
+    return values, cl61
+
+
+def _do_monitoring(s, start, end):
+    """Per-day housekeeping means AND decoded instrument status for one stream, in a single cheap
+    pass (opens each L1 file once, reads only 1-D HK/status/time vars — never the rcs matrix).
+    Returns (hk_rows, status_rows). Runs for every instrument type, independent of calibration."""
     import netCDF4  # lazy: only this leaf needs it
-    rows = []
+    from calibration.status.decode import summarize_day
+    itype = s["type"]
+    hk_rows, status_rows = [], []
     for d in _days(start, end):
         fp = _l1_file(s["wmo"], s["ident"], d)
         if not fp.exists():
             continue
         row = {"date": d.strftime("%Y%m%d")}
+        hk_vals = {}
+        srow = None
         try:
             nc = netCDF4.Dataset(str(fp))
             try:
@@ -466,17 +540,38 @@ def _do_hk(s, start, end):
                                 val = (m - 273.15) if field in _HK_TEMP else m
                             break
                     row[field] = "" if val != val else f"{val:.3f}"   # val!=val -> NaN
+                    if val == val:
+                        hk_vals[field] = val
+                # Decoded status + availability for the day
+                times = _read_time_epoch(nc)
+                svals, cl61 = _read_status_values(nc, itype)
+                ds = summarize_day(times, itype, status_values=svals, cl61_status=cl61,
+                                   hk=hk_vals or None)
+                if ds.n_profiles > 0:
+                    srow = {"date": row["date"], **ds.to_row()}
             finally:
                 nc.close()
         except Exception:  # noqa: BLE001 - one unreadable file must not kill the stream
             continue
         if any(row[f] for f in HK_FIELDS if f != "date"):
-            rows.append(row)
-    return rows
+            hk_rows.append(row)
+        if srow is not None:
+            status_rows.append(srow)
+    return hk_rows, status_rows
 
 
 def _preserve_existing_hk(csv_path, start, end):
     """Existing _hk.csv rows OUTSIDE the processed window, so partial/daily runs accumulate history."""
+    return _preserve_existing_daily(csv_path, start, end, HK_FIELDS)
+
+
+def _preserve_existing_status(csv_path, start, end):
+    """Existing _status.csv rows OUTSIDE the processed window (accumulate history like _hk)."""
+    return _preserve_existing_daily(csv_path, start, end, STATUS_FIELDS)
+
+
+def _preserve_existing_daily(csv_path, start, end, fields):
+    """Rows of a per-day CSV whose date is OUTSIDE [start, end] (keep prior history on partial runs)."""
     if not csv_path.exists():
         return []
     s, e = start.strftime("%Y%m%d"), end.strftime("%Y%m%d")
@@ -485,7 +580,7 @@ def _preserve_existing_hk(csv_path, start, end):
         with open(csv_path, newline="", encoding="utf-8") as f:
             for r in csv.DictReader(f):
                 if not (s <= str(r.get("date", "")) <= e):
-                    keep.append({k: r.get(k, "") for k in HK_FIELDS})
+                    keep.append({k: r.get(k, "") for k in fields})
     except (OSError, csv.Error):
         return []
     return keep
@@ -771,17 +866,20 @@ def _process_stream(payload):
     sdir = OUT / key
     sdir.mkdir(parents=True, exist_ok=True)
 
-    def _write_hk():
-        hk = _do_hk(s, start, end)
-        if not hk:
-            return
-        hk += _preserve_existing_hk(sdir / f"{key}_hk.csv", start, end)
-        hk.sort(key=lambda r: r["date"])
-        _write_csv_atomic(sdir / f"{key}_hk.csv", HK_FIELDS, hk)
+    def _write_monitoring():
+        hk, status = _do_monitoring(s, start, end)
+        if hk:
+            hk += _preserve_existing_hk(sdir / f"{key}_hk.csv", start, end)
+            hk.sort(key=lambda r: r["date"])
+            _write_csv_atomic(sdir / f"{key}_hk.csv", HK_FIELDS, hk)
+        if status:
+            status += _preserve_existing_status(sdir / f"{key}_status.csv", start, end)
+            status.sort(key=lambda r: r["date"])
+            _write_csv_atomic(sdir / f"{key}_status.csv", STATUS_FIELDS, status)
 
-    # Backfill / refresh the monitoring CSV only (skip everything else) -- cheap.
+    # Backfill / refresh the monitoring CSVs only (skip everything else) -- cheap.
     if hk_only:
-        _write_hk()
+        _write_monitoring()
         return key, s["type"], 0, 0
 
     rows = []
@@ -801,7 +899,7 @@ def _process_stream(payload):
             _write_csv_atomic(sdir / f"{key}_cal.csv", CSV_FIELDS, rows)
             _write_csv_atomic(sdir / f"{key}_kalman.csv",
                               ["method", "date", "kalman", "kalman_std"], _kalman_rows(rows))
-            _write_hk()   # monitoring panel: daily HK means for every processed day
+            _write_monitoring()   # monitoring panel: daily HK means + decoded status/availability
             n_ok = sum(1 for r in rows if _is_success(r["flag"]))
 
     # OmB / sensitivity add-ons consume the Kalman C_L: the fresh one if we just

@@ -59,6 +59,7 @@ def _env() -> Environment:
     env.globals["flag_anchor"] = config.flag_anchor
     env.globals["method_label"] = config.method_label
     env.globals["asset_v"] = _asset_version()   # cache-busting token for ?v= on JS/CSS
+    env.globals["has_favicon"] = (_STATIC / "favicon.png").exists()   # EUMETNET tab icon
     return env
 
 
@@ -104,6 +105,11 @@ def _write_assets(out_dir: Path) -> str | None:
             shutil.copyfile(src, assets / src.name)
             logo = src.name
             break
+    # Dedicated square favicon (EUMETNET logo) — copied alongside so the browser tab shows it even
+    # when the header logo is a wide wordmark; referenced explicitly in base.html.
+    fav = _STATIC / "favicon.png"
+    if fav.exists():
+        shutil.copyfile(fav, assets / "favicon.png")
     return logo
 
 
@@ -341,7 +347,7 @@ def _copy_diagnostics(diag: pd.DataFrame, cal: pd.DataFrame, out_dir: Path) -> d
     return _diag_index_from(d, cal)
 
 
-def _method_block(key, method, cal, kal, series, diags=None, op_all=None, oldray_all=None, v13_all=None):
+def _method_block(key, method, cal, kal, series, diags=None, op_all=None, oldray_all=None):
     """Figures + aggregates for one method section on a station page."""
     g_m = cal[(cal["key"] == key) & (cal["method"] == method)].sort_values("datetime")
     kal_m = kal[(kal["key"] == key) & (kal["method"] == method)] if len(kal) else kal
@@ -353,12 +359,10 @@ def _method_block(key, method, cal, kal, series, diags=None, op_all=None, oldray
     op_df = _op_station_df(op_all, key, float(ref.median()) if len(ref) else None)
     # Old operational Rayleigh overlay (black x) — Rayleigh series only.
     oldray_df = oldray_all.get(key) if (oldray_all is not None and method == "rayleigh") else None
-    # v13 test Rayleigh overlay (red x) — Rayleigh series only.
-    v13_df = v13_all.get(key) if (v13_all is not None and method == "rayleigh") else None
     return dict(
         method=method, label=config.method_label(method), meta=meta,
         figs={
-            "ts": charts.fig_to_div(charts.series_timeseries(g_m, kal_m, method, op_df, oldray_df, v13_df), f"fig-ts-{safe}"),
+            "ts": charts.fig_to_div(charts.series_timeseries(g_m, kal_m, method, op_df, oldray_df), f"fig-ts-{safe}"),
             "flags": charts.fig_to_div(charts.monthly_flag_bars(g_m, method), f"fig-mf-{safe}"),
             "aux": charts.fig_to_div(charts.aux_timeseries(g_m, method), f"fig-aux-{safe}"),
         },
@@ -490,6 +494,61 @@ def _stage_ombsens_pngs(fullcal_dir, key, out_dir: Path) -> dict:
     return out
 
 
+def _load_ceda_links(path) -> dict:
+    """{key: CEDA-L2 URL} from the JSON written by scripts/build_ceda_links.py; empty if absent."""
+    if not path:
+        return {}
+    p = Path(path)
+    if not p.exists():
+        return {}
+    try:
+        with open(p, encoding="utf-8") as f:
+            d = json.load(f)
+        return {str(k): str(v) for k, v in d.items() if v}
+    except (OSError, ValueError):
+        return {}
+
+
+def _stage_netcdfs(fullcal_dir, key, out_dir: Path) -> list:
+    """Stage the per-station calibration NetCDF(s) into the site (nc/<key>/) the same way the
+    diagnostics/OmB PNGs are staged (symlink by default; ALC_DIAG_LINK overrides), and return
+    [{'year', 'fname', 'url'}, ...] newest year first. One NetCDF per year lives under
+    <key>/<YYYY>/ALC_calibration_<WMO>_<IDENT><YYYY>.nc. Staging (not just linking a URL) means
+    ops/publish.sh can sync the site's nc/ tree to the bucket."""
+    out = []
+    if not fullcal_dir:
+        return out
+    base = Path(fullcal_dir) / key
+    if not base.exists():
+        return out
+    for nc in sorted(base.glob("*/ALC_calibration_*.nc")):
+        year = nc.parent.name
+        try:
+            _materialize(nc, out_dir / "nc" / key / nc.name, _DIAG_LINK_MODE)
+        except OSError:
+            if not config.IMAGES_IN_BUCKET:
+                continue
+        out.append({"year": year, "fname": nc.name, "url": config.nc_url(key, nc.name)})
+    out.sort(key=lambda r: r["year"], reverse=True)
+    return out
+
+
+def _load_status(fullcal_dir, key):
+    """Per-stream decoded daily status (<key>_status.csv) for the availability bar; None if absent."""
+    if not fullcal_dir:
+        return None
+    p = Path(fullcal_dir) / key / f"{key}_status.csv"
+    if not p.exists():
+        return None
+    try:
+        df = pd.read_csv(p, dtype={"date": str})
+    except Exception:
+        return None
+    if "date" not in df.columns or not len(df):
+        return None
+    return df
+
+
 def _load_hk(fullcal_dir, key):
     """Per-stream daily housekeeping (<key>_hk.csv) for the monitoring panel; None if absent/empty."""
     if not fullcal_dir:
@@ -523,7 +582,7 @@ def _render_one_station(key, ctx) -> str:
     methods = [m for m in config.METHOD_ORDER
                if len(cal[(cal["key"] == key) & (cal["method"] == m)])]
     blocks = [_method_block(key, m, cal, kal, series, ctx.diag_by.get((key, m), []),
-                            ctx.op_all, ctx.oldray_all, ctx.v13_all) for m in methods]
+                            ctx.op_all, ctx.oldray_all) for m in methods]
     overlay = None
     if len(methods) >= 2:
         by_method = {m: cal[(cal["key"] == key) & (cal["method"] == m)] for m in methods}
@@ -534,11 +593,25 @@ def _render_one_station(key, ctx) -> str:
     hk_df = _load_hk(ctx.fullcal_dir, key)
     monitoring = (charts.fig_to_div(charts.monitoring_timeseries(hk_df, meta.get("itype")), "fig-hk")
                   if hk_df is not None else None)
+    # Cloudnet-style per-day availability/health bar + a date->status lookup for the diagnostic viewer.
+    status_df = _load_status(ctx.fullcal_dir, key)
+    availability, status_json = None, None
+    if status_df is not None:
+        avail_fig = charts.daily_availability_bar(status_df)
+        if avail_fig is not None:
+            availability = charts.fig_to_div(avail_fig, "fig-avail")
+            status_map = {str(r["date"]): {"q": str(r.get("quality", "")), "s": str(r.get("summary", ""))}
+                          for _, r in status_df.iterrows()}
+            status_json = json.dumps(status_map, ensure_ascii=False)
     ombsens = _stage_ombsens_pngs(ctx.fullcal_dir, key, ctx.out_dir)
+    # Top-of-page links: download the calibration NetCDF(s) + the matching CEDA L2 archive page.
+    nc_files = _stage_netcdfs(ctx.fullcal_dir, key, ctx.out_dir)
+    ceda_url = getattr(ctx, "ceda_by", {}).get(key)
     html = ctx.tmpl.render(base="../", logo=ctx.logo, key=key, meta=meta,
                            blocks=blocks, overlay=overlay, search_json=ctx.search_json,
                            prev_station=prev_station, next_station=next_station,
-                           monitoring=monitoring, ombsens=ombsens,
+                           monitoring=monitoring, availability=availability, status_json=status_json,
+                           ombsens=ombsens, nc_files=nc_files, ceda_url=ceda_url,
                            periods=getattr(ctx, "periods", None),
                            periods_json=getattr(ctx, "periods_json", None))
     (ctx.out_dir / "stations" / f"{key}.html").write_text(html, encoding="utf-8")
@@ -552,8 +625,8 @@ def _render_one_station(key, ctx) -> str:
 _WORKER_CTX = None
 
 
-def _render_worker_init(db_path, out_dir, fullcal_dir, opcoeff_csv, oldray_dir, v13_dir, logo,
-                        search_json, periods_json):
+def _render_worker_init(db_path, out_dir, fullcal_dir, opcoeff_csv, oldray_dir, logo,
+                        search_json, periods_json, ceda_json=""):
     global _WORKER_CTX
     if _WORKER_CTX is not None:
         return  # fork (Linux/CSCS): the worker inherited the parent's ctx -> no reload/re-index
@@ -565,11 +638,11 @@ def _render_worker_init(db_path, out_dir, fullcal_dir, opcoeff_csv, oldray_dir, 
         diag_by=_diag_index(diag, cal),
         op_all=_load_opcoeff(opcoeff_csv or None),
         oldray_all=_load_oldray(oldray_dir or None),
-        v13_all=_load_oldray(v13_dir or None),
         tmpl=_env().get_template("station.html"),
         out_dir=Path(out_dir), fullcal_dir=(fullcal_dir or None),
         all_keys=all_keys, nav_idx={k: i for i, k in enumerate(all_keys)},
         logo=(logo or None), search_json=search_json,
+        ceda_by=(json.loads(ceda_json) if ceda_json else {}),
         periods=(json.loads(periods_json) if periods_json else None),
         periods_json=(periods_json or None))
 
@@ -589,6 +662,27 @@ def _render_summary_page(env, logo, cal_w, st, fullcal_dir, op_all, search_json,
     series_w = index._series_aggregates(cal_w).merge(st[["key", "itype"]], on="key", how="left")
     summary = metrics.network_summary(cal_w, series_w, st)
     flags = metrics.flag_distribution(cal_w)
+
+    # --- Reactive-filter payloads (country/type re-computed client-side; period is per-page) --------
+    country_by = dict(zip(st["key"], st["country"])) if "country" in st.columns else {}
+    type_by = dict(zip(st["key"], st["itype"])) if "itype" in st.columns else {}
+    # (a) per-series counts -> the 4 KPIs recompute on filter change
+    series_index = [
+        {"key": str(r["key"]), "itype": str(r.get("itype", "") or ""),
+         "country": str(country_by.get(r["key"], "") or ""), "method": str(r.get("method", "") or ""),
+         "n_dates": int(r.get("n_dates") or 0), "n_success": int(r.get("n_success") or 0)}
+        for _, r in series_w.iterrows()]
+    series_json = json.dumps(series_index, ensure_ascii=False)
+    # (b) per-instrument monthly activity -> the stacked "instruments over time" chart
+    cal_m = cal_w[["key", "date"]].copy()
+    cal_m["month"] = cal_m["date"].astype(str).str.slice(0, 6)
+    activity = [
+        {"key": str(k), "itype": str(type_by.get(k, "") or ""),
+         "country": str(country_by.get(k, "") or ""),
+         "months": sorted(set(g["month"].dropna().tolist()))}
+        for k, g in cal_m.groupby("key", sort=False)]
+    activity_json = json.dumps(activity, ensure_ascii=False)
+
     watch = metrics.watchlist(cal_w, st)
     keystats = _keystats(series_w, st)
     keystats = keystats.merge(_opcoeff_ratios(cal_w, op_all, st), on="key", how="left")
@@ -604,6 +698,7 @@ def _render_summary_page(env, logo, cal_w, st, fullcal_dir, op_all, search_json,
         "map": charts.fig_to_div(charts.network_map(keystats), "fig-map"),
         "map_omb": charts.fig_to_div(charts.omb_bias_map(keystats), "fig-map-omb"),
         "map_icao": charts.fig_to_div(charts.icao_altitude_map(keystats), "fig-map-icao"),
+        "instr": charts.fig_to_div(charts.instrument_count_over_time(activity), "fig-instr"),
         "success_type": charts.fig_to_div(charts.success_by_type_method(summary["by_type_method"]), "fig-stype"),
         "flag_dist_rayleigh": charts.fig_to_div(charts.flag_distribution_bar(flags, "rayleigh"), "fig-flags-r"),
         "flag_dist_cloud": charts.fig_to_div(charts.flag_distribution_bar(flags, "cloud"), "fig-flags-c"),
@@ -629,6 +724,7 @@ def _render_summary_page(env, logo, cal_w, st, fullcal_dir, op_all, search_json,
         base="", logo=logo, summary=summary, figs=summary_figs, cl_iqr=cl_iqr_figs,
         watch=watch.to_dict("records"), rows=_series_table_rows(cal_w, series_w, st),
         countries=countries, types=types, search_json=search_json,
+        series_json=series_json, activity_json=activity_json,
         periods=periods, periods_json=periods_json, current_period=current_key)
     out_path.write_text(html, encoding="utf-8")
     return summary
@@ -636,7 +732,7 @@ def _render_summary_page(env, logo, cal_w, st, fullcal_dir, op_all, search_json,
 
 def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
                flagex_dir=None, opcoeff_csv=None, only_keys=None, oldray_dir=None,
-               v13_dir=None, fullcal_dir=None, workers: int | None = None) -> dict:
+               fullcal_dir=None, workers: int | None = None, ceda_links=None) -> dict:
     out_dir = Path(out_dir)
     (out_dir / "stations").mkdir(parents=True, exist_ok=True)
     logo = _write_assets(out_dir)
@@ -649,7 +745,7 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
     # black line on the time series. Loaded once; reused by every per-period summary page below.
     op_all = _load_opcoeff(opcoeff_csv)
     oldray_all = _load_oldray(oldray_dir)
-    v13_all = _load_oldray(v13_dir)
+    ceda_by = _load_ceda_links(ceda_links)   # {key: CEDA L2 URL} for the per-station link
     # NB: the summary aggregates + figures (KPIs, maps, boxes, IQR, watchlist, series table) are now
     # built per time-period in _render_summary_page(), so the page set can re-window cheaply.
 
@@ -725,9 +821,9 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
     nav_idx = {k: i for i, k in enumerate(all_keys)}
     ctx = SimpleNamespace(
         cal=cal, kal=kal, series=series, st=st, diag_by=diag_by, op_all=op_all,
-        oldray_all=oldray_all, v13_all=v13_all, tmpl=station_tmpl, out_dir=out_dir, fullcal_dir=fullcal_dir,
+        oldray_all=oldray_all, tmpl=station_tmpl, out_dir=out_dir, fullcal_dir=fullcal_dir,
         all_keys=all_keys, nav_idx=nav_idx, logo=logo, search_json=search_json,
-        periods=period_list, periods_json=periods_json)
+        ceda_by=ceda_by, periods=period_list, periods_json=periods_json)
 
     n_workers = int(workers) if workers else 1
     if n_workers > 1 and len(keys) > 1:
@@ -738,8 +834,8 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
         print(f"  rendering {len(keys)} station pages on {n_workers} workers ...", flush=True)
         initargs = (str(db_path), str(out_dir), str(fullcal_dir) if fullcal_dir else "",
                     str(opcoeff_csv) if opcoeff_csv else "", str(oldray_dir) if oldray_dir else "",
-                    str(v13_dir) if v13_dir else "",
-                    logo or "", search_json, periods_json)
+                    logo or "", search_json, periods_json,
+                    json.dumps(ceda_by, ensure_ascii=False))
         # Expose the parent's ctx so fork()ed workers (Linux/CSCS) inherit it for free; spawn()ed
         # workers (Windows) ignore this and rebuild from initargs in the initializer.
         global _WORKER_CTX

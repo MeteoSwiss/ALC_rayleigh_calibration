@@ -43,7 +43,7 @@ s3_sync() {
 
 # --- 1. images -> public S3 bucket ---------------------------------------------------------------
 if [ -n "${ALC_S3_BUCKET:-}" ] && { [ -n "${ALC_S3_REMOTE:-}" ] || [ "$S3_TOOL" = "aws" ]; }; then
-  for d in diag ombsens flagex; do
+  for d in diag ombsens flagex nc; do
     [ -d "$SITE/$d" ] || continue
     echo "publish: $S3_TOOL sync $d/ -> $ALC_S3_BUCKET/$d"
     s3_sync "$SITE/$d" "$d" || rc=$?
@@ -68,7 +68,7 @@ fi
 if [ -n "${ALC_VM_RSYNC_TARGET:-}" ]; then
   echo "publish: rsync HTML/assets -> $ALC_VM_RSYNC_TARGET"
   rsync -az --delete --chmod=D755,F644 -e "$VM_SSH" \
-    --exclude 'diag/' --exclude 'ombsens/' --exclude 'flagex/' --exclude 'fullcal_l1_2026/' \
+    --exclude 'diag/' --exclude 'ombsens/' --exclude 'flagex/' --exclude 'nc/' --exclude 'fullcal_l1_2026/' \
     --exclude 'calib_index.sqlite' --exclude '.last_build' \
     --exclude '.processed_days' --exclude '.last_success' --exclude '.git*' \
     "$SITE/" "$ALC_VM_RSYNC_TARGET/" || rc=$?

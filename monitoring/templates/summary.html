@@ -19,11 +19,15 @@
 <h1>Network summary</h1>
 
 <section class="kpis">
-  <div class="kpi"><div class="kpi-val">{{ summary.n_stations }}</div><div class="kpi-lbl">instruments</div></div>
-  <div class="kpi"><div class="kpi-val">{{ summary.n_series }}</div><div class="kpi-lbl">method series</div></div>
-  <div class="kpi"><div class="kpi-val">{{ summary.n_calibrations }}</div><div class="kpi-lbl">calibrations</div></div>
-  <div class="kpi"><div class="kpi-val">{{ summary.success_rate | fmt('{:.1f}') }}%</div><div class="kpi-lbl">overall success</div></div>
+  <div class="kpi"><div class="kpi-val" id="kpi-instruments">{{ summary.n_stations }}</div><div class="kpi-lbl">instruments</div></div>
+  <div class="kpi"><div class="kpi-val" id="kpi-series">{{ summary.n_series }}</div><div class="kpi-lbl">method series</div></div>
+  <div class="kpi"><div class="kpi-val" id="kpi-cals">{{ summary.n_calibrations }}</div><div class="kpi-lbl">calibrations</div></div>
+  <div class="kpi"><div class="kpi-val" id="kpi-success">{{ summary.success_rate | fmt('{:.1f}') }}%</div><div class="kpi-lbl">overall success</div></div>
 </section>
+
+{% if figs.instr %}
+<section class="card">{{ figs.instr | safe }}</section>
+{% endif %}
 
 <section class="grid2">
   <div class="card">{{ figs.map_theo | safe }}</div>
@@ -121,4 +125,8 @@
     </tbody>
   </table>
 </section>
+
+{# Reactive-filter data: per-series counts (KPIs) + per-instrument monthly activity (stacked chart). #}
+{% if series_json %}<script type="application/json" id="series-index">{{ series_json | safe }}</script>{% endif %}
+{% if activity_json %}<script type="application/json" id="instr-activity">{{ activity_json | safe }}</script>{% endif %}
 {% endblock %}

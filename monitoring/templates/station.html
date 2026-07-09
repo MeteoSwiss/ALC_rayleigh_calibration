@@ -20,11 +20,35 @@
   {% if bits %}{{ bits | join("  ·  ") }}{% else %}<span class="muted">station metadata unavailable</span>{% endif %}
 </p>
 
+{% if nc_files or ceda_url %}
+<section class="links">
+  {% for f in nc_files %}<a class="btnlink" href="{{ f.url }}" download
+     title="Download the calibration NetCDF for {{ f.year }}">&#8681; Calibration NetCDF {{ f.year }}</a>{% endfor %}
+  {% if ceda_url %}<a class="btnlink" href="{{ ceda_url }}" target="_blank" rel="noopener"
+     title="E-PROFILE L2 daily files for this instrument on the CEDA archive">&#8599; CEDA L2 data</a>{% endif %}
+</section>
+{% endif %}
+
 <section class="metabar">
   <span><b>WMO</b> {{ meta.wmo or "—" }}</span>
   <span><b>Lat/Lon</b> {{ meta.lat | fmt('{:.3f}') }}, {{ meta.lon | fmt('{:.3f}') }}</span>
   <span><b>Alt</b> {{ meta.alt | fmt('{:.0f}') }} m</span>
 </section>
+
+{% if availability %}
+<section class="card availcard">
+  <h2>Data availability &amp; instrument status
+    <span class="muted">— per day, decoded from the instrument status strings; click a day to load its diagnostic below</span></h2>
+  <div class="avail-legend">
+    <span class="ak ak-pass"></span> Pass
+    <span class="ak ak-warning"></span> Warning
+    <span class="ak ak-error"></span> Error
+    <span class="ak ak-nodata"></span> No data
+  </div>
+  {{ availability | safe }}
+</section>
+{% if status_json %}<script type="application/json" id="status-index">{{ status_json | safe }}</script>{% endif %}
+{% endif %}
 
 {% if overlay %}
 <section class="card">{{ overlay | safe }}</section>
@@ -56,6 +80,8 @@
       <div class="diag-cal"></div>
       <a class="diag-imglink" target="_blank" rel="noopener"><img class="diag-img" alt="calibration diagnostic"></a>
     </div>
+    <div class="diag-status q-nodata" aria-live="polite"
+         title="Instrument status reported on this day (decoded from the status strings)"></div>
     <script type="application/json" class="diag-data">{{ b.diags | tojson }}</script>
   </section>
   {% endif %}

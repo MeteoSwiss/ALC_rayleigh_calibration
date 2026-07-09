@@ -11,8 +11,22 @@
 (function () {
   var active = null;  // viewer that the arrow keys control (last interacted with)
   var calendars = [];  // every calendar's controller, so the period selector can window them all
+  var viewers = [];   // every method viewer, so the availability bar can drive them all
+  // date(YYYYMMDD) -> {q: quality class, s: reporting summary}, from the station-level status index.
+  var statusByDate = (function () {
+    var el = document.getElementById("status-index");
+    if (!el) return {};
+    try { return JSON.parse(el.textContent) || {}; } catch (e) { return {}; }
+  })();
 
   function pad(n) { return (n < 10 ? "0" : "") + n; }
+
+  // A Plotly click event x -> "YYYYMMDD" (handles both ISO-string and epoch-ms x values).
+  function dsFromX(x) {
+    if (typeof x === "string" && /^\d{4}-\d{2}-\d{2}/.test(x)) return x.slice(0, 10).replace(/-/g, "");
+    var d = new Date(x);
+    return "" + d.getUTCFullYear() + pad(d.getUTCMonth() + 1) + pad(d.getUTCDate());
+  }
 
   // Calendar showing a WINDOW of 3 months at a time, with prev/next-month arrows and a
   // month dropdown. Returns a controller: .ensureVisible(date) scrolls the window to a
@@ -109,11 +123,25 @@
     }
     gd.on("plotly_click", function (data) {
       if (!data || !data.points || !data.points.length) return;
-      var x = data.points[0].x, ds;
-      if (typeof x === "string" && /^\d{4}-\d{2}-\d{2}/.test(x)) ds = x.slice(0, 10).replace(/-/g, "");
-      else { var d = new Date(x); ds = "" + d.getUTCFullYear() + pad(d.getUTCMonth() + 1) + pad(d.getUTCDate()); }
-      viewer.jumpNearest(ds);
+      viewer.jumpNearest(dsFromX(data.points[0].x));
       active = viewer;
+    });
+  }
+
+  // The station-level availability bar (fig-avail) drives EVERY method viewer: clicking a day loads
+  // that day's diagnostic + highlights it in the calendar(s) below + updates the status field.
+  function wireAvail(id, tries) {
+    var gd = document.getElementById(id);
+    if (!gd) return;
+    if (typeof gd.on !== "function") {
+      if ((tries || 0) < 40) setTimeout(function () { wireAvail(id, (tries || 0) + 1); }, 150);
+      return;
+    }
+    gd.on("plotly_click", function (data) {
+      if (!data || !data.points || !data.points.length) return;
+      var ds = dsFromX(data.points[0].x);
+      viewers.forEach(function (v) { v.jumpNearest(ds); });
+      if (viewers.length) active = viewers[0];
     });
   }
 
@@ -131,6 +159,7 @@
     var link = section.querySelector(".diag-imglink");
     var label = section.querySelector(".diag-date");
     var calEl = section.querySelector(".diag-cal");
+    var statusEl = section.querySelector(".diag-status");
     var cal = null;   // calendar controller (assigned by buildCalendar below)
     var flagBtn = section.querySelector(".diag-flag");
     var idx = validIdx.length ? validIdx[validIdx.length - 1] : items.length - 1;  // default: latest valid
@@ -159,6 +188,11 @@
       label.textContent = it.date.slice(0, 4) + "-" + it.date.slice(4, 6) + "-" + it.date.slice(6, 8) +
         (it.success ? "  ✓ valid" : "  ✗ rejected") + "  (day " + (idx + 1) + " of " + items.length + ")";
       if (cal) cal.ensureVisible(it.date);   // scroll the 3-month window to this date + highlight
+      if (statusEl) {                        // reporting status decoded for this day (below the image)
+        var stt = statusByDate[it.date];
+        statusEl.textContent = stt ? stt.s : "";
+        statusEl.className = "diag-status q-" + (stt && stt.q ? stt.q : "nodata");
+      }
       syncFlag();
       active = viewer;
     }
@@ -181,6 +215,7 @@
       },
     };
 
+    viewers.push(viewer);   // let the availability bar drive this viewer
     cal = buildCalendar(calEl, items, function (d) { viewer.jump(d); active = viewer; });
     section.querySelector(".diag-prev").addEventListener("click", function () { viewer.prevValid(); });
     section.querySelector(".diag-next").addEventListener("click", function () { viewer.nextValid(); });
@@ -237,4 +272,5 @@
   };
 
   Array.prototype.forEach.call(document.querySelectorAll(".diag"), buildViewer);
+  wireAvail("fig-avail", 0);   // station-level availability bar -> jump every viewer to the clicked day
 })();

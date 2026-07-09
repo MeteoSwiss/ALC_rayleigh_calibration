@@ -46,6 +46,12 @@ IMG_BASE_URL = _norm_base_url(os.environ.get("ALC_IMG_BASE_URL", ""))
 # OFF -> unchanged behaviour (panels enumerated by scanning the local PNGs).
 IMAGES_IN_BUCKET = os.environ.get("ALC_IMAGES_IN_BUCKET", "").strip() not in ("", "0", "false", "False")
 
+
+def nc_url(key: str, fname: str) -> str:
+    """Public URL for a per-station calibration NetCDF. Absolute under the bucket base when set
+    (mirrors diag/ombsens), else site-relative from a station page (stations/<key>.html)."""
+    return (f"{IMG_BASE_URL}nc/{key}/{fname}" if IMG_BASE_URL else f"../nc/{key}/{fname}")
+
 # --- Flag meanings ----------------------------------------------------------
 # MIRROR of calibration/flags.py :: FLAG_MEANINGS (the homogenized cloud/Rayleigh table).
 # Kept local on purpose so the dashboard runs without importing (or installing) the heavy
@@ -127,6 +133,20 @@ TYPE_SYMBOLS = {
 def type_symbol(itype) -> str:
     """Plotly marker symbol for an instrument type (falls back to circle)."""
     return TYPE_SYMBOLS.get(str(itype), "circle")
+
+# --- Instrument health / availability classes (Cloudnet-style daily bar) ---------------------------
+# Per-day instrument health decoded from the status strings (calibration/status/decode.py) + data
+# availability + housekeeping thresholds. Cloudnet's legend is Pass/Info/Warning/Error/No data; we
+# drop "info" (informational Vaisala (S) / CHM15k Note bits are ignored per operator decision) -> the
+# four classes below. Written per day to <key>_status.csv (quality column) by the runner.
+QUALITY_ORDER = ["error", "warning", "pass", "nodata"]
+QUALITY_COLORS = {"pass": "#3cb371", "warning": "#f4c430", "error": "#e03131", "nodata": "#e9ecef"}
+QUALITY_LABELS = {"pass": "Pass", "warning": "Warning", "error": "Error", "nodata": "No data"}
+
+
+def quality_color(q) -> str:
+    """Colour for a daily quality class (falls back to the 'no data' grey)."""
+    return QUALITY_COLORS.get(str(q), QUALITY_COLORS["nodata"])
 
 # Theoretical (reference) lidar constant per instrument type, on the C_L scale. Used to express a
 # station's median C_L as a percent of the nominal value. Mirrors INSTRUMENT_CAL_DEFAULT in the

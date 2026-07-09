@@ -83,9 +83,28 @@ def dash(tmp_path):
             f"20250101,20261231,910.5,8500,12000,15000,5.5e-02,300,300\n")
         (d / f"{key}_omb.png").write_bytes(_png_bytes())
         (d / f"{key}_sens.png").write_bytes(_png_bytes())
+        # decoded per-day status (for the Cloudnet availability bar) — mix of quality classes
+        quals = ["pass", "warning", "error", "pass", "pass", "warning"]
+        st_rows = ["date,quality,n_profiles,coverage_pct,gap_hours,n_alarm_h,n_warn_h,flags_json,summary"]
+        for dt, q in zip(_DATES, quals):
+            summ = {"pass": "No warning or error recorded", "warning": "'Window contamination (W)' 6 h",
+                    "error": "'Transmitter failure (A)' 3 h"}[q]
+            na, nw = (3, 0) if q == "error" else ((0, 6) if q == "warning" else (0, 0))
+            st_rows.append(f'{dt},{q},400,100.0,0,{na},{nw},"{{}}","{summ}"')
+        (d / f"{key}_status.csv").write_text("\n".join(st_rows) + "\n")
+        # a per-year calibration NetCDF (for the download link + nc/ staging); content irrelevant here
+        ncd = d / "2026"
+        ncd.mkdir(parents=True, exist_ok=True)
+        (ncd / f"ALC_calibration_{s['wmo']}_{s['ident']}2026.nc").write_bytes(b"CDF\x01dummy")
 
     manifest = tmp_path / "manifest.json"
     manifest.write_text(json.dumps(_STATIONS))
+
+    # CEDA L2 links map {key: url} for the per-station "CEDA L2 data" link
+    ceda = tmp_path / "ceda_links.json"
+    ceda.write_text(json.dumps({f"{s['wmo']}_{s['ident']}":
+                                f"https://data.ceda.ac.uk/badc/eprofile/data/daily_files/x/y/z_{s['ident']}"
+                                for s in _STATIONS}))
 
     # operational-constant CSV (key,date,op_coeff) for the % of operational map
     op_rows = ["key,date,op_coeff"]
@@ -100,8 +119,8 @@ def dash(tmp_path):
     db = tmp_path / "index.sqlite"
     stats = index.build_index(fullcal, manifest, db)
     out = tmp_path / "site"
-    render.build_site(db, out, opcoeff_csv=opcoeff, fullcal_dir=fullcal)
-    return dict(out=out, db=db, fullcal=fullcal, opcoeff=opcoeff, stats=stats)
+    render.build_site(db, out, opcoeff_csv=opcoeff, fullcal_dir=fullcal, ceda_links=ceda)
+    return dict(out=out, db=db, fullcal=fullcal, opcoeff=opcoeff, ceda=ceda, stats=stats)
 
 
 # ----------------------------------------------------------------------------
@@ -135,6 +154,74 @@ def test_op_map_populated(dash):
     cal, series, st, kal, diag = _frames(dash)
     ratios = render._opcoeff_ratios(cal, render._load_opcoeff(dash["opcoeff"]), st)
     assert ratios["op_pct_op"].notna().any(), "op_pct_op all NaN -> op map empty"
+
+
+def test_station_page_has_availability_bar_and_status(dash):
+    """Cloudnet-style daily availability bar + per-day status field + status index are on the page."""
+    page = (dash["out"] / "stations" / f"{_STATIONS[0]['wmo']}_{_STATIONS[0]['ident']}.html").read_text(encoding="utf-8")
+    assert "fig-avail" in page                 # the availability bar figure
+    assert "availcard" in page                 # its card (class="card availcard")
+    assert 'id="status-index"' in page         # per-day status lookup for the viewer
+    assert "diag-status" in page               # the reporting-status field under the image
+    assert "'Transmitter failure (A)' 3 h" in page or "Window contamination" in page  # decoded summary
+
+
+def test_station_page_has_download_and_ceda_links(dash):
+    """Top-of-page links: a calibration-NetCDF download + the CEDA L2 archive link; nc/ is staged."""
+    key = f"{_STATIONS[0]['wmo']}_{_STATIONS[0]['ident']}"
+    page = (dash["out"] / "stations" / f"{key}.html").read_text(encoding="utf-8")
+    assert "Calibration NetCDF" in page
+    assert "data.ceda.ac.uk" in page and "CEDA L2 data" in page
+    assert (dash["out"] / "nc" / key / f"ALC_calibration_{_STATIONS[0]['wmo']}_{_STATIONS[0]['ident']}2026.nc").exists()
+
+
+def test_summary_reactive_kpis_and_instrument_chart(dash):
+    """Summary embeds the per-series + activity JSON and the stacked instrument chart, and the KPI
+    divs carry ids so filter.js can update them on country/type change."""
+    html = (dash["out"] / "index.html").read_text(encoding="utf-8")
+    assert "fig-instr" in html                                  # instruments-over-time chart
+    assert 'id="series-index"' in html and 'id="instr-activity"' in html
+    for kid in ("kpi-instruments", "kpi-series", "kpi-cals", "kpi-success"):
+        assert f'id="{kid}"' in html, f"missing KPI id {kid}"
+    # filter.js recomputes those ids
+    js = (Path(charts.__file__).resolve().parent / "static" / "filter.js").read_text(encoding="utf-8")
+    assert "recomputeKpis" in js and "recomputeInstrumentChart" in js
+
+
+def test_favicon_present(dash):
+    """The EUMETNET favicon is staged and referenced in the page head."""
+    assert (dash["out"] / "assets" / "favicon.png").exists()
+    page = (dash["out"] / "index.html").read_text(encoding="utf-8")
+    assert 'rel="icon"' in page and "favicon.png" in page
+
+
+def test_availability_bar_builder():
+    """daily_availability_bar builds a bar spanning the record with the quality colours + gaps."""
+    df = pd.DataFrame({"date": ["20260101", "20260103", "20260110"],  # a gap between 03 and 10
+                       "quality": ["pass", "error", "warning"],
+                       "summary": ["No warning or error recorded", "'Transmitter failure (A)' 2 h",
+                                   "'Window contamination (W)' 5 h"]})
+    fig = charts.daily_availability_bar(df)
+    assert fig is not None and fig.data
+    colors = set(fig.data[0].marker.color)
+    assert config.QUALITY_COLORS["pass"] in colors
+    assert config.QUALITY_COLORS["error"] in colors
+    assert config.QUALITY_COLORS["nodata"] in colors   # the gap days
+    assert len(fig.data[0].x) == 10                     # 20260101..20260110 inclusive
+
+
+def test_instrument_count_chart_builder():
+    """instrument_count_over_time stacks per-type monthly instrument counts."""
+    activity = [
+        {"key": "a", "itype": "CHM15k", "country": "CH", "months": ["202601", "202602"]},
+        {"key": "b", "itype": "CHM15k", "country": "DE", "months": ["202601"]},
+        {"key": "c", "itype": "CL61", "country": "CH", "months": ["202602"]},
+    ]
+    fig = charts.instrument_count_over_time(activity)
+    names = [t.name for t in fig.data]
+    assert "CHM15k" in names and "CL61" in names
+    chm = next(t for t in fig.data if t.name == "CHM15k")
+    assert list(chm.y) == [2, 1]   # Jan: a+b, Feb: a
 
 
 def test_station_page_has_ombsens_and_calendar(dash):

@@ -20,7 +20,7 @@ export ALC_DASHBOARD_DIR="/data/zue/E_PROFILE/ALC/Calibration/dashboard"
 export ALC_L2_DIR="/data/zue/E_PROFILE/ALC/L2_FILES"                                                # optional: L2 archive for station name/country (blank = skip)
 export ALC_OPCOEFF_CSV="/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.0/operational_coefficients.csv"                                           # optional: operational-constant CSV for the comparison maps (blank = skip)
 export ALC_OLDRAY_DIR="/data/pay/REM/ACQ/E_PROFILE_ALC/Calibration/rayleigh"   # old operational Rayleigh (v1) overlay
-# v1.0.2-removed-20260629: export ALC_V13_DIR="/data/zue/E_PROFILE/ALC/Calibration/rayleigh-v1.0.2"   # v13 test Rayleigh overlay
+export ALC_CEDA_LINKS="$ALC_REPO/validation/ceda_links.json"     # {key: CEDA-L2 URL} for the per-page CEDA link (committed; blank = skip). Refresh occasionally: python scripts/build_ceda_links.py --out "$ALC_CEDA_LINKS"
 
 # --- publish to the European Weather Cloud (optional; all blank/0 = don't publish) ---------------
 # Push the built site online: bulky images (diag/ombsens/flagex) -> a public S3 bucket, and the static

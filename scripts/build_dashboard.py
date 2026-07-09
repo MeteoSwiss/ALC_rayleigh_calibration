@@ -42,7 +42,10 @@ def _changed_keys(fullcal_dir: Path, out_dir: Path):
         return None
     cutoff = marker.stat().st_mtime
     changed = set()
-    for csv in list(fullcal_dir.glob("*/*_cal.csv")) + list(fullcal_dir.glob("*/*_cl.csv")):
+    # A station is "changed" if its calibration OR its monitoring (HK / decoded status) CSV changed,
+    # so a status/HK-only backfill also refreshes the availability bar on the incremental build.
+    for csv in (list(fullcal_dir.glob("*/*_cal.csv")) + list(fullcal_dir.glob("*/*_cl.csv"))
+                + list(fullcal_dir.glob("*/*_status.csv")) + list(fullcal_dir.glob("*/*_hk.csv"))):
         try:
             if csv.stat().st_mtime > cutoff:
                 changed.add(csv.parent.name)   # the key == the per-stream sub-folder name
@@ -85,11 +88,10 @@ def main() -> None:
                     default=(Path(os.environ["ALC_OLDRAY_DIR"]) if os.environ.get("ALC_OLDRAY_DIR") else None),
                     help="dir of OLD operational Rayleigh NetCDFs (ALC_calibration_<key><YYYY>.nc, e.g. "
                          "/scratch/mch/mhrvo/Calib_oper) to overlay as black 'x' markers on the Rayleigh time series")
-    ap.add_argument("--v13", type=Path,
-                    default=(Path(os.environ["ALC_V13_DIR"]) if os.environ.get("ALC_V13_DIR") else None),
-                    help="dir of v13 test Rayleigh NetCDFs (ALC_calibration_<key><YYYY>.nc, same format as "
-                         "--oldray) to overlay as red 'x' markers on the Rayleigh time series (hidden by "
-                         "default; shown on legend click)")
+    ap.add_argument("--ceda-links", type=Path,
+                    default=(Path(os.environ["ALC_CEDA_LINKS"]) if os.environ.get("ALC_CEDA_LINKS") else None),
+                    help="JSON map {key: CEDA-L2 URL} from scripts/build_ceda_links.py; adds a "
+                         "'CEDA L2 data' link at the top of each station page (default: $ALC_CEDA_LINKS)")
     ap.add_argument("--changed-only", action="store_true",
                     help="incremental: re-render only station pages whose <key>_cal.csv changed since "
                          "the last build (the summary always rebuilds). Fast path for daily updates.")
@@ -127,7 +129,7 @@ def main() -> None:
     print("Rendering site ...", flush=True)
     site = render.build_site(db_path, args.out, limit_pages=args.limit_pages, flagex_dir=args.flagex,
                              opcoeff_csv=args.opcoeff, only_keys=only_keys, oldray_dir=args.oldray,
-                             v13_dir=args.v13, fullcal_dir=args.fullcal, workers=args.workers)
+                             fullcal_dir=args.fullcal, workers=args.workers, ceda_links=args.ceda_links)
     # stamp the build time so the next --changed-only run knows what to re-render
     (args.out / ".last_build").write_text(time.strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
     print(f"  {site['n_pages']} station pages -> {site['out_dir']}  "

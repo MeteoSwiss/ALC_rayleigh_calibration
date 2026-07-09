@@ -81,6 +81,13 @@ h2 { font-size: 17px; margin: 22px 0 10px; }
   padding: 8px; margin: 12px 0; }
 @media (max-width: 900px) { .grid2, .kpis { grid-template-columns: 1fr; } }
 
+/* Top-of-page action links (download NetCDF, CEDA L2) */
+.links { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+.btnlink { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 600;
+  text-decoration: none; color: var(--brand); background: var(--card); border: 1px solid var(--line);
+  border-radius: 8px; padding: 5px 11px; }
+.btnlink:hover { border-color: var(--accent); color: var(--accent); background: #eef4fb; }
+
 /* Metadata bar */
 .metabar { display: flex; flex-wrap: wrap; gap: 8px 18px; background: var(--card);
   border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin-bottom: 6px; }
@@ -207,3 +214,23 @@ td a:hover { text-decoration: underline; }
 .qcm-cancel:hover { background: #f0f2f5; }
 .qcm-remove { color: #a3261f; border-color: #e3b3ae; }
 .qcm-remove:hover { background: #fbecea; }
+
+/* Cloudnet-style daily availability bar + legend + per-day status field */
+.availcard h2 { margin-top: 4px; }
+.avail-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center;
+  font-size: 12px; color: var(--muted); margin: 2px 2px 6px; }
+.avail-legend .ak { display: inline-block; width: 12px; height: 12px; border-radius: 3px;
+  vertical-align: -1px; margin-right: 3px; border: 1px solid rgba(0,0,0,.12); }
+.ak-pass { background: #3cb371; }
+.ak-warning { background: #f4c430; }
+.ak-error { background: #e03131; }
+.ak-nodata { background: #e9ecef; }
+
+.diag-status { margin: 10px 2px 2px; font-size: 13px; padding: 7px 11px; border-radius: 7px;
+  border-left: 4px solid var(--line); background: #f7f8fa; color: var(--ink); }
+.diag-status:empty { display: none; }
+.diag-status::before { content: "Status: "; color: var(--muted); font-weight: 600; }
+.diag-status.q-pass { border-left-color: #3cb371; }
+.diag-status.q-warning { border-left-color: #f4c430; background: #fff9e6; }
+.diag-status.q-error { border-left-color: #e03131; background: #fdecec; }
+.diag-status.q-nodata { border-left-color: #cbd2d9; color: var(--muted); }

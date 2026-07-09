@@ -10,6 +10,67 @@
   // (Maps also carry data[1..5] = dummy symbol-legend traces; we only ever touch trace [0].)
   var MAP_IDS = ["fig-map", "fig-map-theo", "fig-map-op", "fig-map-omb", "fig-map-icao"];
 
+  // Instrument palette (mirror of monitoring/config.TYPE_ORDER / TYPE_COLORS) for the client-side
+  // rebuild of the "instruments over time" stacked chart on filter change.
+  var TYPE_ORDER = ["CHM15k", "CL31", "CL51", "CL61", "Mini-MPL"];
+  var TYPE_COLORS = { "CHM15k": "#1f77b4", "CL31": "#ff7f0e", "CL51": "#2ca02c",
+                      "CL61": "#d62728", "Mini-MPL": "#9467bd" };
+
+  function readJson(id) {
+    var el = document.getElementById(id);
+    if (!el) return null;
+    try { return JSON.parse(el.textContent); } catch (e) { return null; }
+  }
+  var seriesIndex = readJson("series-index");   // [{key,itype,country,method,n_dates,n_success}]
+  var activity = readJson("instr-activity");     // [{key,itype,country,months:[YYYYMM,...]}]
+
+  // Recompute the 4 headline KPIs from the filtered per-series rows (period is already baked per page).
+  function recomputeKpis(c, t) {
+    if (!seriesIndex) return;
+    var nSeries = 0, cals = 0, succ = 0, keys = {};
+    seriesIndex.forEach(function (r) {
+      if ((c && r.country !== c) || (t && r.itype !== t)) return;
+      nSeries++; cals += (r.n_dates || 0); succ += (r.n_success || 0); keys[r.key] = 1;
+    });
+    function set(id, v) { var e = document.getElementById(id); if (e) e.textContent = v; }
+    set("kpi-instruments", Object.keys(keys).length);
+    set("kpi-series", nSeries);
+    set("kpi-cals", cals);
+    set("kpi-success", (cals ? (100 * succ / cals).toFixed(1) : "0.0") + "%");
+  }
+
+  // Rebuild the stacked "active instruments over time" chart for the current filter. Country filtering
+  // changes per-month counts (not a simple restyle), so recompute from the embedded activity list.
+  function recomputeInstrumentChart(c, t) {
+    var gd = document.getElementById("fig-instr");
+    if (!gd || !window.Plotly || !activity) return;
+    var monthsSet = {}, typesPresent = {};
+    activity.forEach(function (r) {
+      typesPresent[r.itype] = 1;
+      (r.months || []).forEach(function (m) { monthsSet[m] = 1; });
+    });
+    var months = Object.keys(monthsSet).sort();
+    if (!months.length) return;
+    var mIdx = {}; months.forEach(function (m, i) { mIdx[m] = i; });
+    var x = months.map(function (m) { return m.slice(0, 4) + "-" + m.slice(4, 6) + "-01"; });
+    var order = TYPE_ORDER.filter(function (tp) { return typesPresent[tp]; })
+      .concat(Object.keys(typesPresent).filter(function (tp) { return tp && TYPE_ORDER.indexOf(tp) < 0; }).sort());
+    if (t) order = order.filter(function (tp) { return tp === t; });
+    var counts = {};
+    order.forEach(function (tp) { counts[tp] = months.map(function () { return 0; }); });
+    activity.forEach(function (r) {
+      if ((c && r.country !== c) || (t && r.itype !== t) || !counts[r.itype]) return;
+      var seen = {};
+      (r.months || []).forEach(function (m) {
+        if (m in mIdx && !seen[m]) { seen[m] = 1; counts[r.itype][mIdx[m]]++; }
+      });
+    });
+    var data = order.filter(function (tp) { return counts[tp].some(function (v) { return v > 0; }); })
+      .map(function (tp) { return { type: "bar", x: x, y: counts[tp], name: tp,
+                                    marker: { color: TYPE_COLORS[tp] || "#888" } }; });
+    window.Plotly.react(gd, data, gd.layout || {});
+  }
+
   // Click a map marker -> open that station's page (retry until Plotly has initialised).
   function wireMapClick(id, tries) {
     var gd = document.getElementById(id);
@@ -118,6 +179,8 @@
     filterTables(c, t);
     filterMap(c, t);
     filterHistograms(c, t);
+    recomputeKpis(c, t);
+    recomputeInstrumentChart(c, t);
   }
   if (fc) fc.addEventListener("change", apply);
   if (ft) ft.addEventListener("change", apply);

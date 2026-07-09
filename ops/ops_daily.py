@@ -49,6 +49,7 @@ FULLCAL_DIR = _envp("ALC_FULLCAL_DIR", str(REPO / "_fullcal"))
 DASHBOARD_DIR = _envp("ALC_DASHBOARD_DIR", str(REPO / "_dashboard"))
 OPCOEFF_CSV = os.environ.get("ALC_OPCOEFF_CSV") or ""
 L2_DIR = os.environ.get("ALC_L2_DIR") or ""
+CEDA_LINKS = os.environ.get("ALC_CEDA_LINKS") or ""   # {key: CEDA-L2 URL} map (build_ceda_links.py)
 DAY_LAG = int(os.environ.get("ALC_DAY_LAG") or "1")
 BACKFILL_DAYS = int(os.environ.get("ALC_BACKFILL_DAYS") or "5")
 WORKERS = str(os.environ.get("ALC_WORKERS") or "6")
@@ -142,6 +143,8 @@ def update_dashboard() -> bool:
         cmd += ["--l2dir", L2_DIR]
     if OPCOEFF_CSV:
         cmd += ["--opcoeff", OPCOEFF_CSV]
+    if CEDA_LINKS and Path(CEDA_LINKS).exists():
+        cmd += ["--ceda-links", CEDA_LINKS]
     log(f"  dashboard: {' '.join(cmd[1:])}")
     return subprocess.run(cmd, cwd=str(REPO)).returncode == 0
 
