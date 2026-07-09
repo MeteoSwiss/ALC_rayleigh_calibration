@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Calibration monitor{% endblock %}</title>
   <link rel="stylesheet" href="{{ base }}assets/style.css?v={{ asset_v }}">
+  {% if logo %}
+  <link rel="icon" type="image/png" href="{{ base }}assets/{{ logo }}?v={{ asset_v }}">
+  <link rel="shortcut icon" type="image/png" href="{{ base }}assets/{{ logo }}?v={{ asset_v }}">
+  {% endif %}
   <!-- Shared Plotly bundle (loaded once, before the figure <div> scripts run). -->
   <script src="{{ base }}assets/plotly.min.js" charset="utf-8"></script>
 </head>

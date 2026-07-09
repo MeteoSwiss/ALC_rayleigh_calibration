@@ -554,6 +554,14 @@ def _const_per_profile(time, cmap, fallback):
 
 def _load_l1_window(s, start, end):
     from calibration.io.l1_window import load_l1_window
+    # Hard invariant: OmB/sens load at most ONE calendar month at a time (they iterate month by
+    # month -- see _do_omb / _do_sens). load_l1_window concatenates every day's native rcs_0 into a
+    # single array, so a multi-month window OOMs on high-rate stations (CL61 17 months > 96 GB at
+    # the concatenate peak). Refuse it loudly here rather than die later on an opaque SIGKILL.
+    if (end - start).days > 31:
+        raise ValueError(
+            f"_load_l1_window: window {start:%Y%m%d}..{end:%Y%m%d} spans {(end - start).days} days "
+            "(>1 month); OmB/sens must load month-by-month to bound memory.")
     paths = [str(_l1_file(s["wmo"], s["ident"], d)) for d in _days(start, end)
              if _l1_file(s["wmo"], s["ident"], d).exists()]
     return load_l1_window(paths) if paths else None
@@ -611,36 +619,52 @@ def _do_omb(s, start, end, kalman_rows):
     kmap = _kalman_map(kalman_rows, method)
     if not kmap:
         return None  # no calibrated C_L -> skip (don't fabricate 'ours' from the default constant)
-    # OmB CAMS: prefer the 0.4 deg monthly archive (ALC_CAMS_DIR); fall back to the coarser 1 deg
-    # archive (ALC_CAMS_DIR_FALLBACK) for months the 0.4 deg set does not yet cover. Both must carry
-    # aerosol backscatter (aerbackscatgnd532/1064) to be usable for OmB.
-    cams = None
-    for _folder in (CAMS, CAMS_FALLBACK):
-        if _folder is None:
-            continue
-        _c = find_cams_file(_folder, end.strftime("%Y%m%d"))
-        if _c is not None and _has_backscatter(_c):
-            cams = _c
-            break
-    if cams is None:
-        return None  # no CAMS-with-backscatter (0.4 deg or 1 deg fallback) for this month
-    data = _load_l1_window(s, start, end)
-    if data is None:
-        return None
     default = INSTRUMENT_CAL_DEFAULT.get(itype, 1.0)
-    c_ours = _const_per_profile(data["time"], kmap, default)
-    c_op = _const_per_profile(data["time"], _op_map(s, start, end), default)
-    rcs = data["rcs"].astype("float64")
-    res = compute_omb(
-        time=data["time"], range_agl=data["range"],
-        beta_sources={"op": rcs / c_op[:, None], "ours": rcs / c_ours[:, None]},
-        station_lat=data["lat"], station_lon=data["lon"], station_alt=data["alt"],
-        wavelength=data["wl"], cams_file=str(cams), instrument=itype,
-        cloud_base_height=data["cbh"], abs_cs_lookup_table=str(WV_LUT),
-    )
+    op_map = _op_map(s, start, end)          # date -> operational C_L (cheap, L1-independent)
     sdir = OUT / key
     from calibration.incremental import omb_cache_update, omb_cache_aggregate
-    omb_cache_update(sdir, res)
+    # Process MONTH BY MONTH and stitch (mirrors _do_sens): loading a whole multi-month window at
+    # once OOMs on high-rate stations (CL61 17 months > 96 GB at the concatenate peak). It is also
+    # REQUIRED for correctness -- the OmB CAMS archive is monthly, so each month must be matched
+    # against its OWN CAMS file, not just the end month's. Each month (~1 GB of L1) is loaded,
+    # reduced to OmB cache columns, then freed; the cache de-dups/accumulates across months.
+    any_update = False
+    m0 = datetime(start.year, start.month, 1)
+    while m0 <= end:
+        m_end = (datetime(m0.year + (m0.month == 12), (m0.month % 12) + 1, 1)
+                 - timedelta(days=1))
+        ws, we = max(m0, start), min(m_end, end)
+        m0 = m_end + timedelta(days=1)       # advance first so every `continue` below is safe
+        # OmB CAMS for THIS month: prefer the 0.4 deg archive (ALC_CAMS_DIR), else the coarser 1 deg
+        # fallback (ALC_CAMS_DIR_FALLBACK). Both must carry aerosol backscatter (aerbackscatgnd*).
+        cams = None
+        for _folder in (CAMS, CAMS_FALLBACK):
+            if _folder is None:
+                continue
+            _c = find_cams_file(_folder, we.strftime("%Y%m%d"))
+            if _c is not None and _has_backscatter(_c):
+                cams = _c
+                break
+        if cams is None:
+            continue  # no CAMS-with-backscatter for this month -> skip it
+        data = _load_l1_window(s, ws, we)
+        if data is None:
+            continue
+        c_ours = _const_per_profile(data["time"], kmap, default)
+        c_op = _const_per_profile(data["time"], op_map, default)
+        rcs = data["rcs"].astype("float64")
+        res = compute_omb(
+            time=data["time"], range_agl=data["range"],
+            beta_sources={"op": rcs / c_op[:, None], "ours": rcs / c_ours[:, None]},
+            station_lat=data["lat"], station_lon=data["lon"], station_alt=data["alt"],
+            wavelength=data["wl"], cams_file=str(cams), instrument=itype,
+            cloud_base_height=data["cbh"], abs_cs_lookup_table=str(WV_LUT),
+        )
+        del data, rcs
+        omb_cache_update(sdir, res)
+        any_update = True
+    if not any_update:
+        return None
     res_all = omb_cache_aggregate(sdir)               # full-period snapshot off the (updated) cache
     if res_all is None:
         return None
