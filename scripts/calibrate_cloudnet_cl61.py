@@ -103,7 +103,8 @@ def main():
 
     # cloud calibration — run on ALL available days (cloud cal wants maximum data coverage)
     try:
-        from calibration.cloud import liquid_cloud_calibration, CloudCalConfig
+        from calibration.cloud import CloudCalConfig
+        from tests._ceilo_reader import calibrate_file  # Cloudnet-raw reader (moved out of calibration/)
         import json as _json
         opt = _json.loads(Path("options.json").read_text())
         for s in SITES:
@@ -134,7 +135,7 @@ def main():
                     aerosol_lidar_ratio=50.0,
                 )
                 try:
-                    res = liquid_cloud_calibration(cfg)
+                    res = calibrate_file(cfg)
                     coef = float(res.cal_mean) if res.n_profiles > 0 else float("nan")
                     std  = float(res.cal_std)  if res.n_profiles > 0 else float("nan")
                     ok = bool(res.n_profiles > 0 and np.isfinite(coef) and coef > 0)

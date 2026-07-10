@@ -82,7 +82,7 @@ from calibration import (  # noqa: E402
 from calibration.config import InstrumentType  # noqa: E402
 from calibration.cloud import CloudCalConfig  # noqa: E402
 from calibration.cloud.calibration import (  # noqa: E402
-    read_ceilometer_data, liquid_cloud_calibration_from_data, set_defaults, _ceilo_from_shared)
+    liquid_cloud_calibration_from_data, set_defaults, _ceilo_from_shared)
 from calibration.io.data_loader import build_file_paths  # noqa: E402
 from calibration.io.instrument_day import load_instrument_day  # noqa: E402
 from calibration.flags import cloud_flag, flag_label, dominant_cloud_reject_flag  # noqa: E402
@@ -359,7 +359,8 @@ def _do_cloud(s, start, end, shared=None):
                 # day -- cloud no longer averages separately (config average_time_s/range = 0).
                 data, status = _ceilo_from_shared(idd.slice_to_date(d), cfg), 0
             else:
-                data, status = read_ceilometer_data(cfg.nc_file, cfg)
+                # L1 unreadable (load_instrument_day already retried this day) -> no-data row below.
+                data, status = None, 1
             beta = getattr(data, "beta", None) if data is not None else None
             if status != 0 or beta is None or not np.any(np.isfinite(np.asarray(beta, dtype=float))):
                 rows.append(dict(date=ds, method="cloud", flag=0, cal_value=-1, uncertainty=0,

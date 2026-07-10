@@ -71,6 +71,11 @@ class CeilometerData:
     # quality instead) → NaN-filled here, which the < threshold test treats as "keep".
     laser_energy: Optional[NDArray[np.float64]] = None
 
+    # L2 only: median ``calibration_constant_0`` baked into the file (the Wiegner C_L
+    # already applied). None for L1 (rcs_0 carries no per-file constant). Lets the cloud
+    # method report an absolute C_L on L2 input; see cloud ``_ceilo_from_ceilometerdata``.
+    calibration_constant_applied: Optional[float] = None
+
 
 def build_file_paths(
     date_str: str,
@@ -423,6 +428,9 @@ def _read_l2_file(filepath_str: str, mtime: float, no_cloud: float):
         cc = np.asarray(d.variables["calibration_constant_0"][:], dtype="f8")
         # rcs = attBsc * 1e-6 * calConst  (fixed factor, MATLAB loadL2Data.m parity)
         rcs = (atten * cc[:, None] * L2_RCS_FACTOR)[:, keep_range]
+        # Median applied constant (finite, positive) so cloud can report an absolute C_L.
+        cc_valid = cc[np.isfinite(cc) & (cc > 0)]
+        cal_const = float(np.median(cc_valid)) if cc_valid.size else float("nan")
 
         cbh = np.ma.filled(d.variables["cloud_base_height"][:].astype("f8"), np.nan)
         cbh[~np.isfinite(cbh) | (np.abs(cbh) > 1e30)] = no_cloud
@@ -434,7 +442,7 @@ def _read_l2_file(filepath_str: str, mtime: float, no_cloud: float):
         else:
             vert_vis = np.full(len(time), np.nan)
 
-    return (time, rcs, cbh, vert_vis, range_alc, station_alt, latitude, longitude, calendar, time_units)
+    return (time, rcs, cbh, vert_vis, range_alc, station_alt, latitude, longitude, calendar, time_units, cal_const)
 
 
 def _load_l2_data(
@@ -454,7 +462,7 @@ def _load_l2_data(
         return None
 
     no_cloud = instrument_type.no_cloud_value
-    time_list, rcs_list, cbh_list, vv_list = [], [], [], []
+    time_list, rcs_list, cbh_list, vv_list, cc_list = [], [], [], [], []
     range_alc = altitude = None
     latitude = longitude = 0.0
     calendar = time_units = None
@@ -462,12 +470,14 @@ def _load_l2_data(
     for filepath in file_list:
         if not filepath.exists():
             continue
-        (t, rcs_f, cbh_f, vv_f, rng, station_alt, lat, lon, cal, tu) = _read_l2_file(
+        (t, rcs_f, cbh_f, vv_f, rng, station_alt, lat, lon, cal, tu, cc) = _read_l2_file(
             str(filepath), os.path.getmtime(filepath), no_cloud)
         time_list.append(t)
         rcs_list.append(rcs_f)
         cbh_list.append(cbh_f)
         vv_list.append(vv_f)
+        if np.isfinite(cc):
+            cc_list.append(cc)
         if range_alc is None:
             range_alc, altitude = rng, station_alt
             latitude, longitude = lat, lon
@@ -480,6 +490,7 @@ def _load_l2_data(
     rcs = np.concatenate(rcs_list, axis=0)
     cbh = np.concatenate(cbh_list, axis=0)
     vert_vis = np.concatenate(vv_list)
+    cal_const_applied = float(np.median(cc_list)) if cc_list else None
     nan_hk = np.full(len(time), np.nan)
 
     try:
@@ -505,6 +516,7 @@ def _load_l2_data(
         laser_life_time=nan_hk.copy(),
         calibration_pulse=nan_hk.copy(),
         vertical_visibility=vert_vis,
+        calibration_constant_applied=cal_const_applied,
         calendar=calendar,
         time_units=time_units,
     )
@@ -752,6 +764,7 @@ def average_ceilometer_data(
         time_units=data.time_units,
         vertical_visibility=(None if data.vertical_visibility is None else np.asarray(data.vertical_visibility, dtype="float64").copy()),
         laser_energy=(None if data.laser_energy is None else np.asarray(data.laser_energy, dtype="float64").copy()),
+        calibration_constant_applied=data.calibration_constant_applied,
     )
 
     if len(out.time_datetime) > 1 and average_time_s is not None and average_time_s > 0:

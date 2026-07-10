@@ -36,8 +36,9 @@ except Exception:
 import numpy as np
 
 from calibration.cloud.calibration import (
-    CloudCalConfig, set_defaults, read_ceilometer_data, average_ceilo_data,
-    compute_wv_transmission, liquid_cloud_calibration_from_data)
+    CloudCalConfig, set_defaults, compute_wv_transmission, liquid_cloud_calibration_from_data,
+)
+from tests._ceilo_reader import read_ceilometer_data, average_ceilo_data
 
 REPO = Path(__file__).resolve().parents[1]
 MANIFEST = json.loads((REPO / "validation" / "scope_cloud_2026.json").read_text())

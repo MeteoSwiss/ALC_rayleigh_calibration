@@ -315,10 +315,8 @@ def _cloud_one(ds: str) -> dict:
     """Worker: cloud-calibrate one day (WV on + off). Runs in a separate process."""
     warnings.filterwarnings("ignore")
     logging.getLogger().setLevel(logging.ERROR)
-    from calibration.cloud import (
-        liquid_cloud_calibration,
-        CloudCalConfig,
-    )
+    from calibration.cloud import CloudCalConfig
+    from tests._ceilo_reader import calibrate_file  # Cloudnet-raw reader (moved out of calibration/)
 
     daily_nc = DATA_ROOT / WMO / f"{ds}.nc"
     rec = {"date": ds}
@@ -334,7 +332,7 @@ def _cloud_one(ds: str) -> dict:
                 station_longitude=SITE["lon"],
                 aerosol_lidar_ratio=50.0,
             )
-            res = liquid_cloud_calibration(cfg)
+            res = calibrate_file(cfg)
             ok = res.n_profiles > 0 and np.isfinite(res.lidar_constant) and res.lidar_constant > 0
             # Wiegner & Geiss (2012) convention: report the absolute lidar constant
             # C_L = calibration_constant_0 / C, where C is the O'Connor cloud multiplier

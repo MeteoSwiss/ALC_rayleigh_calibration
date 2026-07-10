@@ -16,7 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))      # repo root
 import numpy as np
 import run_all_l1_2026 as R  # noqa: E402  (reuse its paths + per-stream helpers)
 from calibration.cloud.calibration import (  # noqa: E402
-    CloudCalConfig, liquid_cloud_calibration_from_data, read_ceilometer_data, set_defaults)
+    CloudCalConfig, liquid_cloud_calibration_from_data, set_defaults, _ceilo_from_shared)
+from calibration.io.instrument_day import load_instrument_day  # noqa: E402
 from calibration.plotting import plot_cloud_diagnostics_compact  # noqa: E402
 
 OUTDIR = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(
@@ -40,7 +41,10 @@ def _run(s, d):
     if not fp.exists():
         return None
     cfg = _cfg(s, fp)
-    data, status = read_ceilometer_data(cfg.nc_file, cfg)
+    idd = load_instrument_day([cfg.nc_file], s["type"], cfg.cams_folder, read_cams=False,
+                              target_time_s=cfg.average_time_s, target_range_m=cfg.average_range_m)
+    data = _ceilo_from_shared(idd, cfg) if idd is not None else None
+    status = 0 if data is not None else 1
     beta = getattr(data, "beta", None) if data is not None else None
     if status != 0 or beta is None or not np.any(np.isfinite(np.asarray(beta, dtype=float))):
         return None

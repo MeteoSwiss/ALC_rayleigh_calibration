@@ -31,8 +31,9 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root for calibration/validation
 from calibration.cloud.calibration import (
-    set_defaults, read_ceilometer_data, average_ceilo_data,
-    compute_wv_transmission, liquid_cloud_calibration_from_data)
+    set_defaults, compute_wv_transmission, liquid_cloud_calibration_from_data,
+)
+from tests._ceilo_reader import read_ceilometer_data, average_ceilo_data
 from validation.run_cloud_sweep import base_config, CONFIGS, MANIFEST, ROOTS
 
 OUT = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/figs_paper_validation/cloud_yield")

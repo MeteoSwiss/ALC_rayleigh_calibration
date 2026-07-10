@@ -182,13 +182,10 @@ def test_ceilo_from_shared_beta_raw_path(label, letter):
     """The raw-signal path: CHM15k (counts) / CL31 (V*m^2) divide by the calibration constant,
     on the shared COARSE grid -- matching the old cloud path (read + 30 s/10 m averaging) to
     machine precision (CHM15k: rcs-then-/C vs beta averaging differ by ~1e-20)."""
-    from calibration.cloud.calibration import (
-        CloudCalConfig,
-        _ceilo_from_shared,
-        average_ceilo_data,
-        read_ceilometer_data,
-        set_defaults,
-    )
+    from calibration.cloud.calibration import CloudCalConfig, _ceilo_from_shared, set_defaults
+    # The legacy MATLAB-faithful reader + CeiloData averager now live in the test helper (moved
+    # out of the operational module); this test still guards that the shared loader reproduces them.
+    from tests._ceilo_reader import average_ceilo_data, read_ceilometer_data
 
     f = _PAYERNE_MAR / f"L1_0-20000-0-06610_{letter}20260306.nc"
     if not f.is_file():
