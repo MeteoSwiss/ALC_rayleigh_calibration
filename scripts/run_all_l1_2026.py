@@ -275,7 +275,7 @@ def _make_shared_reader(s):
             try:
                 idd = load_instrument_day(
                     night, s["type"], CAMS, cams_folder_fallback=fb,
-                    read_cams=False, build_working=False)  # rayleigh/cloud use .native
+                    read_cams=False, build_working=True)  # all passes use the coarse .working
             except Exception:  # noqa: BLE001 - a bad read falls back to each step's own load
                 idd = None
         if len(cache) >= 3:  # bound memory (daily run = 1 day; backfill degrades gracefully)
@@ -305,7 +305,7 @@ def _do_rayleigh(s, start, end, shared=None):
         try:
             idd = shared(ds) if shared is not None else None
             r = calibrate_rayleigh(
-                ds, info, o, preloaded_data=(idd.native if idd is not None else None))
+                ds, info, o, preloaded_data=(idd.working if idd is not None else None))
             rows.append(dict(date=ds, method="rayleigh", flag=r.flag, cal_value=r.lidar_constant,
                              uncertainty=r.uncertainty, n_profiles="",
                              bottom_height=r.calibration_bottom_height,
@@ -343,14 +343,20 @@ def _do_cloud(s, start, end, shared=None):
                 cams_folder_fallback=(str(CAMS_FALLBACK) if CAMS_FALLBACK else ""),
                 wv_source=WV_SOURCE, era5_cache=ERA5_CACHE,
                 station_latitude=s["lat"], station_longitude=s["lon"],
-                average_time_s=30.0, average_range_m=10.0,   # finer cadence -> more valid cloud cals
+                # No separate averaging: the shared read is already the coarse 30 s/10 m grid.
+                average_time_s=0.0, average_range_m=0.0,
             ))
             # Read FIRST so we can tell NO DATA (file present but no usable signal -> flag 0)
             # apart from NO CLOUD (data fine, but clear sky / no liquid cloud -> flag -1).
             idd = shared(ds) if shared is not None else None
+            if idd is None:  # shared read unavailable -> load just this day (still coarse)
+                idd = load_instrument_day(
+                    [str(fp)], s["type"], CAMS,
+                    cams_folder_fallback=(str(CAMS_FALLBACK) if CAMS_FALLBACK else ""),
+                    read_cams=False, build_working=True)
             if idd is not None:
-                # Read-once: cloud consumes the shared night read, sliced to this UTC day
-                # (validated bit-identical to read_ceilometer_data(this file)).
+                # Read-once: cloud consumes the shared coarse read (30 s/10 m), sliced to this UTC
+                # day -- cloud no longer averages separately (config average_time_s/range = 0).
                 data, status = _ceilo_from_shared(idd.slice_to_date(d), cfg), 0
             else:
                 data, status = read_ceilometer_data(cfg.nc_file, cfg)

@@ -263,10 +263,11 @@ def _ceilo_from_shared(idd, config: "CloudCalConfig") -> "CeiloData":
     on the L1 read-once path (E-PROFILE L1 rcs_0 carries no per-file constant, and its quality
     flag is stored (time, range) so ``read_ceilometer_data`` drops it -- a documented no-op).
 
-    ``idd`` is taken duck-typed (only ``.native`` / ``.rcs_units`` / ``.instrument_type``) to
-    avoid a cloud <-> io.instrument_day import cycle.
+    ``idd`` is taken duck-typed (only ``.working`` / ``.rcs_units`` / ``.instrument_type``) to
+    avoid a cloud <-> io.instrument_day import cycle. Uses the coarse ``working`` grid (30 s/10 m)
+    -- the same data the other passes use -- so cloud no longer averages separately.
     """
-    native = idd.native
+    native = idd.working
     units = idd.rcs_units
     config.instrument = idd.instrument_type.value
 

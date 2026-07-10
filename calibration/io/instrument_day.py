@@ -76,16 +76,19 @@ def _read_meta(path: Path) -> Tuple[Optional[str], Optional[float]]:
 class InstrumentDayData:
     """One instrument-day, read once and shared across every processing step.
 
-    ``native`` is full resolution; ``working`` is the dynamically bin-averaged grid every
-    downstream step should consume -- except the sensitivity/OmB noise metrics, which read
-    ``native`` so block-averaging does not understate the per-gate noise. The CAMS closest
-    cell (all time steps) and the once-computed WV transmission ride along.
+    ``working`` is the coarse (default 30 s / 10 m) grid that EVERY downstream step consumes --
+    Rayleigh, cloud, OmB and sensitivity all run on it, so the whole network shares one uniform
+    resolution and one averaging pass (cloud no longer averages separately). ``native`` is kept
+    only so a day-slice can be re-coarsened cleanly (``slice_to_date``). The CAMS closest cell
+    and the once-computed WV transmission ride along.
     """
 
     instrument_type: InstrumentType
     wavelength_nm: float
     rcs_units: Optional[str]              # units of the L1 rcs_0 (for cloud's beta reconstruction)
     wavelength_nm_file: Optional[float]   # the file's l0_wavelength (for OmB/sensitivity)
+    target_range_m: float                 # coarse-grid config, so a slice can re-coarsen per day
+    target_time_s: float
     native: CeilometerData
     working: CeilometerData
     coarsen: Tuple[int, int]              # (time_factor, range_factor) applied to `working`
@@ -142,8 +145,13 @@ class InstrumentDayData:
             calibration_pulse=_sl(n.calibration_pulse),
             vertical_visibility=_sl(n.vertical_visibility),
         )
+        # Re-coarsen the single day (not a slice of the coarse night) so day-scoped consumers
+        # get a clean 30 s/10 m grid with no D-1/D boundary block.
+        working = average_ceilometer_data(
+            sliced, average_time_s=self.target_time_s, average_range_m=self.target_range_m
+        )
         return dataclasses.replace(
-            self, native=sliced, working=sliced,
+            self, native=sliced, working=working,
             cams_time_num=None, cams_z_asl=None, cams_temperature=None, cams_nw=None,
             wv_transmission=None,
         )
@@ -154,9 +162,10 @@ class InstrumentDayData:
         Matches ``calibration.io.l1_window.load_l1_window`` field for field: float32 ``rcs``,
         lowest cloud base (with the Vaisala ``vertical_visibility`` floor), the file
         ``l0_wavelength``, time-sorted -- so OmB/sensitivity can consume the shared read
-        instead of re-opening the file.
+        instead of re-opening the file. Built from the coarse ``working`` grid (30 s/10 m), the
+        same data the calibrations use.
         """
-        n = self.native
+        n = self.working
         days = np.asarray(n.time, dtype="float64")
         time = np.datetime64("1970-01-01") + (days * 86400.0 * 1e9).astype("timedelta64[ns]")
         rcs = np.asarray(n.rcs, dtype="float32")
@@ -345,6 +354,8 @@ def load_instrument_day(
         wavelength_nm=itype.wavelength_nm,
         rcs_units=rcs_units,
         wavelength_nm_file=wl_file,
+        target_range_m=target_range_m,
+        target_time_s=target_time_s,
         native=native,
         working=working,
         coarsen=factors,
