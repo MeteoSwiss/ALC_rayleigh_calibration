@@ -71,6 +71,11 @@ class CeilometerData:
     # quality instead) → NaN-filled here, which the < threshold test treats as "keep".
     laser_energy: Optional[NDArray[np.float64]] = None
 
+    # Linear volume depolarization ratio (time x range), CL61 only (``linear_depol_ratio``);
+    # None for the single-channel instruments. Carried for the Cloudnet target classification
+    # (the ice/liquid split); NaN where the L1 masks it.
+    depol: Optional[NDArray[np.float64]] = None
+
     # L2 only: median ``calibration_constant_0`` baked into the file (the Wiegner C_L
     # already applied). None for L1 (rcs_0 carries no per-file constant). Lets the cloud
     # method report an absolute C_L on L2 input; see cloud ``build_cloud_input``.
@@ -242,6 +247,7 @@ def load_l1_data(
     cal_pulse_list = []
     vert_vis_list = []
     laser_energy_list = []
+    depol_list = []
 
     range_alc = None
     altitude = None
@@ -279,6 +285,13 @@ def load_l1_data(
 
             # Range-corrected signal
             rcs_list.append(data.variables['rcs_0'][:])
+
+            # Linear depolarization (CL61 only), time x range; NaN where masked.
+            if 'linear_depol_ratio' in data.variables:
+                depol_list.append(np.ma.filled(
+                    np.ma.masked_invalid(np.asarray(data.variables['linear_depol_ratio'][:], dtype="f8")), np.nan))
+            else:
+                depol_list.append(None)
 
             # Cloud base height
             cbh_list.append(data.variables['cloud_base_height'][:])
@@ -347,6 +360,9 @@ def load_l1_data(
     cal_pulse = np.concatenate(cal_pulse_list)
     vert_vis = np.concatenate(vert_vis_list)
     laser_energy = np.concatenate(laser_energy_list)
+    # Depolarization: concatenate only if every file carried it (CL61); else None.
+    depol = (np.concatenate(depol_list, axis=0)
+             if depol_list and all(d is not None for d in depol_list) else None)
 
     # Convert time to datetime
     try:
@@ -379,6 +395,7 @@ def load_l1_data(
         calibration_pulse=cal_pulse,
         vertical_visibility=vert_vis,
         laser_energy=laser_energy,
+        depol=depol,
         optical_module_id=om_id,
         instrument_serial_number=serial,
         instrument_firmware_version=firmware,
@@ -764,6 +781,7 @@ def average_ceilometer_data(
         time_units=data.time_units,
         vertical_visibility=(None if data.vertical_visibility is None else np.asarray(data.vertical_visibility, dtype="float64").copy()),
         laser_energy=(None if data.laser_energy is None else np.asarray(data.laser_energy, dtype="float64").copy()),
+        depol=(None if data.depol is None else np.asarray(data.depol, dtype="float64").copy()),
         calibration_constant_applied=data.calibration_constant_applied,
     )
 
@@ -796,6 +814,8 @@ def average_ceilometer_data(
                     out.vertical_visibility = _block_reduce_mean(out.vertical_visibility, time_factor, axis=0)
                 if out.laser_energy is not None and out.laser_energy.size:
                     out.laser_energy = _block_reduce_mean(out.laser_energy, time_factor, axis=0)
+                if out.depol is not None and out.depol.size:
+                    out.depol = _block_reduce_mean(out.depol, time_factor, axis=0)
                 out.rcs = _block_reduce_mean(out.rcs, time_factor, axis=0)
 
     if len(out.range_alc) > 1 and average_range_m is not None and average_range_m > 0:
@@ -807,6 +827,8 @@ def average_ceilometer_data(
                 out.range_alc = _block_reduce_mean(out.range_alc, range_factor, axis=0)
                 out.altitude_grid = out.range_alc + out.altitude
                 out.rcs = _block_reduce_mean(out.rcs, range_factor, axis=1)
+                if out.depol is not None and out.depol.size:
+                    out.depol = _block_reduce_mean(out.depol, range_factor, axis=1)
 
     return out
 
