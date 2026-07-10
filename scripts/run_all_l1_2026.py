@@ -82,7 +82,9 @@ from calibration import (  # noqa: E402
 from calibration.config import InstrumentType  # noqa: E402
 from calibration.cloud import CloudCalConfig  # noqa: E402
 from calibration.cloud.calibration import (  # noqa: E402
-    read_ceilometer_data, liquid_cloud_calibration_from_data, set_defaults)
+    read_ceilometer_data, liquid_cloud_calibration_from_data, set_defaults, _ceilo_from_shared)
+from calibration.io.data_loader import build_file_paths  # noqa: E402
+from calibration.io.instrument_day import load_instrument_day  # noqa: E402
 from calibration.flags import cloud_flag, flag_label, dominant_cloud_reject_flag  # noqa: E402
 from calibration.io.output import write_calibration_result, strip_calibration_method  # noqa: E402
 from calibration.plotting import plot_cloud_diagnostics_compact  # noqa: E402
@@ -249,8 +251,42 @@ def _emit_period_products(sdir, key, png_prefix, csv_name, fields, aggregate_fn,
     return all_row
 
 
+# --- Read-once: one L1 read per day, shared across Rayleigh + cloud ----------
+def _make_shared_reader(s):
+    """Per-stream reader: load the night ``[D-1, D]`` union ONCE per day (small cache) so the
+    Rayleigh pass (uses ``.native``) and the cloud pass (uses ``.slice_to_date``) share a
+    single L1 read in the daily run. ``read_cams=False`` -- the cloud WV correction reads CAMS
+    itself. Returns ``get(ds) -> InstrumentDayData | None`` (None if the night has no files or
+    the load fails, so each step falls back to its own read).
+    """
+    info = _info(s)
+    o = CalibrationOptions.from_json(REPO / "options.json")
+    o.folder_root = L1_ROOT
+    o.data_level = DataLevel.L1
+    fb = str(CAMS_FALLBACK) if CAMS_FALLBACK else ""
+    cache: dict = {}
+
+    def get(ds):
+        if ds in cache:
+            return cache[ds]
+        night = [str(f) for f in build_file_paths(ds, info, o) if f.exists()]
+        idd = None
+        if night:
+            try:
+                idd = load_instrument_day(
+                    night, s["type"], CAMS, cams_folder_fallback=fb, read_cams=False)
+            except Exception:  # noqa: BLE001 - a bad read falls back to each step's own load
+                idd = None
+        if len(cache) >= 3:  # bound memory (daily run = 1 day; backfill degrades gracefully)
+            cache.clear()
+        cache[ds] = idd
+        return idd
+
+    return get
+
+
 # --- Rayleigh (per night) ---------------------------------------------------
-def _do_rayleigh(s, start, end):
+def _do_rayleigh(s, start, end, shared=None):
     info = _info(s)
     key = _key(s)
     o = CalibrationOptions.from_json(REPO / "options.json")
@@ -266,7 +302,9 @@ def _do_rayleigh(s, start, end):
             continue
         ds = d.strftime("%Y%m%d")
         try:
-            r = calibrate_rayleigh(ds, info, o)
+            idd = shared(ds) if shared is not None else None
+            r = calibrate_rayleigh(
+                ds, info, o, preloaded_data=(idd.native if idd is not None else None))
             rows.append(dict(date=ds, method="rayleigh", flag=r.flag, cal_value=r.lidar_constant,
                              uncertainty=r.uncertainty, n_profiles="",
                              bottom_height=r.calibration_bottom_height,
@@ -279,7 +317,7 @@ def _do_rayleigh(s, start, end):
 
 
 # --- Cloud (per day) --------------------------------------------------------
-def _do_cloud(s, start, end):
+def _do_cloud(s, start, end, shared=None):
     info = _info(s)
     key = _key(s)
     # Drop any cloud (method=1) rows already in the NetCDF for THIS date window, so a re-run leaves no
@@ -308,7 +346,13 @@ def _do_cloud(s, start, end):
             ))
             # Read FIRST so we can tell NO DATA (file present but no usable signal -> flag 0)
             # apart from NO CLOUD (data fine, but clear sky / no liquid cloud -> flag -1).
-            data, status = read_ceilometer_data(cfg.nc_file, cfg)
+            idd = shared(ds) if shared is not None else None
+            if idd is not None:
+                # Read-once: cloud consumes the shared night read, sliced to this UTC day
+                # (validated bit-identical to read_ceilometer_data(this file)).
+                data, status = _ceilo_from_shared(idd.slice_to_date(d), cfg), 0
+            else:
+                data, status = read_ceilometer_data(cfg.nc_file, cfg)
             beta = getattr(data, "beta", None) if data is not None else None
             if status != 0 or beta is None or not np.any(np.isfinite(np.asarray(beta, dtype=float))):
                 rows.append(dict(date=ds, method="cloud", flag=0, cal_value=-1, uncertainty=0,
@@ -887,10 +931,13 @@ def _process_stream(payload):
     # --no-cal reuses the EXISTING calibration + Kalman (for a sens/omb-only pass);
     # otherwise (re)compute the per-night calibration, Kalman best estimate and HK.
     if not no_cal:
+        # One shared night [D-1, D] read per day feeds both Rayleigh (.native) and cloud
+        # (.slice_to_date) -- one L1 open instead of two.
+        shared = _make_shared_reader(s)
         if "rayleigh" in methods and s["type"] in RAYLEIGH_TYPES:
-            rows += _do_rayleigh(s, start, end)
+            rows += _do_rayleigh(s, start, end, shared)
         if "cloud" in methods and s["type"] in CLOUD_TYPES:
-            rows += _do_cloud(s, start, end)
+            rows += _do_cloud(s, start, end, shared)
         if rows:
             # keep prior rows outside the processed window (and other methods) so daily/partial
             # runs accumulate history instead of overwriting with just the processed dates

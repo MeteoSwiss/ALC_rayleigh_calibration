@@ -155,6 +155,34 @@ def test_ceilo_from_shared_beta_matches_reader():
     assert np.array_equal(np.asarray(ref.range), np.asarray(mine.range))
 
 
+@pytest.mark.skipif(not BUNDLED_L1.is_file(), reason="bundled CL61 L1 not present")
+def test_slice_to_date_matches_full_day():
+    """slice_to_date keeps a single UTC day's profiles, and the cloud beta rebuilt from the
+    slice still matches read_ceilometer_data -- so a night [D-1,D] read can feed the day-D
+    cloud pass."""
+    from calibration.cloud.calibration import (
+        CloudCalConfig,
+        _ceilo_from_shared,
+        read_ceilometer_data,
+        set_defaults,
+    )
+
+    idd = load_instrument_day([BUNDLED_L1], "CL61", CAMS_DIR, read_cams=False)
+    # UTC date from time (days since 1970); time_datetime may be cftime, not datetime.
+    day0 = int(np.floor(float(np.asarray(idd.native.time)[0])))
+    date = dt.date(1970, 1, 1) + dt.timedelta(days=day0)
+    sliced = idd.slice_to_date(date)
+    assert sliced.native.rcs.shape == idd.native.rcs.shape  # all profiles kept
+
+    ref, _ = read_ceilometer_data(
+        str(BUNDLED_L1), set_defaults(CloudCalConfig(instrument="CL61"))
+    )
+    mine = _ceilo_from_shared(sliced, set_defaults(CloudCalConfig(instrument="CL61")))
+    fa, fb = np.isfinite(ref.beta), np.isfinite(mine.beta)
+    assert np.array_equal(fa, fb)
+    assert np.array_equal(ref.beta[fa], mine.beta[fb])
+
+
 _PAYERNE_MAR = Path(r"D:\E-PROFILE_L1_2026\0-20000-0-06610\2026\03")
 
 

@@ -23,6 +23,8 @@ otherwise understate the instrument's true detection limit.
 
 from __future__ import annotations
 
+import dataclasses
+import datetime as dt
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -99,6 +101,46 @@ class InstrumentDayData:
     @property
     def altitude(self) -> float:
         return self.native.altitude
+
+    def slice_to_date(self, date: dt.date) -> "InstrumentDayData":
+        """A view whose ``native`` profiles are restricted to one UTC date.
+
+        Day-scoped consumers (cloud, monitoring) take this slice of the night ``[D-1, D]``
+        union read, so the files are opened once for the whole night yet each service sees
+        only its day. Only ``native`` is sliced; the working grid / CAMS cell / WV transmission
+        are dropped (rebuild if a sliced consumer needs them -- cloud does not).
+        """
+        n = self.native
+        t_days = np.asarray(n.time, dtype="float64")  # UTC days since 1970-01-01
+        day0 = int((np.datetime64(date) - np.datetime64("1970-01-01")).astype("timedelta64[D]").astype(int))
+        idx = np.nonzero(np.floor(t_days).astype("int64") == day0)[0]
+
+        def _sl(a):
+            if a is None:
+                return None
+            arr = np.asarray(a)
+            return arr[idx] if arr.ndim >= 1 and arr.shape[0] == t_days.size else a
+
+        sliced = dataclasses.replace(
+            n,
+            time=_sl(n.time),
+            time_datetime=[n.time_datetime[i] for i in idx],
+            hours_since_start=_sl(n.hours_since_start),
+            rcs=_sl(n.rcs),
+            cbh=_sl(n.cbh),
+            temperature_optical_module=_sl(n.temperature_optical_module),
+            window_transmission=_sl(n.window_transmission),
+            status_laser=_sl(n.status_laser),
+            status_detector=_sl(n.status_detector),
+            laser_life_time=_sl(n.laser_life_time),
+            calibration_pulse=_sl(n.calibration_pulse),
+            vertical_visibility=_sl(n.vertical_visibility),
+        )
+        return dataclasses.replace(
+            self, native=sliced, working=sliced,
+            cams_time_num=None, cams_z_asl=None, cams_temperature=None, cams_nw=None,
+            wv_transmission=None,
+        )
 
 
 def _applied_factors(
