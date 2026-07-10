@@ -55,16 +55,21 @@ _BETA_VARS = (
 )
 
 
-def _read_rcs_units(path: Path) -> Optional[str]:
-    """Units of the L1 backscatter variable (attribute-only read; no arrays materialized)."""
+def _read_meta(path: Path) -> Tuple[Optional[str], Optional[float]]:
+    """rcs_0 units (for cloud's beta) and l0_wavelength (for OmB/sensitivity), attribute-only."""
+    units: Optional[str] = None
+    wl: Optional[float] = None
     try:
         with netCDF4.Dataset(str(path)) as nc:
             for nm in _BETA_VARS:
                 if nm in nc.variables:
-                    return getattr(nc.variables[nm], "units", None)
+                    units = getattr(nc.variables[nm], "units", None)
+                    break
+            if "l0_wavelength" in nc.variables:
+                wl = float(np.asarray(nc.variables["l0_wavelength"][...]).ravel()[0])
     except OSError:
-        return None
-    return None
+        pass
+    return units, wl
 
 
 @dataclass
@@ -80,6 +85,7 @@ class InstrumentDayData:
     instrument_type: InstrumentType
     wavelength_nm: float
     rcs_units: Optional[str]              # units of the L1 rcs_0 (for cloud's beta reconstruction)
+    wavelength_nm_file: Optional[float]   # the file's l0_wavelength (for OmB/sensitivity)
     native: CeilometerData
     working: CeilometerData
     coarsen: Tuple[int, int]              # (time_factor, range_factor) applied to `working`
@@ -140,6 +146,36 @@ class InstrumentDayData:
             self, native=sliced, working=sliced,
             cams_time_num=None, cams_z_asl=None, cams_temperature=None, cams_nw=None,
             wv_transmission=None,
+        )
+
+    def to_omb_dict(self) -> dict:
+        """The ``load_l1_window`` dict (OmB / sensitivity input) built from this native read.
+
+        Matches ``calibration.io.l1_window.load_l1_window`` field for field: float32 ``rcs``,
+        lowest cloud base (with the Vaisala ``vertical_visibility`` floor), the file
+        ``l0_wavelength``, time-sorted -- so OmB/sensitivity can consume the shared read
+        instead of re-opening the file.
+        """
+        n = self.native
+        days = np.asarray(n.time, dtype="float64")
+        time = np.datetime64("1970-01-01") + (days * 86400.0 * 1e9).astype("timedelta64[ns]")
+        rcs = np.asarray(n.rcs, dtype="float32")
+        cb = np.asarray(n.cbh, dtype="float64")
+        cb = np.where(cb > 0, cb, np.nan)
+        with np.errstate(invalid="ignore"):
+            cbh = np.nanmin(cb, axis=1) if cb.ndim == 2 else cb
+        vv = n.vertical_visibility
+        if vv is not None:
+            vis = np.asarray(vv, dtype="float64").reshape(-1)
+            vis = np.where(vis > 0, vis, np.nan)
+            if vis.size == cbh.size:
+                cbh = np.fmin(cbh, vis)  # fmin ignores NaN: vis where clear, min where both
+        order = np.argsort(time)
+        wl = self.wavelength_nm_file if self.wavelength_nm_file is not None else self.wavelength_nm
+        return dict(
+            time=time[order], rcs=rcs[order], cbh=cbh[order],
+            range=np.asarray(n.range_alc, dtype="float64"), wl=wl,
+            lat=float(n.latitude), lon=float(n.longitude), alt=float(n.altitude),
         )
 
 
@@ -263,7 +299,7 @@ def load_instrument_day(
     native = load_l1_data([Path(p) for p in l1_paths], itype)
     if native is None:
         return None
-    rcs_units = _read_rcs_units(Path(l1_paths[0]))
+    rcs_units, wl_file = _read_meta(Path(l1_paths[0]))
 
     # The coarsened working grid is only needed by consumers that classify (or otherwise want
     # the reduced grid). Rayleigh/cloud/OmB/sensitivity all use `native`, so building it there
@@ -305,6 +341,7 @@ def load_instrument_day(
         instrument_type=itype,
         wavelength_nm=itype.wavelength_nm,
         rcs_units=rcs_units,
+        wavelength_nm_file=wl_file,
         native=native,
         working=working,
         coarsen=factors,

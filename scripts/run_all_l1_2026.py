@@ -743,7 +743,7 @@ def _cache_coverage_regression(key, sdir, cache_name, output_name):
     return False  # brand-new station (no cache, no output) -> proceed normally
 
 
-def _do_omb(s, start, end, kalman_rows):
+def _do_omb(s, start, end, kalman_rows, shared=None):
     """Observation-minus-Background vs CAMS (operational + our-calibrated). Writes
     <key>_omb.png and a one-row <key>_omb.csv. Returns the summary row or None."""
     from calibration.cloud.calibration import INSTRUMENT_CAL_DEFAULT
@@ -763,31 +763,27 @@ def _do_omb(s, start, end, kalman_rows):
     op_map = _op_map(s, start, end)          # date -> operational C_L (cheap, L1-independent)
     sdir = OUT / key
     from calibration.incremental import omb_cache_update, omb_cache_aggregate
-    # Process MONTH BY MONTH and stitch (mirrors _do_sens): loading a whole multi-month window at
-    # once OOMs on high-rate stations (CL61 17 months > 96 GB at the concatenate peak). It is also
-    # REQUIRED for correctness -- the OmB CAMS archive is monthly, so each month must be matched
-    # against its OWN CAMS file, not just the end month's. Each month (~1 GB of L1) is loaded,
-    # reduced to OmB cache columns, then freed; the cache de-dups/accumulates across months.
+    # Process DAY BY DAY -- the same mechanism as the Rayleigh/cloud passes -- so OmB consumes the
+    # shared per-day read and never loads a whole month at once. Each day is reduced to its OmB cache
+    # columns (de-duped by CAMS timestamp), so the day-loop stitches to exactly the same cache as the
+    # old month-loop. CAMS resolves per day to that day's monthly file (0.4 deg, then the 1 deg
+    # fallback); both must carry aerosol backscatter (aerbackscatgnd*).
     any_update = False
-    m0 = datetime(start.year, start.month, 1)
-    while m0 <= end:
-        m_end = (datetime(m0.year + (m0.month == 12), (m0.month % 12) + 1, 1)
-                 - timedelta(days=1))
-        ws, we = max(m0, start), min(m_end, end)
-        m0 = m_end + timedelta(days=1)       # advance first so every `continue` below is safe
-        # OmB CAMS for THIS month: prefer the 0.4 deg archive (ALC_CAMS_DIR), else the coarser 1 deg
-        # fallback (ALC_CAMS_DIR_FALLBACK). Both must carry aerosol backscatter (aerbackscatgnd*).
+    for d in _days(start, end):
+        ds8 = d.strftime("%Y%m%d")
         cams = None
         for _folder in (CAMS, CAMS_FALLBACK):
             if _folder is None:
                 continue
-            _c = find_cams_file(_folder, we.strftime("%Y%m%d"))
+            _c = find_cams_file(_folder, ds8)
             if _c is not None and _has_backscatter(_c):
                 cams = _c
                 break
         if cams is None:
-            continue  # no CAMS-with-backscatter for this month -> skip it
-        data = _load_l1_window(s, ws, we)
+            continue  # no CAMS-with-backscatter for this day's month -> skip it
+        idd = shared(ds8) if shared is not None else None
+        data = (idd.slice_to_date(d).to_omb_dict() if idd is not None
+                else _load_l1_window(s, d, d))
         if data is None:
             continue
         c_ours = _const_per_profile(data["time"], kmap, default)
@@ -834,7 +830,7 @@ def _do_omb(s, start, end, kalman_rows):
         span_min=span_min, span_max=span_max)
 
 
-def _do_sens(s, start, end, kalman_rows):
+def _do_sens(s, start, end, kalman_rows, shared=None):
     """Per-day noise -> detection thresholds over the window. Writes <key>_sens.png
     and a one-row <key>_sens.csv (headline ICAO detection altitude)."""
     from calibration.cloud.calibration import INSTRUMENT_CAL_DEFAULT
@@ -850,16 +846,15 @@ def _do_sens(s, start, end, kalman_rows):
     if not kmap:
         return None  # no calibrated C_L -> skip (sensitivity scale depends on it)
     default = INSTRUMENT_CAL_DEFAULT.get(itype, 1.0)
-    # Process MONTH BY MONTH and stitch: loading a whole multi-month window at once OOMs
-    # (CL61 17 months > 64 GB even in float32, mostly the concatenate peak). Each month
-    # (~1 GB) is loaded, reduced to its daily beta_min columns, then freed.
+    # Process DAY BY DAY -- the same mechanism as the Rayleigh/cloud passes -- so sensitivity consumes
+    # the shared per-day read and never loads a whole month at once. sensitivity_over_period bins by
+    # day internally, so per-day parts stitch to exactly the same per-date cache as the old month-loop.
     parts = []
-    m0 = datetime(start.year, start.month, 1)
-    while m0 <= end:
-        m_end = (datetime(m0.year + (m0.month == 12), (m0.month % 12) + 1, 1)
-                 - timedelta(days=1))
-        ws, we = max(m0, start), min(m_end, end)
-        data = _load_l1_window(s, ws, we)
+    for d in _days(start, end):
+        ds8 = d.strftime("%Y%m%d")
+        idd = shared(ds8) if shared is not None else None
+        data = (idd.slice_to_date(d).to_omb_dict() if idd is not None
+                else _load_l1_window(s, d, d))
         if data is not None:
             c = _const_per_profile(data["time"], kmap, default).astype("float32")
             beta = (data["rcs"] / c[:, None]) * np.float32(1e6)  # Mm^-1 sr^-1
@@ -867,7 +862,6 @@ def _do_sens(s, start, end, kalman_rows):
                 time=data["time"], beta=beta, range_agl=data["range"], cbh=data["cbh"],
                 lat=data["lat"], lon=data["lon"], wavelength=data["wl"]))
             del data, beta
-        m0 = m_end + timedelta(days=1)
     from calibration.incremental import sens_cache_update, sens_cache_aggregate
     sdir = OUT / key
     for _p in parts:
@@ -929,12 +923,12 @@ def _process_stream(payload):
 
     rows = []
     n_ok = 0
+    # One shared night [D-1, D] read per day feeds every pass that needs the L1: Rayleigh
+    # (.native), cloud (.slice_to_date) and OmB/sensitivity (.slice_to_date().to_omb_dict()).
+    shared = _make_shared_reader(s)
     # --no-cal reuses the EXISTING calibration + Kalman (for a sens/omb-only pass);
     # otherwise (re)compute the per-night calibration, Kalman best estimate and HK.
     if not no_cal:
-        # One shared night [D-1, D] read per day feeds both Rayleigh (.native) and cloud
-        # (.slice_to_date) -- one L1 open instead of two.
-        shared = _make_shared_reader(s)
         if "rayleigh" in methods and s["type"] in RAYLEIGH_TYPES:
             rows += _do_rayleigh(s, start, end, shared)
         if "cloud" in methods and s["type"] in CLOUD_TYPES:
@@ -956,9 +950,9 @@ def _process_stream(payload):
         kalman_rows = _kalman_rows(rows) if rows else _read_kalman_csv(sdir / f"{key}_kalman.csv")
         try:
             if do_omb:
-                _do_omb(s, start, end, kalman_rows)
+                _do_omb(s, start, end, kalman_rows, shared)
             if do_sens:
-                _do_sens(s, start, end, kalman_rows)
+                _do_sens(s, start, end, kalman_rows, shared)
         except Exception as exc:  # noqa: BLE001 - an add-on failure must not lose the calibration
             print(f"{key}: sens/omb failed: {type(exc).__name__}: {exc}", flush=True)
 
