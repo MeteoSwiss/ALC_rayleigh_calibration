@@ -261,7 +261,7 @@ def load_instrument_day(
     wv_source: str = "cams",
     era5_cache: str = "",
     target_range_m: float = 10.0,
-    target_time_s: float = 15.0,
+    target_time_s: float = 30.0,
     read_cams: bool = True,
     auto_download_cams: bool = False,
     build_working: bool = True,
@@ -279,7 +279,10 @@ def load_instrument_day(
     wv_lut : str/Path
         Absorption cross-section LUT; ``""`` uses the bundled 910 nm LUT.
     target_range_m, target_time_s : float
-        Working-grid config (default 10 m / 15 s). The block factor is derived per file.
+        Working-grid config (default 10 m / 30 s). The block factor is derived per file.
+        30 s makes every instrument uniform (only CHM15k is finer, at 15 s) and shifts its
+        classification by <1 pp; calibration/OmB/sensitivity run on `native`, so it does not
+        affect them.
     read_cams : bool
         Read the CAMS cell + compute WV. Set ``False`` to only load/coarsen L1.
     auto_download_cams : bool
