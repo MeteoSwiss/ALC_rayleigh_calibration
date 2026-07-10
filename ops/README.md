@@ -20,7 +20,7 @@ Everything is driven by `ALC_*` env vars set in **`ops/config.sh`** — the only
    ```bash
    git clone <repo> ~/ALC_rayleigh_calibration && cd ~/ALC_rayleigh_calibration
    python3 -m venv .venv && . .venv/bin/activate
-   pip install -r requirements.txt
+   pip install -e ".[dashboard,download]"
    ```
    `cfgrib` converts the CAMS GRIB to netCDF in pure Python — **no conda, no system eccodes, no
    `grib_to_netcdf` CLI** needed.
