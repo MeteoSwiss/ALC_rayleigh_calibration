@@ -28,6 +28,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import List, Optional, Tuple, Union
 
+import netCDF4
 import numpy as np
 from numpy.typing import NDArray
 
@@ -43,6 +44,26 @@ _MATLAB_DATENUM_1970 = 719529.0
 # negligible WV absorption and skips it.
 _WV_WAVELENGTHS_NM = {910.0}
 
+# Backscatter variable names in the order read_ceilometer_data picks them; for an L1 file
+# this resolves to rcs_0 (the same variable load_l1_data reads), so its units drive cloud's
+# beta reconstruction (see _ceilo_from_shared).
+_BETA_VARS = (
+    "attenuated_backscatter_0", "rcs_0", "beta", "beta_raw",
+    "attenuated_backscatter", "beta_att",
+)
+
+
+def _read_rcs_units(path: Path) -> Optional[str]:
+    """Units of the L1 backscatter variable (attribute-only read; no arrays materialized)."""
+    try:
+        with netCDF4.Dataset(str(path)) as nc:
+            for nm in _BETA_VARS:
+                if nm in nc.variables:
+                    return getattr(nc.variables[nm], "units", None)
+    except OSError:
+        return None
+    return None
+
 
 @dataclass
 class InstrumentDayData:
@@ -56,6 +77,7 @@ class InstrumentDayData:
 
     instrument_type: InstrumentType
     wavelength_nm: float
+    rcs_units: Optional[str]              # units of the L1 rcs_0 (for cloud's beta reconstruction)
     native: CeilometerData
     working: CeilometerData
     coarsen: Tuple[int, int]              # (time_factor, range_factor) applied to `working`
@@ -198,6 +220,7 @@ def load_instrument_day(
     native = load_l1_data([Path(p) for p in l1_paths], itype)
     if native is None:
         return None
+    rcs_units = _read_rcs_units(Path(l1_paths[0]))
 
     working = average_ceilometer_data(
         native, average_time_s=target_time_s, average_range_m=target_range_m
@@ -233,6 +256,7 @@ def load_instrument_day(
     return InstrumentDayData(
         instrument_type=itype,
         wavelength_nm=itype.wavelength_nm,
+        rcs_units=rcs_units,
         native=native,
         working=working,
         coarsen=factors,

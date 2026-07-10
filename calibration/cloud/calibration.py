@@ -254,6 +254,64 @@ class CeiloData:
     calibration_constant_applied: Optional[float] = None
 
 
+def _ceilo_from_shared(idd, config: "CloudCalConfig") -> "CeiloData":
+    """Build the cloud ``CeiloData`` from a shared ``InstrumentDayData`` (read-once path).
+
+    Reproduces ``read_ceilometer_data``'s beta reconstruction from the already-loaded rcs_0:
+    ``beta = rcs_0 * unit_factor / C`` oriented (range, time). The remaining fields are copied
+    from the shared object; ``quality_flag`` and ``calibration_constant_applied`` are ``None``
+    on the L1 read-once path (E-PROFILE L1 rcs_0 carries no per-file constant, and its quality
+    flag is stored (time, range) so ``read_ceilometer_data`` drops it -- a documented no-op).
+
+    ``idd`` is taken duck-typed (only ``.native`` / ``.rcs_units`` / ``.instrument_type``) to
+    avoid a cloud <-> io.instrument_day import cycle.
+    """
+    native = idd.native
+    units = idd.rcs_units
+    config.instrument = idd.instrument_type.value
+
+    # beta: same unit factor and (for raw signals) division by the calibration constant that
+    # read_ceilometer_data applies, then the identical (range, time) orientation.
+    factor = _beta_conversion_factor(config.instrument, units)
+    beta = np.ma.filled(np.ma.masked_invalid(np.asarray(native.rcs, dtype="float64")), np.nan)
+    beta = beta * factor
+    if _is_raw_signal(units):
+        raw_ccal = config.calibration_constant
+        if raw_ccal is None:
+            raw_ccal = INSTRUMENT_CAL_DEFAULT.get(config.instrument, 1.0)
+        if raw_ccal and np.isfinite(raw_ccal) and raw_ccal != 0:
+            beta = beta / raw_ccal
+    beta = np.ascontiguousarray(beta.T)  # (range, time)
+
+    # cbh: lowest layer, clipped -- read_ceilometer_data keeps the first layer.
+    cbh = np.asarray(native.cbh, dtype="float64")
+    if cbh.ndim == 2:
+        cbh = cbh[:, 0]
+    cbh = cbh.copy()
+    cbh[(cbh < 0) | (cbh > 20000)] = np.nan
+
+    rng = np.asarray(native.range_alc, dtype="float64")
+    range_resol = float(rng[1] - rng[0]) if rng.size > 1 else float("nan")
+    time_dt = np.asarray(native.time_datetime, dtype="datetime64[ns]")
+    wt = getattr(native, "window_transmission", None)
+    return CeiloData(
+        time=time_dt,
+        time_num=_matlab_datenum(time_dt),
+        station_altitude=float(native.altitude),
+        station_latitude=float(native.latitude),
+        station_longitude=float(native.longitude),
+        range=rng,
+        range_resol=range_resol,
+        beta=beta,
+        cbh=cbh,
+        quality_flag=None,
+        window_transmission=(None if wt is None else np.asarray(wt, dtype="float64").ravel()),
+        laser_energy=None,
+        trans2_wv=None,
+        calibration_constant_applied=None,
+    )
+
+
 def _matlab_datenum(dt64: NDArray) -> NDArray:
     """Convert numpy datetime64 to MATLAB datenum (days since 0000-00-00 proleptic).
 

@@ -125,3 +125,58 @@ def test_wv_transmission_once_matches_production():
     )
     ref = compute_wv_transmission(view, cfg)
     assert np.array_equal(ref, wv)
+
+
+# ------------------------------------------------ cloud: _ceilo_from_shared
+
+
+@pytest.mark.skipif(not BUNDLED_L1.is_file(), reason="bundled CL61 L1 not present")
+def test_ceilo_from_shared_beta_matches_reader():
+    """_ceilo_from_shared rebuilds cloud's beta from the shared read, bit-identical to
+    read_ceilometer_data (bundled CL61 -> physical units, factor 1, no /C)."""
+    from calibration.cloud.calibration import (
+        CloudCalConfig,
+        _ceilo_from_shared,
+        read_ceilometer_data,
+        set_defaults,
+    )
+
+    ref, status = read_ceilometer_data(
+        str(BUNDLED_L1), set_defaults(CloudCalConfig(instrument="CL61"))
+    )
+    assert status == 0
+    idd = load_instrument_day([BUNDLED_L1], "CL61", CAMS_DIR, read_cams=False)
+    mine = _ceilo_from_shared(idd, set_defaults(CloudCalConfig(instrument="CL61")))
+
+    assert mine.beta.shape == ref.beta.shape  # (range, time)
+    fa, fb = np.isfinite(ref.beta), np.isfinite(mine.beta)
+    assert np.array_equal(fa, fb)
+    assert np.array_equal(ref.beta[fa], mine.beta[fb])
+    assert np.array_equal(np.asarray(ref.range), np.asarray(mine.range))
+
+
+_PAYERNE_MAR = Path(r"D:\E-PROFILE_L1_2026\0-20000-0-06610\2026\03")
+
+
+@pytest.mark.skipif(not _PAYERNE_MAR.is_dir(), reason="L1 archive not present (e.g. CI)")
+@pytest.mark.parametrize("label,letter", [("CHM15k", "A"), ("CL31", "B")])
+def test_ceilo_from_shared_beta_raw_path(label, letter):
+    """The raw-signal path: CHM15k (counts) / CL31 (V*m^2) divide by the calibration
+    constant -- still bit-identical to read_ceilometer_data."""
+    from calibration.cloud.calibration import (
+        CloudCalConfig,
+        _ceilo_from_shared,
+        read_ceilometer_data,
+        set_defaults,
+    )
+
+    f = _PAYERNE_MAR / f"L1_0-20000-0-06610_{letter}20260306.nc"
+    if not f.is_file():
+        pytest.skip(f"{f.name} absent")
+    ref, status = read_ceilometer_data(str(f), set_defaults(CloudCalConfig(instrument=label)))
+    assert status == 0
+    idd = load_instrument_day([f], label, CAMS_DIR, read_cams=False)
+    mine = _ceilo_from_shared(idd, set_defaults(CloudCalConfig(instrument=label)))
+    fa, fb = np.isfinite(ref.beta), np.isfinite(mine.beta)
+    assert np.array_equal(fa, fb)
+    assert np.array_equal(ref.beta[fa], mine.beta[fb])
