@@ -65,6 +65,12 @@ class CeilometerData:
     # None when the variable is absent (e.g. CHM15k).
     vertical_visibility: Optional[NDArray[np.float64]] = None
 
+    # Laser pulse energy (%). Vaisala CL31/CL51/CL61 export ``laser_energy`` (or
+    # ``laser_pulse_energy``); the cloud calibration rejects profiles below
+    # ``energy_threshold``. CHM15k has no such variable (it reports ``status_laser``
+    # quality instead) → NaN-filled here, which the < threshold test treats as "keep".
+    laser_energy: Optional[NDArray[np.float64]] = None
+
 
 def build_file_paths(
     date_str: str,
@@ -230,6 +236,7 @@ def load_l1_data(
     laser_life_list = []
     cal_pulse_list = []
     vert_vis_list = []
+    laser_energy_list = []
 
     range_alc = None
     altitude = None
@@ -294,12 +301,15 @@ def load_l1_data(
                 status_detector_list.append(np.full(n_t, np.nan))
                 laser_life_list.append(np.full(n_t, np.nan))
                 cal_pulse_list.append(np.full(n_t, np.nan))
+                laser_energy_list.append(np.full(n_t, np.nan))
             else:
                 window_trans_list.append(_hk(data, 'window_transmission'))
                 status_laser_list.append(_hk(data, 'status_laser', 'state_laser'))
                 status_detector_list.append(_hk(data, 'status_detector', 'state_detector'))
                 laser_life_list.append(_hk(data, 'laser_life_time'))
                 cal_pulse_list.append(_hk(data, 'calibration_pulse'))
+                # Laser pulse energy (Vaisala): drives the cloud energy_rejected filter.
+                laser_energy_list.append(_hk(data, 'laser_energy', 'laser_pulse_energy'))
 
             # Fog indicator (Vaisala): NaN-filled if absent (CHM15k / Mini-MPL).
             vert_vis_list.append(_hk(data, 'vertical_visibility'))
@@ -331,6 +341,7 @@ def load_l1_data(
     laser_life = np.concatenate(laser_life_list)
     cal_pulse = np.concatenate(cal_pulse_list)
     vert_vis = np.concatenate(vert_vis_list)
+    laser_energy = np.concatenate(laser_energy_list)
 
     # Convert time to datetime
     try:
@@ -362,6 +373,7 @@ def load_l1_data(
         laser_life_time=laser_life,
         calibration_pulse=cal_pulse,
         vertical_visibility=vert_vis,
+        laser_energy=laser_energy,
         optical_module_id=om_id,
         instrument_serial_number=serial,
         instrument_firmware_version=firmware,
@@ -739,6 +751,7 @@ def average_ceilometer_data(
         calendar=data.calendar,
         time_units=data.time_units,
         vertical_visibility=(None if data.vertical_visibility is None else np.asarray(data.vertical_visibility, dtype="float64").copy()),
+        laser_energy=(None if data.laser_energy is None else np.asarray(data.laser_energy, dtype="float64").copy()),
     )
 
     if len(out.time_datetime) > 1 and average_time_s is not None and average_time_s > 0:
@@ -768,6 +781,8 @@ def average_ceilometer_data(
                     out.calibration_pulse = _block_reduce_mean(out.calibration_pulse, time_factor, axis=0)
                 if out.vertical_visibility is not None and out.vertical_visibility.size:
                     out.vertical_visibility = _block_reduce_mean(out.vertical_visibility, time_factor, axis=0)
+                if out.laser_energy is not None and out.laser_energy.size:
+                    out.laser_energy = _block_reduce_mean(out.laser_energy, time_factor, axis=0)
                 out.rcs = _block_reduce_mean(out.rcs, time_factor, axis=0)
 
     if len(out.range_alc) > 1 and average_range_m is not None and average_range_m > 0:

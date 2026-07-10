@@ -295,6 +295,10 @@ def _ceilo_from_shared(idd, config: "CloudCalConfig") -> "CeiloData":
     range_resol = float(rng[1] - rng[0]) if rng.size > 1 else float("nan")
     time_dt = np.asarray(native.time_datetime, dtype="datetime64[ns]")
     wt = getattr(native, "window_transmission", None)
+    # Laser pulse energy drives the energy_rejected filter. The shared loader now reads it
+    # (Vaisala laser_energy; NaN for CHM15k, which the < threshold test keeps) so the
+    # read-once path applies the SAME energy gate as read_ceilometer_data — not disabled.
+    le = getattr(native, "laser_energy", None)
     return CeiloData(
         time=time_dt,
         time_num=_matlab_datenum(time_dt),
@@ -307,7 +311,7 @@ def _ceilo_from_shared(idd, config: "CloudCalConfig") -> "CeiloData":
         cbh=cbh,
         quality_flag=None,
         window_transmission=(None if wt is None else np.asarray(wt, dtype="float64").ravel()),
-        laser_energy=None,
+        laser_energy=(None if le is None else np.asarray(le, dtype="float64").ravel()),
         trans2_wv=None,
         calibration_constant_applied=None,
     )

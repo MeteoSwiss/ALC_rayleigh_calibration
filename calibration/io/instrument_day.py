@@ -144,6 +144,7 @@ class InstrumentDayData:
             laser_life_time=_sl(n.laser_life_time),
             calibration_pulse=_sl(n.calibration_pulse),
             vertical_visibility=_sl(n.vertical_visibility),
+            laser_energy=_sl(n.laser_energy),
         )
         # Re-coarsen the single day (not a slice of the coarse night) so day-scoped consumers
         # get a clean 30 s/10 m grid with no D-1/D boundary block.
