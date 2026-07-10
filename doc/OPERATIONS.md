@@ -23,7 +23,7 @@ from a daily **CAMS** download.
 cron 0 15 * * * -> ops/run_daily.sh -> ops/ops_daily.py
   (15:00, live)      (glue: config.sh,      0. refresh census            (scripts/refresh_census.py, merge-only)
                      venv, flock, log,      1. fetch CAMS for D-1        (ADS download, retried; all regional boxes)
-                     alert mail)            2. calibrate D-1 network     (scripts/run_all_l1_2026.py --sens --omb)
+                     alert mail)            2. calibrate D-1 network     (scripts/run_network_calibration.py --sens --omb)
                                             3. update_opcoeff            (extract_l2_opcoeff.py -> operational_coefficients.csv)
                                             4. dashboard (incremental)   (scripts/build_dashboard.py --changed-only)
                                             5. publish to EWC            (ops/publish.sh: images->S3, HTML->web VM)
@@ -85,7 +85,7 @@ retried on the next run.
 1. **Fetch CAMS** (`calibration.io.cams.ensure_cams_file`, 3 retries, isolated so a network failure is
    one log line). Downloads `CAMS_Beta_<D>.nc` covering the night (`D-1`..`D`) from the ADS if missing.
 2. **Calibrate the day** across the network:
-   `scripts/run_all_l1_2026.py --start D --end D --per-type 0 --ignore-coverage --workers 6
+   `scripts/run_network_calibration.py --start D --end D --per-type 0 --ignore-coverage --workers 6
    --methods rayleigh,cloud --force --sens --omb`.
    Runs `ALC_WORKERS=6` parallel instrument streams (per-stream subprocess timeout
    `STREAM_TIMEOUT=1800 s`). It **merges** into the per-stream CSVs (it no longer overwrites them).
@@ -139,7 +139,7 @@ A daily run computes only yesterday's column(s) from yesterday's L1, appends to 
 (de-duplicating by date / CAMS timestamp so a forced re-run **replaces** rather than doubles), then
 re-derives the full-period snapshot (`<key>_sens.csv` / `<key>_omb.csv` + PNG) from the cache.
 
-**Regression guard** — `scripts/run_all_l1_2026.py::_cache_coverage_regression(key, sdir, cache_name,
+**Regression guard** — `scripts/run_network_calibration.py::_cache_coverage_regression(key, sdir, cache_name,
 output_name)`. The historic caches were built **offline** (chunked monthly jobs) over the full
 2025–2026 window. A daily single-day run for a station **whose cache file is missing** would otherwise
 create a brand-new 1-day cache and overwrite the rich historic `<key>_sens.csv`/`_omb.csv` with a
@@ -328,7 +328,7 @@ morning; 15:00 is fine). Validate with a manual `python ops/ops_daily.py --day <
   correct, current one; `.processed_days` there lists 2026-06-24..27.
 - Everything else in this doc was verified against the live code/config on 2026-06-28: paths in
   `ops/config.sh`; the pipeline in `ops/ops_daily.py` + `run_daily.sh` + `publish.sh`; the regression
-  guard and caches in `run_all_l1_2026.py` + `calibration/incremental.py`; bucket mode in
+  guard and caches in `run_network_calibration.py` + `calibration/incremental.py`; bucket mode in
   `monitoring/{index,render,config}.py`; the v1.0 overlay in `charts.py` + `render.py`; the CAMS
   boxes/vars/routing in `download_cams_beta.py`; the cron table (`hem` + `rem`);
   and the `rem` `noclobber` / `sudo` constraints. (Section 7 + the cron table re-verified 2026-07-06

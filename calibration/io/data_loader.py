@@ -73,7 +73,7 @@ class CeilometerData:
 
     # L2 only: median ``calibration_constant_0`` baked into the file (the Wiegner C_L
     # already applied). None for L1 (rcs_0 carries no per-file constant). Lets the cloud
-    # method report an absolute C_L on L2 input; see cloud ``_ceilo_from_ceilometerdata``.
+    # method report an absolute C_L on L2 input; see cloud ``build_cloud_input``.
     calibration_constant_applied: Optional[float] = None
 
 
@@ -445,7 +445,7 @@ def _read_l2_file(filepath_str: str, mtime: float, no_cloud: float):
     return (time, rcs, cbh, vert_vis, range_alc, station_alt, latitude, longitude, calendar, time_units, cal_const)
 
 
-def _load_l2_data(
+def load_l2_data(
     file_list: List[Path],
     instrument_type: InstrumentType,
 ) -> Optional[CeilometerData]:
@@ -656,7 +656,7 @@ def load_data(
         return load_l1_data(file_list, instrument_type)
     if data_level == DataLevel.RAW:
         return load_raw_data(file_list, instrument_type)
-    return _load_l2_data(file_list, instrument_type)
+    return load_l2_data(file_list, instrument_type)
 
 
 def _block_reduce_mean(arr: NDArray, factor: int, axis: int) -> NDArray:

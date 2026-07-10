@@ -127,22 +127,22 @@ def test_wv_transmission_once_matches_production():
     assert np.array_equal(ref, wv)
 
 
-# ------------------------------------------------ cloud: _ceilo_from_shared
+# ------------------------------------------------ cloud: build_cloud_input_from_day
 
 
 @pytest.mark.skipif(not BUNDLED_L1.is_file(), reason="bundled CL61 L1 not present")
-def test_ceilo_from_shared_beta_matches_reader():
-    """_ceilo_from_shared reconstructs cloud's beta from the shared COARSE working grid. For a
+def test_build_cloud_input_from_day_beta_matches_reader():
+    """build_cloud_input_from_day reconstructs cloud's beta from the shared COARSE working grid. For a
     physical-unit CL61 that is exactly the working rcs, oriented (range, time), factor 1, no /C.
     (The 'equals the production 30 s/10 m cloud path' equivalence is covered on real files by
-    test_ceilo_from_shared_beta_raw_path; the bundled file's range_resol attribute disagrees
+    test_build_cloud_input_from_day_beta_raw_path; the bundled file's range_resol attribute disagrees
     with its actual spacing, so we validate the reconstruction directly here.)"""
     from numpy import ma
 
-    from calibration.cloud.calibration import CloudCalConfig, _ceilo_from_shared, set_defaults
+    from calibration.cloud.calibration import CloudCalConfig, build_cloud_input_from_day, set_defaults
 
     idd = load_instrument_day([BUNDLED_L1], "CL61", CAMS_DIR, read_cams=False)
-    mine = _ceilo_from_shared(idd, set_defaults(CloudCalConfig(instrument="CL61")))
+    mine = build_cloud_input_from_day(idd, set_defaults(CloudCalConfig(instrument="CL61")))
     expected = ma.filled(ma.masked_invalid(np.asarray(idd.working.rcs, float)), np.nan).T
     assert mine.beta.shape == expected.shape  # coarse (range, time)
     assert np.array_equal(np.isfinite(expected), np.isfinite(mine.beta))
@@ -152,12 +152,12 @@ def test_ceilo_from_shared_beta_matches_reader():
 
 @pytest.mark.skipif(not BUNDLED_L1.is_file(), reason="bundled CL61 L1 not present")
 def test_slice_to_date_matches_full_day():
-    """slice_to_date keeps a single UTC day and re-coarsens it; _ceilo_from_shared then
+    """slice_to_date keeps a single UTC day and re-coarsens it; build_cloud_input_from_day then
     reconstructs beta from the sliced coarse grid (so a night [D-1,D] read feeds the day-D cloud
     pass)."""
     from numpy import ma
 
-    from calibration.cloud.calibration import CloudCalConfig, _ceilo_from_shared, set_defaults
+    from calibration.cloud.calibration import CloudCalConfig, build_cloud_input_from_day, set_defaults
 
     idd = load_instrument_day([BUNDLED_L1], "CL61", CAMS_DIR, read_cams=False)
     # UTC date from time (days since 1970); time_datetime may be cftime, not datetime.
@@ -166,7 +166,7 @@ def test_slice_to_date_matches_full_day():
     sliced = idd.slice_to_date(date)
     assert sliced.native.rcs.shape == idd.native.rcs.shape  # single-day file -> all native kept
 
-    mine = _ceilo_from_shared(sliced, set_defaults(CloudCalConfig(instrument="CL61")))
+    mine = build_cloud_input_from_day(sliced, set_defaults(CloudCalConfig(instrument="CL61")))
     expected = ma.filled(ma.masked_invalid(np.asarray(sliced.working.rcs, float)), np.nan).T
     assert mine.beta.shape == expected.shape
     assert np.array_equal(np.isfinite(expected), np.isfinite(mine.beta))
@@ -178,11 +178,11 @@ _PAYERNE_MAR = Path(r"D:\E-PROFILE_L1_2026\0-20000-0-06610\2026\03")
 
 @pytest.mark.skipif(not _PAYERNE_MAR.is_dir(), reason="L1 archive not present (e.g. CI)")
 @pytest.mark.parametrize("label,letter", [("CHM15k", "A"), ("CL31", "B")])
-def test_ceilo_from_shared_beta_raw_path(label, letter):
+def test_build_cloud_input_from_day_beta_raw_path(label, letter):
     """The raw-signal path: CHM15k (counts) / CL31 (V*m^2) divide by the calibration constant,
     on the shared COARSE grid -- matching the old cloud path (read + 30 s/10 m averaging) to
     machine precision (CHM15k: rcs-then-/C vs beta averaging differ by ~1e-20)."""
-    from calibration.cloud.calibration import CloudCalConfig, _ceilo_from_shared, set_defaults
+    from calibration.cloud.calibration import CloudCalConfig, build_cloud_input_from_day, set_defaults
     # The legacy MATLAB-faithful reader + CeiloData averager now live in the test helper (moved
     # out of the operational module); this test still guards that the shared loader reproduces them.
     from tests._ceilo_reader import average_ceilo_data, read_ceilometer_data
@@ -196,7 +196,7 @@ def test_ceilo_from_shared_beta_raw_path(label, letter):
         ref, set_defaults(CloudCalConfig(instrument=label, average_time_s=30.0, average_range_m=10.0))
     )
     idd = load_instrument_day([f], label, CAMS_DIR, read_cams=False)
-    mine = _ceilo_from_shared(idd, set_defaults(CloudCalConfig(instrument=label)))
+    mine = build_cloud_input_from_day(idd, set_defaults(CloudCalConfig(instrument=label)))
     assert mine.beta.shape == ref.beta.shape
     fa, fb = np.isfinite(ref.beta), np.isfinite(mine.beta)
     assert np.array_equal(fa, fb)

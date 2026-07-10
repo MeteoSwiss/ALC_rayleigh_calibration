@@ -158,7 +158,7 @@ reads `omb.csv`) is unaffected; only the per‑station OmB plot label changes wh
 `calibration/`: `flags.py`, `config.py`, `rayleigh/calibration.py`, `rayleigh/rayleigh_fit.py`,
 `rayleigh/molecular_methods.py`, `cloud/calibration.py`, `water_vapor_correction/water_vapor.py`,
 `plotting.py` · `monitoring/`: `index.py`, `render.py`, `metrics.py`, `charts.py`, `config.py`,
-`static/diag.js`, `static/style.css` · `scripts/run_all_l1_2026.py` · `options.json` ·
+`static/diag.js`, `static/style.css` · `scripts/run_network_calibration.py` · `options.json` ·
 `scripts/run_lindenberg_cl61_cal.py`.
 
 **Tests added:** `test_cams_too_far.py`, `test_default_method.py`, `test_plotting_time_axis.py`,

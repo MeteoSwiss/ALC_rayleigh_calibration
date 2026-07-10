@@ -7,7 +7,7 @@ backfill of the last few days that have not been processed yet (self-healing aft
   1. ensures the CAMS file for that day (downloads it from the ADS if missing; retried -- this is the
      slow, network-dependent step, deliberately isolated so a failure is one clear log line);
   2. runs the calibration for that day across the whole network: Rayleigh + liquid-cloud + Kalman
-     (scripts/run_all_l1_2026.py, which now MERGES into the per-stream CSVs instead of overwriting);
+     (scripts/run_network_calibration.py, which now MERGES into the per-stream CSVs instead of overwriting);
 
 then, once, if anything changed:
 
@@ -114,7 +114,7 @@ def fetch_cams(ds: str, retries: int = 3) -> bool:
 
 
 def calibrate(ds: str) -> bool:
-    cmd = [PY, str(REPO / "scripts" / "run_all_l1_2026.py"),
+    cmd = [PY, str(REPO / "scripts" / "run_network_calibration.py"),
            "--start", ds, "--end", ds, "--per-type", "0", "--ignore-coverage",
            "--workers", WORKERS, "--methods", "rayleigh,cloud", "--force",
            "--sens", "--omb"]

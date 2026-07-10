@@ -40,14 +40,14 @@ python scripts/download_cams_cscs.py --start 202501 --end 202612
 The OmB/sens pass REUSES the existing per-stream Kalman, so this is only needed if the
 calibration has not been run for the window. SLURM array as usual (~3–5 min/month).
 ```bash
-python scripts/run_all_l1_2026.py --start 20250101 --end 20261231 \
+python scripts/run_network_calibration.py --start 20250101 --end 20261231 \
     --per-type 0 --workers <N> --ignore-coverage
 ```
 This writes `<key>_cal.csv`, `<key>_kalman.csv`, `<key>_hk.csv` per stream.
 
 ## 3. OmB + sensitivity (reuse the Kalman) — needs step 1 done
 ```bash
-python scripts/run_all_l1_2026.py --no-cal --omb --sens \
+python scripts/run_network_calibration.py --no-cal --omb --sens \
     --start 20250101 --end 20261231 --per-type 0 --workers <N> --ignore-coverage
 ```
 - Reads `<key>_kalman.csv` (no recalibration), writes per stream:
@@ -64,8 +64,8 @@ python scripts/run_all_l1_2026.py --no-cal --omb --sens \
 ## 4. Real-time / daily (D-1)
 ```bash
 Y=$(date -u -d 'yesterday' +%Y%m%d)
-python scripts/run_all_l1_2026.py --start $Y --end $Y --ignore-coverage   # cal + Kalman update
-python scripts/run_all_l1_2026.py --no-cal --omb --sens --start $Y --end $Y --ignore-coverage
+python scripts/run_network_calibration.py --start $Y --end $Y --ignore-coverage   # cal + Kalman update
+python scripts/run_network_calibration.py --no-cal --omb --sens --start $Y --end $Y --ignore-coverage
 ```
 (OmB needs that day's CAMS forecast, which publishes ~next day — hence D-1.)
 

@@ -45,7 +45,7 @@ still resolves thin liquid layers); time stays ≥15 s so nothing is smeared.
 
 ```
 ops/           config.sh (ALC_* env) · run_daily.sh · ops_daily.py · publish.sh · prefetch_cams.sh
-scripts/       run_all_l1_2026.py  ← ThreadPoolExecutor, 1 subprocess per stream
+scripts/       run_network_calibration.py  ← ThreadPoolExecutor, 1 subprocess per stream
                  └ _process_stream → _do_rayleigh · _do_cloud · _do_monitoring · _do_omb · _do_sens
                build_dashboard.py · refresh_census.py · extract_l2_opcoeff.py
 calibration/io/            data_loader.py (load_l1_data) · l1_window.py (load_l1_window) · cams.py
@@ -140,7 +140,7 @@ dashboard images and validates at scale.
   ceilopyter reader; 5 streams).
 - Per stream/day: `eprofile_l1.read_eprofile_l1` → coarsen (§1) → `cams_model.cams_to_model`
   (0.4° `D:\CAMS_Monthly_04` / `ALC_CAMS_DIR`, 1° fallback) → `classify` → curtain PNG.
-- Parallelize over streams (ThreadPool, like `run_all_l1_2026`).
+- Parallelize over streams (ThreadPool, like `run_network_calibration`).
 - **Compute:** ~110 min/day single-thread → **~10–15 min at 8–16 workers**; CL61 ÷3 trims it.
 - **Storage:** ~150 KB/curtain × 433 ≈ **65 MB/day ≈ 24 GB/yr**; prune-after-upload as today.
 
@@ -154,7 +154,7 @@ against Phase A to confirm equivalence.
 
 - `ops/config.sh`: add `ALC_CLASSIFY=1` (+ optional `ALC_CLASSIFY_MAXY`, coarsening targets).
   `ALC_CAMS_DIR` (0.4°) already exists — reuse it, **not** the 1° `D:\CAMS`.
-- `ops_daily.py` / `run_all_l1_2026.py`: pass `--classify`; add `_do_classification` after the
+- `ops_daily.py` / `run_network_calibration.py`: pass `--classify`; add `_do_classification` after the
   shared load; write curtain into the per-station `plots/` dir with the existing `<date>_<wmo>`
   tag convention.
 - **910 nm nights without usable CAMS**: classification needs temperature only for the

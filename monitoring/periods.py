@@ -3,7 +3,7 @@
 A *period* is a labelled date window over the calibration archive. The same set drives:
   * the station-page client-side selector (``rangesync.js``, via an embedded JSON),
   * the per-period summary pages (``build_dashboard.py`` / ``render.build_site``), and
-  * the per-period OmB / sensitivity images (``scripts/run_all_l1_2026.py``).
+  * the per-period OmB / sensitivity images (``scripts/run_network_calibration.py``).
 
 Years are *derived from the data span*, not hardcoded: every calendar year from the first
 year with data to the current year (2025, 2026, then 2027, 2028 … automatically). Rolling

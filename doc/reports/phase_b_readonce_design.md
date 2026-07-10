@@ -106,8 +106,8 @@ All behind `ALC_READONCE=1`; each step keeps the old path until its diff check p
 | **B2** | Single CAMS cell-reader; make WV transmission a **compute-once** shared field (pass into Rayleigh/cloud/OmB instead of each recomputing). | `water_vapor.py`, `cloud/calibration.py:877`, `omb.py:321`, `rayleigh/calibration.py:531` |
 | **B3** | Coarsening → **working grid** producer; wire Rayleigh + cloud + classification to it; drop cloud's internal 30 s/10 m double-average. | `io/instrument_day.py`, `_do_cloud`, `_do_rayleigh` |
 | **B4** | Make Rayleigh window search **metre-based** (`increment_bins=8` is a gate count → convert to metres) so coarsening can't change search granularity. | `rayleigh/rayleigh_fit.py:104` |
-| **B5** | Thread the shared object into `_do_rayleigh/_do_cloud/_do_monitoring/_do_omb/_do_sens`; each stops re-opening. Sensitivity/OmB take the **native view**. | `scripts/run_all_l1_2026.py` |
-| **B6** | Add `_do_classification(shared)` consumer (β = rcs×factor on the working grid + CAMS T). | `scripts/run_all_l1_2026.py`, `calibration/classify/…` |
+| **B5** | Thread the shared object into `_do_rayleigh/_do_cloud/_do_monitoring/_do_omb/_do_sens`; each stops re-opening. Sensitivity/OmB take the **native view**. | `scripts/run_network_calibration.py` |
+| **B6** | Add `_do_classification(shared)` consumer (β = rcs×factor on the working grid + CAMS T). | `scripts/run_network_calibration.py`, `calibration/classify/…` |
 
 Because all steps already run in one subprocess per stream (`_process_stream`), this is threading
 one object through — **not** a process re-architecture.

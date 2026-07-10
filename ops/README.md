@@ -6,7 +6,7 @@ downloads the **CAMS** aerosol file it needs, and **incrementally** refreshes th
 ```
 cron ──> ops/run_daily.sh ──> ops/ops_daily.py
    (glue: config, venv,          1. fetch CAMS for D-1   (ADS download, retried)
-    flock, log, alert)           2. calibrate D-1         (scripts/run_all_l1_2026.py, all streams)
+    flock, log, alert)           2. calibrate D-1         (scripts/run_network_calibration.py, all streams)
                                  3. dashboard             (scripts/build_dashboard.py --changed-only)
                                  4. heartbeat             (.last_success)
 nginx/apache ──> serves $ALC_DASHBOARD_DIR  (HTTP, separate path)
@@ -22,8 +22,6 @@ Everything is driven by `ALC_*` env vars set in **`ops/config.sh`** — the only
    python3 -m venv .venv && . .venv/bin/activate
    pip install -e ".[dashboard,download]"
    ```
-   `cfgrib` converts the CAMS GRIB to netCDF in pure Python — **no conda, no system eccodes, no
-   `grib_to_netcdf` CLI** needed.
 
 2. **CAMS / ADS credentials** — put your ADS key in `~/.cdsapirc` and accept the CAMS licences once.
    Smoke-test the download:
@@ -41,7 +39,7 @@ Everything is driven by `ALC_*` env vars set in **`ops/config.sh`** — the only
    python scripts/build_dashboard.py --fullcal "$ALC_FULLCAL_DIR" --out "$ALC_DASHBOARD_DIR"
    ```
    No calibration output yet? Seed a few days first: `python ops/ops_daily.py --day YYYYMMDD` (repeat),
-   or a range with `scripts/run_all_l1_2026.py --start … --end … --per-type 0 --methods rayleigh,cloud`.
+   or a range with `scripts/run_network_calibration.py --start … --end … --per-type 0 --methods rayleigh,cloud`.
 
 5. **Serve it** — point your web server at `$ALC_DASHBOARD_DIR`, e.g. nginx
    `location /alc/ { alias /…/dashboard/; index index.html; }`. Serving over **HTTP** (not `file://`)

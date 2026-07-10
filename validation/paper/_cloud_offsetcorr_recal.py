@@ -38,10 +38,10 @@ JOBS = [
          lat=50.8, lon=4.35, alt=100.0, npz="cl51_b_dark.npz", key="0-20000-0-06447_A_cloud"),
 ]
 
-# ---- offset injection: wrap _ceilo_from_ceilometerdata (the CeiloData builder that
+# ---- offset injection: wrap build_cloud_input (the CeiloData builder that
 # liquid_cloud_calibration now feeds; read_ceilometer_data was retired to tests/_ceilo_reader).
 STATE = {"rng": None, "b": None}
-_orig_adapt = CC._ceilo_from_ceilometerdata
+_orig_adapt = CC.build_cloud_input
 def _patched_adapt(cd, config, rcs_units, cal_const_applied=None):
     data = _orig_adapt(cd, config, rcs_units, cal_const_applied)
     if STATE["b"] is not None and data.beta.size and data.range.size:
@@ -50,7 +50,7 @@ def _patched_adapt(cd, config, rcs_units, cal_const_applied=None):
             off = np.interp(data.range, STATE["rng"], STATE["b"], left=0.0, right=0.0)  # rcs_0 units
             data.beta = data.beta - (off / Cc)[:, None]     # beta is (range, time)
     return data
-CC._ceilo_from_ceilometerdata = _patched_adapt
+CC.build_cloud_input = _patched_adapt
 
 
 def _ch(j):

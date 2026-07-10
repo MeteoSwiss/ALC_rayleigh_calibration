@@ -1,7 +1,7 @@
 """Legacy MATLAB-faithful ceilometer reader (L1 / L2 / Cloudnet-raw) + CeiloData averager.
 
 Moved out of ``calibration.cloud.calibration`` (2026-07): the operational pipeline reads L1/L2
-through the single shared loader (``calibration.io.data_loader`` -> ``_ceilo_from_ceilometerdata``)
+through the single shared loader (``calibration.io.data_loader`` -> ``build_cloud_input``)
 and no longer needs this reader. It is retained here for the R&D validation scripts and any
 Cloudnet-raw (``beta_raw``/``beta_att``) input, which the operational loader does not handle.
 

@@ -90,14 +90,19 @@ from ..water_vapor_correction.water_vapor import (
 from ..io.cams import ensure_cams_file
 
 # --- split-out submodules (re-exported so `from ...calibration import X` keeps working) ---
-from ._water_vapor import (  # noqa: F401,E402
+# The cloud water-vapour chain lives with the other WV code in ../water_vapor_correction/.
+from ..water_vapor_correction.cloud_water_vapor import (  # noqa: F401,E402
     compute_wv_transmission, _murphy_koop_es_liquid, _wagner_pruss_pws_hpa, _nw_from_T_RH,
     _cams_levels_all_times, _era5_levels_all_times,
     _interp1_linear_nan, _cumtrapz_axis1, _interp1_nearest_extrap_cols)
 from ._filters import (  # noqa: F401,E402
     S_THEORETICAL, apply_multiple_scattering_correction, apply_instrument_filters,
     calculate_lidar_ratio, apply_cloud_filters, apply_temporal_consistency_filter,
-    apply_transmission_correction, _trapz, _find_first, _find_last, _interp1_linear_extrap)
+    apply_transmission_correction, _trapz, _find_first, _find_last, _interp1_linear_extrap,
+    _ETA_CL31, _ETA_CL51, _ETA_CL61, _ETA_CHM15K, _ETA_MINIMPL, _ETA_MPL)
+# NOTE for eta-swap experiments: apply_multiple_scattering_correction reads the eta tables from
+# calibration.cloud._filters (their real home) — re-exporting them here is read-only; to override
+# the tables at runtime, patch calibration.cloud._filters._ETA_*, not this module's names.
 
 
 # ===========================================================================
@@ -254,7 +259,7 @@ class CeiloData:
     calibration_constant_applied: Optional[float] = None
 
 
-def _ceilo_from_ceilometerdata(cd, config: "CloudCalConfig", rcs_units,
+def build_cloud_input(cd, config: "CloudCalConfig", rcs_units,
                                cal_const_applied=None) -> "CeiloData":
     """Build the cloud ``CeiloData`` from a ``CeilometerData`` grid (the single cloud reader path).
 
@@ -320,7 +325,7 @@ def _ceilo_from_ceilometerdata(cd, config: "CloudCalConfig", rcs_units,
     )
 
 
-def _ceilo_from_shared(idd, config: "CloudCalConfig") -> "CeiloData":
+def build_cloud_input_from_day(idd, config: "CloudCalConfig") -> "CeiloData":
     """Thin wrapper: build cloud ``CeiloData`` from a shared ``InstrumentDayData``'s coarse
     working grid (the read-once path used by the daily runner and the file entry).
 
@@ -329,7 +334,7 @@ def _ceilo_from_shared(idd, config: "CloudCalConfig") -> "CeiloData":
     so cloud no longer averages separately.
     """
     config.instrument = idd.instrument_type.value
-    return _ceilo_from_ceilometerdata(
+    return build_cloud_input(
         idd.working, config, idd.rcs_units,
         getattr(idd.working, "calibration_constant_applied", None))
 
@@ -672,7 +677,7 @@ def liquid_cloud_calibration(config: CloudCalConfig) -> CloudCalResults:
     """Calibrate a single L1 or L2 file via the shared loader (``load_data``).
 
     Reads once into a ``CeilometerData``, block-averages to ``config.average_time_s`` /
-    ``average_range_m``, reconstructs the cloud ``CeiloData`` (:func:`_ceilo_from_ceilometerdata`),
+    ``average_range_m``, reconstructs the cloud ``CeiloData`` (:func:`build_cloud_input`),
     and runs :func:`liquid_cloud_calibration_from_data`. L1 and L2 both go through the ONE reader;
     the strict WV requirement (CL31/CL51/CL61) still raises on failure. Cloudnet-raw is not handled
     here (research only).
@@ -685,7 +690,7 @@ def liquid_cloud_calibration(config: CloudCalConfig) -> CloudCalResults:
     if cd is None:
         raise RuntimeError("Failed to read NetCDF file")
     cd = average_ceilometer_data(cd, config.average_time_s, config.average_range_m)
-    data = _ceilo_from_ceilometerdata(cd, config, rcs_units, cd.calibration_constant_applied)
+    data = build_cloud_input(cd, config, rcs_units, cd.calibration_constant_applied)
 
     return liquid_cloud_calibration_from_data(data, config)
 

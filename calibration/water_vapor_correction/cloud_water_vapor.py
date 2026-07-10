@@ -1,9 +1,13 @@
 """Water-vapour two-way transmission for the liquid-cloud calibration (910 nm band).
 
-Split out of ``calibration.py`` (2026-07). Self-contained: the humidity physics (Murphy-Koop /
-Wagner-Pruss / number density), the CAMS & ERA5 model-level readers, and ``compute_wv_transmission``.
+Split out of ``cloud/calibration.py`` and co-located here with the other water-vapour code
+(2026-07). It is the cloud method's OWN transmission chain: the humidity physics (Murphy-Koop /
+Wagner-Pruss / number density), the CAMS & ERA5 model-level readers, and ``compute_wv_transmission``,
+built on the shared Gaussian core (``wv_t2eff_core``) + L137 coefficients in ``water_vapor.py``.
 Functions duck-type ``data``/``config`` (type hints only, stringised by ``from __future__``), so this
-module does not import back into ``calibration``. Re-exported from ``calibration`` for back-compat.
+module does not import back into the cloud package. Re-exported from ``cloud.calibration`` for
+back-compat. (It historically diverged from the shared route for MATLAB parity; now that MATLAB is
+no longer the reference the two water-vapour paths could be reconciled — a future cleanup.)
 """
 from __future__ import annotations
 
@@ -15,7 +19,7 @@ import numpy as np
 from numpy.typing import NDArray
 from netCDF4 import Dataset
 
-from ..water_vapor_correction.water_vapor import (
+from .water_vapor import (
     wv_t2eff_core, load_abs_cross_section, in_water_vapor_band, _A137, _B137)
 from ..io.cams import ensure_cams_file
 

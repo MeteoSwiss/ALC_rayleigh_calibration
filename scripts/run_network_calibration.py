@@ -37,7 +37,7 @@ dashboard/NetCDF treat them as the same day -- a method cross-check on a fast-ch
 compares slightly different windows.
 
 Usage:
-  python scripts/run_all_l1_2026.py [--start 20260301] [--end 20260531]
+  python scripts/run_network_calibration.py [--start 20260301] [--end 20260531]
         [--types CL31,CL51,CL61,CHM15k,Mini-MPL] [--per-type 3] [--limit N] [--workers 6]
 
 --per-type N keeps the N best-covered streams per instrument type (a balanced test subset);
@@ -82,7 +82,7 @@ from calibration import (  # noqa: E402
 from calibration.config import InstrumentType  # noqa: E402
 from calibration.cloud import CloudCalConfig  # noqa: E402
 from calibration.cloud.calibration import (  # noqa: E402
-    liquid_cloud_calibration_from_data, set_defaults, _ceilo_from_shared)
+    liquid_cloud_calibration_from_data, set_defaults, build_cloud_input_from_day)
 from calibration.io.data_loader import build_file_paths  # noqa: E402
 from calibration.io.instrument_day import load_instrument_day  # noqa: E402
 from calibration.flags import cloud_flag, flag_label, dominant_cloud_reject_flag  # noqa: E402
@@ -357,7 +357,7 @@ def _do_cloud(s, start, end, shared=None):
             if idd is not None:
                 # Read-once: cloud consumes the shared coarse read (30 s/10 m), sliced to this UTC
                 # day -- cloud no longer averages separately (config average_time_s/range = 0).
-                data, status = _ceilo_from_shared(idd.slice_to_date(d), cfg), 0
+                data, status = build_cloud_input_from_day(idd.slice_to_date(d), cfg), 0
             else:
                 # L1 unreadable (load_instrument_day already retried this day) -> no-data row below.
                 data, status = None, 1

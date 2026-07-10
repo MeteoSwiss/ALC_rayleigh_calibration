@@ -48,7 +48,7 @@ _WV_WAVELENGTHS_NM = {910.0}
 
 # Backscatter variable names in the order read_ceilometer_data picks them; for an L1 file
 # this resolves to rcs_0 (the same variable load_l1_data reads), so its units drive cloud's
-# beta reconstruction (see _ceilo_from_shared).
+# beta reconstruction (see build_cloud_input_from_day).
 _BETA_VARS = (
     "attenuated_backscatter_0", "rcs_0", "beta", "beta_raw",
     "attenuated_backscatter", "beta_att",

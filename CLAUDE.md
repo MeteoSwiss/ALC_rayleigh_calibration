@@ -34,7 +34,7 @@ Live dashboard: <https://alc-calib.ch-meteoswiss-emermet.f.ewcloud.host/>
    into `validation/scope_l1_2026_census.json` (new streams appended, existing never dropped) so a
    newly-installed station is calibrated the same day.
 2. **fetch CAMS** for D-1 (ADS download, retried).
-3. **calibrate** D-1 across the network: `scripts/run_all_l1_2026.py --sens --omb` (Rayleigh +
+3. **calibrate** D-1 across the network: `scripts/run_network_calibration.py --sens --omb` (Rayleigh +
    liquid-cloud + Kalman; per-day caches in `calibration/incremental.py` + a regression guard so a
    missing cache never overwrites a rich history; MERGES into per-stream CSVs, no overwrite).
 4. **update_opcoeff** (`extract_l2_opcoeff.py` → `operational_coefficients.csv`).

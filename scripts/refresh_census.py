@@ -38,7 +38,7 @@ REPO = Path(__file__).resolve().parents[1]
 L1_ROOT = Path(os.environ.get("ALC_L1_ROOT", "D:/E-PROFILE_L1_2026"))
 CENSUS = Path(os.environ.get("ALC_CENSUS", str(REPO / "validation" / "scope_l1_2026_census.json")))
 
-# Instrument types the calibration knows how to process (matches run_all_l1_2026.ITYPE).
+# Instrument types the calibration knows how to process (matches run_network_calibration.ITYPE).
 TARGET_TYPES = {"CL31", "CL51", "CL61", "CHM15k", "Mini-MPL"}
 DATE_RE = re.compile(r"(\d{8})\.nc$")
 

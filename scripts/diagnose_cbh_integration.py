@@ -30,9 +30,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
-import run_all_l1_2026 as R  # noqa: E402
+import run_network_calibration as R  # noqa: E402
 from calibration.cloud.calibration import (  # noqa: E402
-    CloudCalConfig, liquid_cloud_calibration_from_data, set_defaults, _ceilo_from_shared)
+    CloudCalConfig, liquid_cloud_calibration_from_data, set_defaults, build_cloud_input_from_day)
 from calibration.io.instrument_day import load_instrument_day  # noqa: E402
 
 OUTDIR = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(
@@ -60,7 +60,7 @@ def _run(s, d):
     cfg = _cfg(s, fp)
     idd = load_instrument_day([cfg.nc_file], s["type"], cfg.cams_folder, read_cams=False,
                               target_time_s=cfg.average_time_s, target_range_m=cfg.average_range_m)
-    data = _ceilo_from_shared(idd, cfg) if idd is not None else None
+    data = build_cloud_input_from_day(idd, cfg) if idd is not None else None
     status = 0 if data is not None else 1
     beta = getattr(data, "beta", None) if data is not None else None
     if status != 0 or beta is None or not np.any(np.isfinite(np.asarray(beta, dtype=float))):

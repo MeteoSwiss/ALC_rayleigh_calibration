@@ -2,7 +2,7 @@
 as intercompare.CALOUT) into the paper-validation report.
 
 Source directory: $ALC_VAL_CALOUT (default E_PROFILE_calout_2025_2026) — the network calibration run
-(scripts/run_all_l1_2026.py, on CSCS) that calibrates every stream from the native L1 archive over
+(scripts/run_network_calibration.py, on CSCS) that calibrates every stream from the native L1 archive over
 2025-2026 and writes, per stream <WMO>_<ident>:
     <key>_cal.csv     date, method, flag, cal_value, uncertainty, ...   (raw per-night/day)
     <key>_kalman.csv  method, date, kalman, kalman_std                  (E-PROFILE best estimate)
