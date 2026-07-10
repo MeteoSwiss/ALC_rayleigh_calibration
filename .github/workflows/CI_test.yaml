@@ -29,10 +29,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # pyproject currently declares requires-python >=3.9, but the dev env
-        # and .python-version are 3.12. Testing 3.10-3.12 mirrors the MeteoSwiss
-        # OSS template; trim to just '3.12' once the floor is bumped (Tier 3).
-        python-version: ['3.10', '3.11', '3.12']
+        # requires-python is >=3.12, matching .python-version and the deployment.
+        # Add newer versions here to test forward compatibility.
+        python-version: ['3.12']
     env:
       MPLBACKEND: Agg   # headless matplotlib (calibration.plotting / test_plotting_time_axis)
 

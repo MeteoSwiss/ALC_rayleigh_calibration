@@ -3,7 +3,7 @@ name = "eprofile-calibration"
 version = "2.0.0"
 description = "Rayleigh and liquid-cloud calibration for automated lidars and ceilometers (E-PROFILE)"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "E-PROFILE", email = "contact@e-profile.eu" }]
 keywords = ["lidar", "ceilometer", "calibration", "rayleigh", "cloud", "atmospheric", "remote sensing"]
@@ -13,9 +13,6 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Atmospheric Science",
 ]
@@ -59,7 +56,7 @@ include = ["calibration", "tests", "README.md"]
 # Tooling
 # ---------------------------------------------------------------------------
 [tool.ruff]
-target-version = "py39"
+target-version = "py312"
 line-length = 100
 select = [
     "E",     # pycodestyle errors
@@ -80,7 +77,7 @@ ignore = [
 known-first-party = ["calibration"]
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.12"
 warn_return_any = true
 warn_unused_ignores = true
 disallow_untyped_defs = true

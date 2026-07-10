@@ -71,7 +71,7 @@ lives in [`pyproject.toml`](pyproject.toml).
 
 ```console
 $ ruff check calibration monitoring      # lint
-$ ruff format calibration monitoring     # auto-format
+$ ruff format <files you changed>        # auto-format (see note below)
 $ mypy calibration                       # type check
 ```
 
@@ -79,6 +79,12 @@ New function definitions should carry type annotations (`disallow_untyped_defs`
 is enabled). Prefer clear, readable code and comment the *why*, not just the
 *what*. These checks also run in CI (`.github/workflows/CI_test.yaml`); they are
 currently advisory and will become blocking once the tree is fully clean.
+
+**Formatting note:** the existing code is not yet ruff-formatted, so run
+`ruff format` only on the files you actually change — do not reformat the whole
+tree inside a feature PR. A one-shot repo-wide reformat should be its own
+dedicated commit on a clean tree, with the commit hash added to
+[`.git-blame-ignore-revs`](.git-blame-ignore-revs) so `git blame` skips it.
 
 ## Pull request process
 
