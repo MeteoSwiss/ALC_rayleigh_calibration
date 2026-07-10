@@ -242,6 +242,7 @@ def calibrate_rayleigh(
     options: CalibrationOptions,
     std_atm_file: Optional[Path] = None,
     fit_inputs_out: Optional[dict] = None,
+    preloaded_data: Optional[CeilometerData] = None,
 ) -> CalibrationResult:
     """
     Perform Rayleigh calibration for a single instrument on a single date.
@@ -293,23 +294,30 @@ def calibrate_rayleigh(
     # =========================================================================
     # Step 1: Load L1 data
     # =========================================================================
-    candidate_files = build_file_paths(date_str, info, options)
+    if preloaded_data is not None:
+        # Read-once path (see calibration.io.instrument_day): reuse the already-loaded L1
+        # instead of re-opening the file(s). `preloaded_data` must be exactly what
+        # `load_data(file_list, instrument_type, L1)` returns for this night, so the result
+        # is identical to the default path below.
+        data = preloaded_data
+    else:
+        candidate_files = build_file_paths(date_str, info, options)
 
-    # Keep only files that exist (chronological order preserved)
-    file_list = [f for f in candidate_files if f.exists()]
+        # Keep only files that exist (chronological order preserved)
+        file_list = [f for f in candidate_files if f.exists()]
 
-    if not file_list:
-        logger.warning(f"No data files found for {date_str}")
-        return CalibrationResult(
-            lidar_constant=-1,
-            flag=0,
-            uncertainty=0,
-            message="No data files found",
-        )
+        if not file_list:
+            logger.warning(f"No data files found for {date_str}")
+            return CalibrationResult(
+                lidar_constant=-1,
+                flag=0,
+                uncertainty=0,
+                message="No data files found",
+            )
 
-    logger.info(f"Loading {len(file_list)} {options.data_level.value} file(s)")
+        logger.info(f"Loading {len(file_list)} {options.data_level.value} file(s)")
 
-    data = load_data(file_list, info.instrument_type, options.data_level)
+        data = load_data(file_list, info.instrument_type, options.data_level)
     if data is None:
         logger.warning("Failed to load data")
         return CalibrationResult(
