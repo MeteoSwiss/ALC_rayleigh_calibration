@@ -228,6 +228,7 @@ def load_instrument_day(
     target_time_s: float = 15.0,
     read_cams: bool = True,
     auto_download_cams: bool = False,
+    build_working: bool = True,
 ) -> Optional[InstrumentDayData]:
     """Read L1 (once) + CAMS (once, closest cell) and build the shared working grid.
 
@@ -264,10 +265,15 @@ def load_instrument_day(
         return None
     rcs_units = _read_rcs_units(Path(l1_paths[0]))
 
-    working = average_ceilometer_data(
-        native, average_time_s=target_time_s, average_range_m=target_range_m
-    )
+    # The coarsened working grid is only needed by consumers that classify (or otherwise want
+    # the reduced grid). Rayleigh/cloud/OmB/sensitivity all use `native`, so building it there
+    # is pure overhead (block-averaging the full rcs) -- skip it unless asked (build_working).
     factors = _applied_factors(native, target_range_m, target_time_s)
+    working = (
+        average_ceilometer_data(native, average_time_s=target_time_s, average_range_m=target_range_m)
+        if build_working
+        else native
+    )
 
     cams_file: Optional[str] = None
     cams_cell: Tuple[Optional[NDArray], ...] = (None, None, None, None)

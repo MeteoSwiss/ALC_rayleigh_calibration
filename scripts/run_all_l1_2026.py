@@ -274,7 +274,8 @@ def _make_shared_reader(s):
         if night:
             try:
                 idd = load_instrument_day(
-                    night, s["type"], CAMS, cams_folder_fallback=fb, read_cams=False)
+                    night, s["type"], CAMS, cams_folder_fallback=fb,
+                    read_cams=False, build_working=False)  # rayleigh/cloud use .native
             except Exception:  # noqa: BLE001 - a bad read falls back to each step's own load
                 idd = None
         if len(cache) >= 3:  # bound memory (daily run = 1 day; backfill degrades gracefully)
