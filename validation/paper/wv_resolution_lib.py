@@ -29,7 +29,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from calibration.water_vapor_correction.water_vapor import (  # noqa: E402
     _cams_levels, two_way_wv_transmission, DEFAULT_ABS_CROSS_SECTION,
     LASER_SPECTRUM, cams_nearest_offset_deg, KB, EPS, G0)
-from calibration.cloud.calibration import _nw_from_T_RH, _cams_levels_all_times  # noqa: E402
+from calibration.cloud.calibration import _nw_from_T_RH  # noqa: E402
+from calibration.water_vapor_correction.water_vapor import cams_levels_all_times  # noqa: E402
 
 # ---------------------------------------------------------------- paths / data
 CAMS_04 = Path("D:/CAMS_Monthly_04")          # operational 0.4 deg, 3-hourly, monthly files
@@ -94,7 +95,7 @@ def _cams_dt(cams_file: Path, lat: float, lon: float):
     """Cached (datetime64 steps, z[lev,t] ASL, nw[lev,t]) at the nearest CAMS grid point."""
     k = (str(cams_file), round(lat, 4), round(lon, 4))
     if k not in _CAMS_DT_CACHE:
-        tnum, z, _T, nw = _cams_levels_all_times(str(cams_file), lat, lon)
+        tnum, z, _T, nw = cams_levels_all_times(str(cams_file), lat, lon)
         dt = np.datetime64("1970-01-01") + ((tnum - 719529) * 86400).round().astype("timedelta64[s]")
         _CAMS_DT_CACHE[k] = (dt, np.asarray(z, float), np.asarray(nw, float))
     return _CAMS_DT_CACHE[k]

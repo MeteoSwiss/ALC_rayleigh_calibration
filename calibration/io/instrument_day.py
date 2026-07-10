@@ -8,7 +8,7 @@ functions so that, per instrument-day:
     (dynamic, per-file bin-averaging to a config target -- ``round(target / median
      native step)``, simple block means, cloud-base by *min* -- i.e. the pipeline's own
      reduction, so it is identical to what the cloud step already produces)
-* the **CAMS closest cell** is read once         -> :func:`_cams_levels_all_times`
+* the **CAMS closest cell** is read once         -> :func:`cams_levels_all_times`
     (lazy nearest-cell read of the 8.5 GB monthly file, LRU-cached by (file, lat, lon))
 * the two-way **WV transmission** is computed once on the working grid (910 nm only)
                                                  -> :func:`compute_wv_transmission`
@@ -39,7 +39,7 @@ from .cams import ensure_cams_file
 from .data_loader import CeilometerData, average_ceilometer_data, load_l1_data
 
 # MATLAB datenum of 1970-01-01: `compute_wv_transmission` compares CAMS datenums against
-# ``data.time_num`` on this convention (see ``_cams_levels_all_times``).
+# ``data.time_num`` on this convention (see ``cams_levels_all_times``).
 _MATLAB_DATENUM_1970 = 719529.0
 
 # The water-vapour correction applies to 910 nm ceilometers only; 1064 nm (CHM15k) has
@@ -229,7 +229,7 @@ def _wv_transmission_once(
     to what the cloud/OmB path produces on the same grid -- via a light data view. That
     function only reads ``.range``, ``.time``, ``.time_num``, ``.beta.shape[1]`` and the
     station coords off the object, and its CAMS read is the same cached
-    ``_cams_levels_all_times``.
+    ``cams_levels_all_times``.
     """
     # Lazy import to avoid any import cycle (cloud.calibration -> io.cams).
     from ..cloud.calibration import CloudCalConfig, compute_wv_transmission, set_defaults
@@ -340,10 +340,9 @@ def load_instrument_day(
             )
         if path is not None:
             cams_file = str(path)
-            # Lazy import to avoid any import cycle.
-            from ..cloud.calibration import _cams_levels_all_times
+            from ..water_vapor_correction.water_vapor import cams_levels_all_times
 
-            cams_cell = _cams_levels_all_times(cams_file, native.latitude, native.longitude)
+            cams_cell = cams_levels_all_times(cams_file, native.latitude, native.longitude)
             if itype.wavelength_nm in _WV_WAVELENGTHS_NM:
                 wv = _wv_transmission_once(
                     working, itype, str(cams_folder), str(cams_folder_fallback),

@@ -19,28 +19,12 @@ import numpy as np
 from numpy.typing import NDArray
 from netCDF4 import Dataset
 
-from .water_vapor import (
-    wv_t2eff_core, load_abs_cross_section, in_water_vapor_band, _A137, _B137)
+from .water_vapor import cams_levels_all_times, load_abs_cross_section
 from ..io.cams import ensure_cams_file
 
-_RD_CAMS = 287.06                        # J/(kg K), Rd in get_Beta_CAMS_oper_monthly.m
-
-
-_G0 = 9.80665                            # m/s^2 (get_Beta_CAMS_oper_monthly.m)
-
-
-_M_DRY = 28.9644                         # kg/kmol (get_meteo_const.m)
-
-
-_M_WET = 18.0152                         # kg/kmol (get_meteo_const.m)
-
-
-_C_MD = _M_WET / _M_DRY                  # = 0.6219808... (convert_humidity c)
-
-
+# Constants for the RH -> number-density converter (research sounding/RH input only; the CAMS
+# and ERA5 paths use the direct ideal-gas route in water_vapor._wv_number_density).
 _RW = 0.4615                             # J g^-1 K^-1 (get_water_vapor..RH.m)
-
-
 _NW_COEF = 7.25e22                       # number-density coefficient (get_water_vapor..RH.m)
 
 
@@ -88,140 +72,6 @@ def _nw_from_T_RH(T: NDArray, RH: NDArray) -> NDArray:
     return nw
 
 
-@lru_cache(maxsize=32)
-def _cams_levels_all_times(
-    cams_file: str, latitude: float, longitude: float,
-) -> Tuple[NDArray, NDArray, NDArray, NDArray]:
-    """Read CAMS T/q at the nearest grid point for ALL time steps and integrate the
-    L137 half-level geopotential, exactly like get_Beta_CAMS_oper_monthly.m (z=[] path).
-
-    Cached by (file, lat, lon): a station processes many days from the same monthly CAMS
-    file at one location, so without the cache the (tens-of-MB) file is re-read and the
-    hydrostatic integration redone for every single day (~8 s each). The returned arrays
-    are treated as read-only by ``compute_wv_transmission`` (it only interpolates from
-    them), so sharing them across days is safe.
-
-    Returns
-    -------
-    time_num : (n_t,) MATLAB datenum  = double(time_raw)/24 + datenum(1900,1,1)
-    z_model  : (n_lev, n_t)  geopotential height [m ASL]   (NOT sorted; native order)
-    T        : (n_lev, n_t)  temperature [K]
-    nw       : (n_lev, n_t)  water-vapor number density [m^-3]
-
-    The arrays keep the native CAMS level order (top..surface). The hydrostatic
-    integration walks from the surface (last index) upward and keys the top-of-atmos
-    singularity on the half-level whose pressure is identically zero (A=B=0), i.e.
-    ``level_number == 1`` -> ``idx == 0`` -- matching the MATLAB ``find(level(i)-1==...)``
-    behaviour without assuming a particular loop position.
-    """
-    with Dataset(cams_file, "r") as nc:
-        if "station" in nc.dimensions:
-            # Per-station MARS format (mars_wv_station_v1): t/q are (time, station, level),
-            # lnsp (time, station), z (station) static orography. Pick the nearest station
-            # (an exact match) and read its column; the L137 integration below is identical.
-            lat_m = np.asarray(nc.variables["lat"][:], dtype="float64")
-            lon_m = np.asarray(nc.variables["lon"][:], dtype="float64")
-            level = np.asarray(nc.variables["level"][:], dtype="float64")
-            t_cf = np.asarray(nc.variables["time"][:], dtype="float64")   # seconds since 1970-01-01
-            dlon = ((lon_m - longitude + 180.0) % 360.0) - 180.0
-            si = int(np.argmin((lat_m - latitude) ** 2 + dlon ** 2))
-            n_lev = level.size
-            n_t = t_cf.size
-            T = np.asarray(nc.variables["t"][:, si, :], dtype="float64").T           # (level, time)
-            q = np.asarray(nc.variables["q"][:, si, :], dtype="float64").T
-            lnsp = np.asarray(nc.variables["lnsp"][:, si], dtype="float64").ravel()  # (time,)
-            z_surf = np.full(n_t, float(np.asarray(nc.variables["z"][si])), dtype="float64")  # static
-            time_num = t_cf / 86400.0 + 719529.0   # datenum(1970,1,1) = 719529
-        else:
-            lon_m = np.asarray(nc.variables["longitude"][:], dtype="float64")
-            lat_m = np.asarray(nc.variables["latitude"][:], dtype="float64")
-            level = np.asarray(nc.variables["level"][:], dtype="float64")
-            time_raw = np.asarray(nc.variables["time"][:], dtype="float64")
-
-            li = int(np.argmin(np.abs(lon_m - longitude)))
-            ai = int(np.argmin(np.abs(lat_m - latitude)))
-            n_lev = level.size
-            n_t = time_raw.size
-
-            # ncread(...,'t',[li,ai,1,1],[1,1,n_lev,n_t]) -> squeeze -> (n_lev, n_t)
-            # netCDF4 variable dims are (time, level, latitude, longitude) in this file;
-            # index accordingly and transpose to (level, time).
-            tvar = nc.variables["t"]
-            qvar = nc.variables["q"]
-            zvar = nc.variables["z"]
-            spvar = nc.variables["lnsp"]
-            dim_names = tvar.dimensions  # e.g. ('time','level','latitude','longitude')
-
-            def _read_profile(var):
-                # Slice the NetCDF variable DIRECTLY so only this station's (level, time) column
-                # is read from disk. Never materialise the full 4-D (time, level, lat, lon) array
-                # via var[:] -- that is multi-GB for a monthly CAMS file and was the cause of the
-                # ~10 GB/worker RSS growth (freed numpy memory is not returned to the OS).
-                axes = {nm: k for k, nm in enumerate(dim_names)}
-                idx = [slice(None)] * len(dim_names)
-                idx[axes["longitude"]] = li
-                idx[axes["latitude"]] = ai
-                sub = np.asarray(var[tuple(idx)], dtype="float64")  # remaining dims: level, time (orig order)
-                remaining = [nm for nm in dim_names if nm in ("level", "time")]
-                lev_pos = remaining.index("level")
-                sub = np.moveaxis(sub, lev_pos, 0)  # (level, time)
-                return sub
-
-            T = _read_profile(tvar)
-            q = _read_profile(qvar)
-
-            # z, lnsp are surface fields stored at a single (top) level slot.
-            # MATLAB reads them at level index 1 (start=1,count=1) for all times.
-            def _read_surface(var):
-                axes = {nm: k for k, nm in enumerate(dim_names)}
-                idx = [slice(None)] * len(dim_names)
-                idx[axes["longitude"]] = li
-                idx[axes["latitude"]] = ai
-                idx[axes["level"]] = 0  # MATLAB start index 1 -> python 0 (first level slot)
-                sub = np.asarray(var[tuple(idx)], dtype="float64")  # read only the column; remaining dim: time
-                return sub.ravel()
-
-            z_surf = _read_surface(zvar)     # (n_t,) surface geopotential [m^2/s^2]
-            lnsp = _read_surface(spvar)      # (n_t,) ln surface pressure
-            time_num = time_raw / 24.0 + 693962.0  # datenum(1900,1,1) = 693962
-
-    # L137 a/b coefficients indexed by level NUMBER (param_137_levels(:,1)).
-    A = _A137
-    B = _B137
-
-    T_moist = T * (1.0 + 0.609133 * q)
-    z_f = np.full((n_lev, n_t), np.nan)
-    P_level = np.full((n_lev, n_t), np.nan)
-
-    lev_int = level.astype(int)
-    for t in range(n_t):
-        surface_pressure = np.exp(lnsp[t])
-        z_h = z_surf[t]
-        for i in range(n_lev - 1, -1, -1):
-            idx = lev_int[i] - 1  # half-level index (A/B indexed by level number)
-            Ph_lev = A[idx] + B[idx] * surface_pressure
-            Ph_levp1 = A[idx + 1] + B[idx + 1] * surface_pressure
-            P_level[i, t] = 0.5 * (Ph_lev + Ph_levp1)
-            if idx == 0:
-                dlogP = np.log(Ph_levp1 / 0.1)
-                alpha = np.log(2.0)
-            else:
-                dlogP = np.log(Ph_levp1 / Ph_lev)
-                dP = Ph_levp1 - Ph_lev
-                alpha = 1.0 - (Ph_lev / dP) * dlogP
-            TRd = T_moist[i, t] * _RD_CAMS
-            z_f[i, t] = z_h + TRd * alpha
-            z_h = z_h + TRd * dlogP
-
-    z_model = z_f / _G0  # m ASL
-
-    # RH via convert_humidity (q -> e -> RH with Murphy&Koop es)
-    e = (q * P_level) / (_C_MD + (1.0 - _C_MD) * q)   # Pa
-    es = _murphy_koop_es_liquid(T)                     # Pa
-    RH = 100.0 * e / es                                # %
-    nw = _nw_from_T_RH(T, RH)                          # m^-3
-
-    return time_num, z_model, T, nw
 
 
 _ERA5_CACHE_DATA: dict = {}
@@ -230,7 +80,7 @@ _ERA5_CACHE_DATA: dict = {}
 def _era5_levels_all_times(era5_cache: str, latitude: float, longitude: float):
     """Per-step ERA5 humidity profile at the station nearest (lat, lon), from a prefetched cache.
 
-    Mirrors the return contract of :func:`_cams_levels_all_times` so ``compute_wv_transmission`` is
+    Mirrors the return contract of :func:`cams_levels_all_times` so ``compute_wv_transmission`` is
     source-agnostic:
 
         time_num : (n_t,)          MATLAB datenum (days; datenum(1970,1,1)=719529)
@@ -349,7 +199,7 @@ def compute_wv_transmission(data: CeiloData, config: CloudCalConfig) -> NDArray:
             raise ValueError(
                 f"Closest CAMS data too far from station "
                 f"({data.station_latitude:.2f},{data.station_longitude:.2f}); station outside CAMS domain")
-        time_cams, cams_z, _cams_T, nw_all = _cams_levels_all_times(
+        time_cams, cams_z, _cams_T, nw_all = cams_levels_all_times(
             cams_file, data.station_latitude, data.station_longitude)
 
     # A monthly CAMS file holds ~248 (3-hourly) steps, but one daily ceilometer file spans
@@ -449,11 +299,6 @@ def _interp1_linear_nan(x: NDArray, y: NDArray, xi: NDArray) -> NDArray:
     return out
 
 
-def _cumtrapz_axis1(y: NDArray, x: NDArray) -> NDArray:
-    """MATLAB cumtrapz(x, y, 2): cumulative trapezoid along axis 1 with leading zero."""
-    dx = np.diff(x)
-    incr = 0.5 * (y[:, 1:] + y[:, :-1]) * dx[None, :]
-    return np.concatenate([np.zeros((y.shape[0], 1)), np.cumsum(incr, axis=1)], axis=1)
 
 
 def _interp1_nearest_extrap_cols(x: NDArray, Y: NDArray, xi: NDArray) -> NDArray:

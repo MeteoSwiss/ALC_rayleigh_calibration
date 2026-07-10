@@ -93,8 +93,7 @@ from ..io.cams import ensure_cams_file
 # The cloud water-vapour chain lives with the other WV code in ../water_vapor_correction/.
 from ..water_vapor_correction.cloud_water_vapor import (  # noqa: F401,E402
     compute_wv_transmission, _murphy_koop_es_liquid, _wagner_pruss_pws_hpa, _nw_from_T_RH,
-    _cams_levels_all_times, _era5_levels_all_times,
-    _interp1_linear_nan, _cumtrapz_axis1, _interp1_nearest_extrap_cols)
+    _era5_levels_all_times, _interp1_linear_nan, _interp1_nearest_extrap_cols)
 from ._filters import (  # noqa: F401,E402
     S_THEORETICAL, apply_multiple_scattering_correction, apply_instrument_filters,
     calculate_lidar_ratio, apply_cloud_filters, apply_temporal_consistency_filter,

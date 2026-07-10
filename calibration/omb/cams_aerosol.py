@@ -2,7 +2,7 @@
 
 The CAMS_Beta_*.nc files carry ``aerbackscatgnd355/532/1064`` (attenuated
 backscatter due to aerosol, from the ground), in m^-1 sr^-1, on the model
-levels. We reuse :func:`calibration.cloud.calibration._cams_levels_all_times`
+levels. We reuse :func:`calibration.water_vapor_correction.water_vapor.cams_levels_all_times`
 for the model-level geopotential height and time axis (it is LRU-cached, so the
 extra call is free) and read only the two aerosol-backscatter columns here.
 
@@ -23,7 +23,7 @@ import numpy as np
 from netCDF4 import Dataset
 from numpy.typing import NDArray
 
-from ..cloud.calibration import _cams_levels_all_times
+from ..water_vapor_correction.water_vapor import cams_levels_all_times
 
 __all__ = ["cams_aerosol_backscatter", "angstrom_interpolate"]
 
@@ -51,7 +51,7 @@ def _read_aer_column(nc: Dataset, name: str, li: int, ai: int) -> NDArray:
     """Read aerbackscatgnd<name> at one grid point as (level, time).
 
     Slices the NetCDF variable directly (never materialises the 4-D array),
-    mirroring ``_cams_levels_all_times._read_profile``.
+    mirroring ``cams_levels_all_times._read_profile``.
     """
     var = nc.variables[name]
     dim_names = var.dimensions  # ('time','level','latitude','longitude')
@@ -77,7 +77,7 @@ def cams_aerosol_backscatter(
     beta_aer : (n_lev, n_t)  aerosol backscatter [m^-1 sr^-1] at wavelength_nm
     """
     # Heights + time come from the cached molecular reader (same grid point).
-    time_num, z_model, _T, _nw = _cams_levels_all_times(cams_file, latitude, longitude)
+    time_num, z_model, _T, _nw = cams_levels_all_times(cams_file, latitude, longitude)
 
     with Dataset(cams_file, "r") as nc:
         lon_m = np.asarray(nc.variables["longitude"][:], dtype="float64")
