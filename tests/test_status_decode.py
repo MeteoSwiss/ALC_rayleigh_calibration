@@ -218,6 +218,41 @@ def test_summarize_chm_uses_error_ext_table():
     assert any("Laser optical unit temperature error" in k for k in ds.flags)
 
 
+def test_prevalence_gate_transient_does_not_warn_day():
+    # Full day at 60 s cadence (1440 profiles, 60/hour). A single transient warning profile
+    # (1/60 = 1.7% of its hour, < 5%) is gated out -> the day stays 'pass'.
+    times = _uniform(24, interval_s=60)
+    vals = [0] * len(times)
+    vals[100] = 1 << 29                      # one profile, Transmitter expires (W)
+    ds = summarize_day(times, "CL31", status_values=vals)
+    assert ds.quality == "pass"
+    assert ds.flags == {}
+    assert ds.n_warn_h == 0
+    assert ds.summary == "No warning or error recorded"
+
+
+def test_prevalence_gate_sustained_warns_day():
+    # 10 of 60 profiles in one hour (16.7% > 5%) is kept -> that hour counts.
+    times = _uniform(24, interval_s=60)
+    vals = [0] * len(times)
+    for k in range(10):
+        vals[5 * 60 + k] = 1 << 46           # Transmitter failure (A), sustained in hour 5
+    ds = summarize_day(times, "CL31", status_values=vals)
+    assert ds.quality == "error"
+    assert ds.flags.get("Transmitter failure (A)") == 1   # exactly 1 gated hour
+    assert ds.n_alarm_h == 1
+    assert "'Transmitter failure (A)' 1 h" in ds.summary
+
+
+def test_prevalence_threshold_is_tunable():
+    times = _uniform(24, interval_s=60)
+    vals = [0] * len(times)
+    vals[100] = 1 << 29                      # 1.7% of its hour
+    # with a 1% threshold the same blip now counts
+    ds = summarize_day(times, "CL31", status_values=vals, prevalence_threshold=0.01)
+    assert ds.flags.get("Transmitter expires (W)") == 1
+
+
 def test_summarize_accepts_numpy_arrays():
     np = __import__("numpy")
     times = np.array(_uniform(24), dtype=float)

@@ -47,6 +47,12 @@ QUALITY_ORDER = ["nodata", "pass", "warning", "error"]
 # Severity -> quality class it contributes (info contributes nothing).
 _SEV_TO_QUALITY = {Severity.ERROR: "error", Severity.WARNING: "warning"}
 
+# Hourly prevalence gate: a decoded warning/alarm is credited to a clock-hour only if it appears in
+# MORE than this fraction of that hour's profiles (default 5%). This filters transient single-profile
+# blips (e.g. the CHM15k bit-12 laser-controller-temperature firmware quirk, present in ~0.1% of
+# profiles) from painting a whole day 'warning'; a genuine sustained fault still exceeds it.
+PREVALENCE_THRESHOLD = 0.05
+
 
 def _worst(*classes: str) -> str:
     """Return the most severe of several quality classes ('error' beats 'warning' …)."""
@@ -367,6 +373,7 @@ def summarize_day(
     hk: Optional[Dict[str, float]] = None,
     thresholds: Optional[HKThresholds] = None,
     error_string_fmt: str = "auto",
+    prevalence_threshold: float = PREVALENCE_THRESHOLD,
     expected_interval_s: Optional[float] = None,
 ) -> DayStatus:
     """Aggregate one day of profiles into a :class:`DayStatus`.
@@ -381,9 +388,12 @@ def summarize_day(
     hk          : daily-mean housekeeping ({window, laser, temp_internal, ...}).
     thresholds  : HK thresholds (defaults if None).
     error_string_fmt : "48" (default) or "32" for the Vaisala decoder.
+    prevalence_threshold : a flag counts toward a clock-hour only if present in > this fraction of
+                    that hour's profiles (default 5%); the reported count is the number of such hours.
 
-    Occurrence counting is in **distinct clock-hours present** (0-24), matching the
-    operator's "N hourly occurrences" convention.
+    Occurrence counting is in **prevalence-gated clock-hours** (0-24): the number of hours in which a
+    code exceeded ``prevalence_threshold`` — matching the operator's "N hourly occurrences" and
+    suppressing transient single-profile blips.
     """
     thresholds = thresholds or HKThresholds()
     itype = str(itype or "")
@@ -403,29 +413,28 @@ def summarize_day(
         expected = 86400.0 / interval
         coverage = min(100.0, 100.0 * n_profiles / expected) if expected > 0 else float("nan")
 
-    # --- decode each profile, tallying distinct hours per flag + per severity ---
-    flag_hours: Dict[str, set] = {}
+    # --- decode each profile, tallying per-(clock-hour, flag) counts + per-hour profile totals ---
+    hour_total: Dict[int, int] = {}          # hour -> # profiles (prevalence denominator)
+    hour_flag: Dict[int, Dict[str, int]] = {}  # hour -> {flag: # profiles with it}
     flag_sev: Dict[str, str] = {}
-    alarm_hours: set = set()
-    warn_hours: set = set()
 
-    def _record(decoded: List[Tuple[str, str]], hour: int) -> None:
+    def _accumulate(decoded: List[Tuple[str, str]], hour: int) -> None:
+        hour_total[hour] = hour_total.get(hour, 0) + 1
+        if not decoded:
+            return
+        hf = hour_flag.setdefault(hour, {})
         for name, sev in decoded:
             if sev == Severity.INFO:
                 continue  # informational (S)/Note -> ignored per user
-            flag_hours.setdefault(name, set()).add(hour)
+            hf[name] = hf.get(name, 0) + 1
             flag_sev[name] = sev
-            if sev == Severity.ERROR:
-                alarm_hours.add(hour)
-            elif sev == Severity.WARNING:
-                warn_hours.add(hour)
 
     if cl61_status:
         names = list(cl61_status.keys())
         for i, t in enumerate(times):
             snapshot = {nm: cl61_status[nm][i] for nm in names
                         if i < len(cl61_status[nm])}
-            _record(decode_cl61_status(snapshot), _hour_of(t))
+            _accumulate(decode_cl61_status(snapshot), _hour_of(t))
     elif status_values is not None:
         is_chm = itype.upper().startswith("CHM")
         n = min(len(times), len(status_values))
@@ -433,8 +442,22 @@ def summarize_day(
             val = status_values[i]
             decoded = (decode_chm15k_error_ext(val) if is_chm
                        else decode_vaisala_error_string(val, fmt=error_string_fmt))
-            _record(decoded, _hour_of(times[i]))
+            _accumulate(decoded, _hour_of(times[i]))
 
+    # Prevalence gate: a flag "occurred" in an hour only if it exceeds the threshold there; its
+    # reported count is the number of such hours. Alarm/warning hours are the gated hours.
+    flag_hours: Dict[str, set] = {}
+    for h, fl in hour_flag.items():
+        tot = hour_total.get(h, 0)
+        if tot <= 0:
+            continue
+        for name, cnt in fl.items():
+            if cnt / tot > prevalence_threshold:
+                flag_hours.setdefault(name, set()).add(h)
+    alarm_hours = {h for nm, hrs in flag_hours.items()
+                   if flag_sev.get(nm) == Severity.ERROR for h in hrs}
+    warn_hours = {h for nm, hrs in flag_hours.items()
+                  if flag_sev.get(nm) == Severity.WARNING for h in hrs}
     flags = {name: len(hrs) for name, hrs in flag_hours.items()}
 
     # --- quality class = worst of flags / availability / housekeeping ---
