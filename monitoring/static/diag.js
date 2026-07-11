@@ -217,8 +217,10 @@
 
     viewers.push(viewer);   // let the availability bar drive this viewer
     cal = buildCalendar(calEl, items, function (d) { viewer.jump(d); active = viewer; });
-    section.querySelector(".diag-prev").addEventListener("click", function () { viewer.prevValid(); });
-    section.querySelector(".diag-next").addEventListener("click", function () { viewer.nextValid(); });
+    var pv = section.querySelector(".diag-prev");   // absent on the classification card (no pass/fail)
+    if (pv) pv.addEventListener("click", function () { viewer.prevValid(); });
+    var nx = section.querySelector(".diag-next");
+    if (nx) nx.addEventListener("click", function () { viewer.nextValid(); });
     var up = section.querySelector(".diag-up"), dn = section.querySelector(".diag-down");
     if (up) up.addEventListener("click", function () { viewer.prevAny(); });
     if (dn) dn.addEventListener("click", function () { viewer.nextAny(); });

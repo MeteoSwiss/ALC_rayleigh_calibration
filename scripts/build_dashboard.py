@@ -51,6 +51,14 @@ def _changed_keys(fullcal_dir: Path, out_dir: Path):
                 changed.add(csv.parent.name)   # the key == the per-stream sub-folder name
         except OSError:
             continue
+    # A new/updated classification curtain also re-renders its station (the day list is embedded in
+    # the station HTML). The .nc lives at <key>/classification/<wmo>/<year>/, so the key is the top part.
+    for nc in fullcal_dir.glob("*/classification/**/*_classification.nc"):
+        try:
+            if nc.stat().st_mtime > cutoff:
+                changed.add(nc.relative_to(fullcal_dir).parts[0])
+        except OSError:
+            continue
     return changed
 
 

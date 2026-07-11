@@ -54,11 +54,14 @@ fi
 
 # --- 1b. images-in-bucket: prune now-published local diag PNGs to reclaim disk -----------------
 if [ "${ALC_IMAGES_IN_BUCKET:-0}" = "1" ] && [ "${rc:-0}" -eq 0 ] && [ -n "${ALC_FULLCAL_DIR:-}" ]; then
-  n=$(find "$ALC_FULLCAL_DIR" -name '*_diag_compact.png' -type f 2>/dev/null | wc -l)
+  # Diagnostic PNGs (cloud/rayleigh) under plots/ AND the classification curtains under classification/
+  # are both staged into diag/ and synced above; prune both local copies (the classification NetCDF is
+  # kept -- it is the per-day marker the dashboard index reads).
+  n=$(find "$ALC_FULLCAL_DIR" \( -name '*_diag_compact.png' -o -name '*_classification.png' \) -type f 2>/dev/null | wc -l)
   if [ "$n" -gt 0 ]; then
-    echo "publish: images-in-bucket -> pruning $n local diag PNGs already synced to the bucket"
-    find "$ALC_FULLCAL_DIR" -name '*_diag_compact.png' -type f -delete
-    find "$ALC_FULLCAL_DIR" -path '*/plots/*' -type d -empty -delete 2>/dev/null || true
+    echo "publish: images-in-bucket -> pruning $n local diag/classification PNGs already synced to the bucket"
+    find "$ALC_FULLCAL_DIR" \( -name '*_diag_compact.png' -o -name '*_classification.png' \) -type f -delete
+    find "$ALC_FULLCAL_DIR" \( -path '*/plots/*' -o -path '*/classification/*' \) -type d -empty -delete 2>/dev/null || true
   fi
 fi
 

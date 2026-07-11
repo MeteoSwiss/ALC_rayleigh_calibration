@@ -112,6 +112,28 @@
 </section>
 {% endfor %}
 
+{% if class_diags %}
+<section class="block">
+  <h2>Cloudnet target classification
+    <span class="muted">— {{ class_diags | length }} day{{ 's' if class_diags | length != 1 else '' }} · aerosol / cloud / drizzle / ice / supercooled (ceiloclass, driven by CAMS T)</span></h2>
+  <section class="diag card" id="diag-classification" data-key="{{ key }}" data-method="classification"
+           data-itype="{{ meta.itype }}" tabindex="0">
+    <h3>Classification — <span class="diag-date muted">latest</span>
+      <span class="diag-nav">
+        <button type="button" class="diag-up" title="Previous day (Ctrl+←)">‹ day</button>
+        <button type="button" class="diag-down" title="Next day (Ctrl+→)">day ›</button>
+      </span>
+      <span class="muted diag-hint">— <b>Ctrl+← →</b> step days, or click a day in the calendar</span>
+    </h3>
+    <div class="diag-body">
+      <div class="diag-cal"></div>
+      <a class="diag-imglink" target="_blank" rel="noopener"><img class="diag-img" alt="target classification curtain"></a>
+    </div>
+    <script type="application/json" class="diag-data">{{ class_diags | tojson }}</script>
+  </section>
+</section>
+{% endif %}
+
 {% if monitoring %}
 <section class="card">
   <h2>Instrument monitoring <span class="muted">— daily averages: laser power, window transmission, temperatures</span></h2>

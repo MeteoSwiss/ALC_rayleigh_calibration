@@ -104,6 +104,25 @@ def _diag_rows_from_csv(fullcal_dir: Path, keys) -> list:
     return rows
 
 
+def _classification_rows(fullcal_dir: Path, keys) -> list:
+    """Cloudnet classification curtain rows (method='classification'), one per
+    ``<key>/classification/<wmo>/<YYYY>/<key>_<YYYYMMDD>_classification.nc``. Enumerating the NetCDF
+    (which is never pruned) works in BOTH on-disk and IMAGES_IN_BUCKET modes; ``src`` is the sibling
+    PNG -- staged if it still exists on disk, else served from the bucket by (key, method, date)."""
+    import re
+    rows = []
+    for key in keys:
+        cdir = Path(fullcal_dir) / key / "classification"
+        if not cdir.exists():
+            continue
+        for nc in cdir.rglob("*_classification.nc"):
+            m = re.search(r"_(\d{8})_classification", nc.name)
+            if m:
+                rows.append(dict(key=key, method="classification", date=m.group(1),
+                                 src=str(nc.with_name(nc.stem + ".png"))))
+    return rows
+
+
 def _scan_diagnostics(fullcal_dir: Path, keys) -> pd.DataFrame:
     """Find per-calibration diagnostic PNGs the runner emitted under <key>/plots/**/*.png.
 
@@ -116,7 +135,8 @@ def _scan_diagnostics(fullcal_dir: Path, keys) -> pd.DataFrame:
     rest."""
     cols = ["key", "method", "date", "src"]
     if config.IMAGES_IN_BUCKET:
-        return pd.DataFrame(_diag_rows_from_csv(fullcal_dir, keys), columns=cols)
+        return pd.DataFrame(_diag_rows_from_csv(fullcal_dir, keys)
+                            + _classification_rows(fullcal_dir, keys), columns=cols)
     rows = []
     for key in keys:
         pdir = Path(fullcal_dir) / key / "plots"
@@ -131,6 +151,7 @@ def _scan_diagnostics(fullcal_dir: Path, keys) -> pd.DataFrame:
             if method is None:
                 continue
             rows.append(dict(key=key, method=method, date=date, src=str(png)))
+    rows += _classification_rows(fullcal_dir, keys)   # per-day classification curtains
     return pd.DataFrame(rows, columns=cols)
 
 

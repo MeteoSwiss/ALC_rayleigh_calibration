@@ -320,6 +320,9 @@ def _diag_index_from(d: pd.DataFrame, cal: pd.DataFrame) -> dict:
         d["success"] = [t in succ for t in zip(d["key"], d["method"], d["date"])]
     else:
         d["success"] = False
+    # Classification is a product, not a pass/fail calibration -> every classified day is "valid"
+    # (so the day-picker shows it available, not greyed like a rejected calibration).
+    d.loc[d["method"] == "classification", "success"] = True
     d = d.sort_values("date")
     for (key, method), g in d.groupby(["key", "method"], sort=False):
         by[(key, method)] = g[["date", "rel", "success"]].to_dict("records")
@@ -583,6 +586,9 @@ def _render_one_station(key, ctx) -> str:
                if len(cal[(cal["key"] == key) & (cal["method"] == m)])]
     blocks = [_method_block(key, m, cal, kal, series, ctx.diag_by.get((key, m), []),
                             ctx.op_all, ctx.oldray_all) for m in methods]
+    # Cloudnet target classification curtains: a per-day gallery like the calibration diagnostics, but
+    # not tied to a calibration method (it has no cal rows), so it renders as its own standalone card.
+    class_diags = ctx.diag_by.get((key, "classification"), [])
     overlay = None
     if len(methods) >= 2:
         by_method = {m: cal[(cal["key"] == key) & (cal["method"] == m)] for m in methods}
@@ -612,6 +618,7 @@ def _render_one_station(key, ctx) -> str:
                            prev_station=prev_station, next_station=next_station,
                            monitoring=monitoring, availability=availability, status_json=status_json,
                            ombsens=ombsens, nc_files=nc_files, ceda_url=ceda_url,
+                           class_diags=class_diags,
                            periods=getattr(ctx, "periods", None),
                            periods_json=getattr(ctx, "periods_json", None))
     (ctx.out_dir / "stations" / f"{key}.html").write_text(html, encoding="utf-8")
