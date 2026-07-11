@@ -28,12 +28,15 @@ CL61    beta_att (physical) 1.0    (rcs_0 already beta)
 
 from __future__ import annotations
 
+import datetime as _dt
 from os import PathLike
 
 import netCDF4
 import numpy as np
 from cftime import num2pydate
 from numpy import ma
+
+_EPOCH = _dt.datetime(1970, 1, 1)
 
 from ceilopyter.ceilo import Ceilo
 from ceilopyter.ceilo_raw import CeiloRaw, concatenate_raw
@@ -138,7 +141,9 @@ def ceilo_from_shared(idd, calibration_factor: float | None = None) -> Ceilo:
     key, wl_fallback, default_factor = _spec_for(idd.instrument_type.value)
     factor = default_factor if calibration_factor is None else calibration_factor
     w = idd.working
-    time = list(np.asarray(w.time_datetime))
+    # Python datetimes (the loader keeps cftime; ceilopyter/matplotlib want datetime), built from the
+    # numeric ``time`` (days since 1970) so they match the file reader's num2pydate output type.
+    time = [_EPOCH + _dt.timedelta(days=float(t)) for t in np.asarray(w.time, dtype="float64")]
     rng = np.asarray(w.range_alc, dtype=float)
     beta = ma.masked_invalid(np.asarray(w.rcs, dtype=float))          # (time, range), raw rcs_0
     wavelength = float(idd.wavelength_nm_file) if idd.wavelength_nm_file else wl_fallback

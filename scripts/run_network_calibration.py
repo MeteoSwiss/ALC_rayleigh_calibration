@@ -903,9 +903,75 @@ def _do_sens(s, start, end, kalman_rows, shared=None):
         span_min=span_min, span_max=span_max)
 
 
+# --- Cloudnet target classification (optional add-on) -----------------------
+CLASSIFY_TYPES = {"CL31", "CL51", "CL61", "CHM15k"}  # ceiloclass has no Mini-MPL reader
+
+
+def _do_classification(s, start, end, shared=None):
+    """Cloudnet target classification (ceiloclass) per stream-day, on the shared read-once grid.
+
+    Builds the classifier input from the coarse working grid (rcs_0 -> beta, + CL61 depolarization)
+    and the CAMS temperature -> writes a classification NetCDF (+ curtain PNG when PLOTS=1) under
+    ``<key>/classification/<wmo>/<year>/``. ``ceiloclass``/``ceilopyter`` are OPTIONAL deps: if
+    missing, log once and return. A day without CAMS temperature is skipped (no melting-layer
+    reference); any per-day failure is logged and skipped, never aborting the run.
+    """
+    try:
+        from calibration.classify import cams_to_model, ceilo_from_shared
+        from ceiloclass.classification import classify
+        from ceiloclass.plot import plot_classification
+        from ceiloclass.write import write_classification
+    except ImportError as exc:
+        print(f"{_key(s)}: classification skipped (optional ceiloclass deps missing: {exc})", flush=True)
+        return 0
+    from calibration.io.cams import find_cams_file
+
+    info = _info(s)
+    key = _key(s)
+    n_ok = 0
+    for d in _days(start, end):
+        fp = _l1_file(s["wmo"], s["ident"], d)
+        if not fp.exists():
+            continue
+        ds = d.strftime("%Y%m%d")
+        cams = next((c for c in (find_cams_file(f, ds) for f in (CAMS, CAMS_FALLBACK) if f is not None)
+                     if c is not None), None)
+        if cams is None:
+            continue  # no CAMS temperature for this month -> cannot place the melting layer
+        try:
+            idd = shared(ds) if shared is not None else None
+            if idd is None:
+                idd = load_instrument_day(
+                    [str(fp)], s["type"], CAMS,
+                    cams_folder_fallback=(str(CAMS_FALLBACK) if CAMS_FALLBACK else ""),
+                    read_cams=False, build_working=True)
+            if idd is None:
+                continue
+            sub = idd.slice_to_date(d)                 # day D of the shared night read (coarse grid)
+            ceilo = ceilo_from_shared(sub)
+            alt = float(sub.altitude)
+            model = cams_to_model(str(cams), s["lat"], s["lon"], ceilo.time, ceilo.range, alt)
+            result = classify(ceilo, model, altitude=alt, use_wet_bulb=False)  # CAMS is dry-bulb
+            cdir = OUT / key / "classification" / info.wmo_id / ds[:4]
+            cdir.mkdir(parents=True, exist_ok=True)
+            base = f"{key}_{ds}"
+            write_classification(
+                result, cdir / f"{base}_classification.nc",
+                wavelength=float(ceilo.wavelength), altitude=alt,
+                latitude=s["lat"], longitude=s["lon"],
+                location=s.get("site", key), source_files=[str(fp)])
+            if PLOT_ENABLED:
+                plot_classification(result, str(cdir / f"{base}_classification.png"),
+                                    beta=ceilo.beta, depol=ceilo.depol, histogram=True)
+            n_ok += 1
+        except Exception as exc:  # noqa: BLE001 - a classification failure must not lose the run
+            print(f"{key} {ds}: classification failed: {type(exc).__name__}: {exc}", flush=True)
+    return n_ok
+
+
 # --- One instrument stream --------------------------------------------------
 def _process_stream(payload):
-    s, start, end, methods, hk_only, do_sens, do_omb, no_cal = payload
+    s, start, end, methods, hk_only, do_sens, do_omb, no_cal, do_classify = payload
     warnings.filterwarnings("ignore")
     logging.getLogger().setLevel(logging.CRITICAL)
     key = _key(s)
@@ -963,6 +1029,13 @@ def _process_stream(payload):
         except Exception as exc:  # noqa: BLE001 - an add-on failure must not lose the calibration
             print(f"{key}: sens/omb failed: {type(exc).__name__}: {exc}", flush=True)
 
+    # Cloudnet target classification (independent of the calibration; rides on the shared read).
+    if do_classify:
+        try:
+            _do_classification(s, start, end, shared)
+        except Exception as exc:  # noqa: BLE001 - classification must not lose the calibration
+            print(f"{key}: classification failed: {type(exc).__name__}: {exc}", flush=True)
+
     return key, s["type"], len(rows), n_ok
 
 
@@ -1018,12 +1091,18 @@ def main():
     ap.add_argument("--sens", action="store_true",
                     help="also produce the instrument sensitivity / detection-threshold product "
                          "(<key>_sens.png/.csv): per-day noise -> ICAO detection altitude.")
+    ap.add_argument("--classify", action="store_true",
+                    help="also run the Cloudnet target classification (ceiloclass) per stream-day on "
+                         "the shared read-once grid; writes <key>/classification/<wmo>/<year>/*.nc "
+                         "(+ curtain PNG when PLOTS=1). Needs the optional ceiloclass/ceilopyter deps "
+                         "and CAMS temperature; CHM15k/CL31/CL51/CL61 (no Mini-MPL reader).")
     ap.add_argument("--no-cal", action="store_true",
-                    help="skip (re)calibration and REUSE the existing <key>_kalman.csv for --omb/--sens "
-                         "(the decoupled add-on pass / operational D-1 step). Requires --omb and/or --sens.")
+                    help="skip (re)calibration and REUSE the existing <key>_kalman.csv for "
+                         "--omb/--sens (the decoupled add-on pass / operational D-1 step). Requires "
+                         "--omb, --sens and/or --classify.")
     args = ap.parse_args()
-    if args.no_cal and not (args.omb or args.sens):
-        ap.error("--no-cal requires --omb and/or --sens (nothing to do otherwise)")
+    if args.no_cal and not (args.omb or args.sens or args.classify):
+        ap.error("--no-cal requires --omb, --sens and/or --classify (nothing to do otherwise)")
 
     start = datetime.strptime(args.start, "%Y%m%d")
     end = datetime.strptime(args.end, "%Y%m%d")
@@ -1041,7 +1120,7 @@ def main():
             print(f"stream {args.stream} not in census", flush=True)
             return
         _process_stream((s, start, end, methods, args.hk_only,
-                         args.sens, args.omb, args.no_cal))
+                         args.sens, args.omb, args.no_cal, args.classify))
         return
 
     types = [t.strip() for t in args.types.split(",")]
@@ -1052,10 +1131,12 @@ def main():
     if args.hk_only:
         relevant = set(ITYPE)
     elif args.no_cal:
-        # sens/omb-only: every calibratable stream (it reuses its existing Kalman)
-        relevant = RAYLEIGH_TYPES | CLOUD_TYPES
+        # sens/omb/classify-only: every calibratable/classifiable stream (reuses its existing Kalman)
+        relevant = RAYLEIGH_TYPES | CLOUD_TYPES | CLASSIFY_TYPES
     else:
         relevant = (RAYLEIGH_TYPES if "rayleigh" in methods else set()) | (CLOUD_TYPES if "cloud" in methods else set())
+    if args.classify:
+        relevant |= CLASSIFY_TYPES        # classification runs alongside any calibration methods
     streams = [s for s in streams if s["type"] in relevant]
     OUT.mkdir(parents=True, exist_ok=True)
     # Per-run output marker drives resume (skip streams that already produced it). The marker
@@ -1084,6 +1165,8 @@ def main():
             cmd.append("--omb")
         if args.sens:
             cmd.append("--sens")
+        if args.classify:
+            cmd.append("--classify")
         if args.no_cal:
             cmd.append("--no-cal")
         try:
