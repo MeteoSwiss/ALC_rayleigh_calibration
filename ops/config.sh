@@ -49,6 +49,7 @@ export ALC_BACKFILL_DAYS="${ALC_BACKFILL_DAYS:-5}"                  # also (re)t
 export ALC_WORKERS="${ALC_WORKERS:-6}"                             # parallel streams (slow no-sudo server -> keep modest)
 export STREAM_TIMEOUT="${STREAM_TIMEOUT:-1800}"                     # per-stream subprocess timeout (seconds)
 export PLOTS="${PLOTS:-1}"                                          # 1 = render diagnostic PNGs (needed for the per-calibration viewer)
+export ALC_CLASSIFY="${ALC_CLASSIFY:-0}"                           # 1 = also run Cloudnet target classification (needs ceiloclass in $ALC_VENV; set 1 after install)
 
 # --- network (no-sudo server behind a proxy): uncomment + set if CAMS download needs it ----------
 export https_proxy="http://proxy.meteoswiss.ch:8080"; export http_proxy="$https_proxy"; export no_proxy="localhost,127.0.0.1"

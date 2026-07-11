@@ -17,13 +17,12 @@ ice/liquid split) is a small extension.
 from __future__ import annotations
 
 from os import PathLike
-from pathlib import Path
 
 import numpy as np
 
 from ceiloclass.model import Model
 
-from ..water_vapor_correction.water_vapor import cams_temperature_pressure_profile
+from ..water_vapor_correction.water_vapor import _matlab_datenum_days, cams_levels_all_times
 
 _ISA_LAPSE = 6.5e-3  # K/m, standard tropospheric lapse rate (T rises downward)
 
@@ -54,33 +53,44 @@ def cams_to_model(
     obs_range: np.ndarray,
     altitude: float,
 ) -> Model:
-    """Temperature ``Model`` on the (obs_time, obs_range) grid from a CAMS file.
+    """Time-varying temperature ``Model`` on the (obs_time, obs_range) grid from a CAMS file.
+
+    Each CAMS time step is integrated to geometric height independently (via
+    :func:`cams_levels_all_times`), mapped onto the observation height grid, then interpolated in
+    time to every observation profile. This preserves CAMS's native (3-hourly) temporal resolution
+    so the melting layer *moves* through the day -- a day-averaged profile both freezes the 0 degC
+    isotherm and, on days with a surface-pressure swing, distorts it (model-level averaging invents a
+    warm layer; see :func:`..water_vapor_correction.water_vapor._cams_levels`).
 
     Args:
         cams_file: ``CAMS_Beta_<month>.nc`` (or regional variant).
         lat, lon: Station coordinates; the nearest CAMS grid point is used.
-        obs_time: Ceilometer time (datetimes); its span sets the CAMS averaging window.
+        obs_time: Ceilometer time (datetimes).
         obs_range: Ceilometer range (m).
         altitude: Site altitude (m a.s.l.), to align range (a.g.l.) with CAMS a.s.l.
 
     Returns:
         A ceiloclass ``Model`` (dry-bulb temperature + extrapolation flag).
     """
-    t_start = np.datetime64(min(obs_time))
-    t_end = np.datetime64(max(obs_time))
-    profile = cams_temperature_pressure_profile(
-        Path(cams_file), float(lat), float(lon), t_start, t_end
-    )
-    if profile is None:
+    time_num, z_t, temp_t, _n_wv = cams_levels_all_times(str(cams_file), float(lat), float(lon))
+    if time_num.size == 0:
         msg = f"No CAMS data at ({lat},{lon}) in {cams_file}"
         raise ValueError(msg)
-    h_asl, temp, _pressure = profile  # sorted ascending in altitude
 
     obs_h_asl = np.asarray(obs_range, dtype=float) + float(altitude)
-    t_on_range = _temperature_on_heights(obs_h_asl, np.asarray(h_asl), np.asarray(temp))
-    # Temperature varies little over a night: use the mean profile for every step.
-    tw = np.broadcast_to(t_on_range, (len(obs_time), obs_h_asl.size)).copy()
-    extrapolated = np.broadcast_to(
-        obs_h_asl > h_asl[-1], (len(obs_time), obs_h_asl.size)
-    ).copy()
+    # 1) each CAMS time -> temperature on the obs height grid (a.s.l.), lapse-extrapolated below
+    t_ct = np.empty((time_num.size, obs_h_asl.size))
+    top_asl = np.empty(time_num.size)
+    for j in range(time_num.size):
+        zj = np.asarray(z_t[:, j], dtype=float)
+        order = np.argsort(zj)
+        t_ct[j] = _temperature_on_heights(obs_h_asl, zj[order], np.asarray(temp_t[order, j]))
+        top_asl[j] = zj[order][-1]
+    # 2) interpolate across CAMS time to each observation profile (moving melting layer)
+    obs_num = _matlab_datenum_days(np.asarray(obs_time, dtype="datetime64[ns]"))
+    tw = np.empty((obs_num.size, obs_h_asl.size))
+    for i in range(obs_h_asl.size):
+        tw[:, i] = np.interp(obs_num, time_num, t_ct[:, i])
+    top_at_obs = np.interp(obs_num, time_num, top_asl)
+    extrapolated = obs_h_asl[None, :] > top_at_obs[:, None]
     return Model(tw, extrapolated)

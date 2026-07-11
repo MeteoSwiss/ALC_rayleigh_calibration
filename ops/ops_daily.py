@@ -55,6 +55,10 @@ BACKFILL_DAYS = int(os.environ.get("ALC_BACKFILL_DAYS") or "5")
 WORKERS = str(os.environ.get("ALC_WORKERS") or "6")
 PY = sys.executable
 PUBLISH = (os.environ.get("ALC_PUBLISH") or "0") == "1"
+# Cloudnet target classification (per stream-day NetCDF + curtain PNG on the dashboard). Off by
+# default; flip on with ALC_CLASSIFY=1 once ceiloclass/ceilopyter are in $ALC_VENV. The runner
+# degrades gracefully (skips) if the deps or CAMS temperature are absent, so this never fails a run.
+CLASSIFY = (os.environ.get("ALC_CLASSIFY") or "0") == "1"
 PUBLISH_SH = REPO / "ops" / "publish.sh"
 
 PROCESSED = DASHBOARD_DIR / ".processed_days"     # one YYYYMMDD per line: days CAMS was present + run
@@ -118,6 +122,8 @@ def calibrate(ds: str) -> bool:
            "--start", ds, "--end", ds, "--per-type", "0", "--ignore-coverage",
            "--workers", WORKERS, "--methods", "rayleigh,cloud", "--force",
            "--sens", "--omb"]
+    if CLASSIFY:
+        cmd.append("--classify")
     log(f"  calibrate {ds}: {' '.join(cmd[1:])}")
     return subprocess.run(cmd, cwd=str(REPO)).returncode == 0
 

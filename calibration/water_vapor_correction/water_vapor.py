@@ -349,16 +349,38 @@ def _cams_levels(
         tmask = np.zeros(time_dt.size, dtype=bool)
         tmask[it] = True
     idx = np.where(tmask)[0]
-    T_avg = T[:, idx].mean(axis=1)
-    q_avg = q[:, idx].mean(axis=1)
-    z_surf_avg = float(z_surf[idx].mean())
-    lnsp_avg = float(lnsp[idx].mean())
-    if not (np.isfinite(z_surf_avg) and np.isfinite(lnsp_avg)):
+    if not (np.all(np.isfinite(z_surf[idx])) and np.all(np.isfinite(lnsp[idx]))):
         return None
-    H, P_level = _hydrostatic_z_p(level, T_avg, q_avg, z_surf_avg, lnsp_avg)
-    n_wv = _wv_number_density(q_avg, P_level, T_avg)
-    order = np.argsort(H)
-    return H[order], T_avg[order], P_level[order], n_wv[order]
+    # Integrate EACH time step to geometric height first, then average the fields ON HEIGHT.
+    # Averaging on model-level *index* (the old behaviour) is only valid at constant surface
+    # pressure: model level k sits at pressure A[k]+B[k]*ps, so when ps varies across the window
+    # (e.g. a frontal passage) a fixed index maps to different altitudes at different times, and
+    # blending them manufactures a spurious profile. On Payerne 2026-01-27 an 8.7 hPa ps swing
+    # invented a +3.6 degC warm layer and threw the 0 degC isotherm ~1.4 km too high. Averaging the
+    # per-time geometric-height profiles removes the artifact and is a no-op when ps is steady.
+    z_t, P_t = _hydrostatic_z_p(level, T[:, idx], q[:, idx], z_surf[idx], lnsp[idx])  # (n_lev, n_t)
+    n_wv_t = _wv_number_density(q[:, idx], P_t, T[:, idx])
+    # Average on a FIXED geometric-height grid, independent of the model-level index -- fine through
+    # the troposphere (the 2-6 km Rayleigh window + the WV column), coarser above. A grid tied to the
+    # per-level *mean* height would just map each time back onto its own level values and reproduce
+    # model-level averaging (the artifact); a fixed grid samples every time at the SAME altitudes.
+    z_bottom = float(np.floor(z_t.min()))
+    z_top = float(np.ceil(z_t.max()))
+    z_break = min(8000.0, z_top)
+    z_grid = np.unique(np.concatenate([
+        np.arange(z_bottom, z_break, 20.0),
+        np.arange(z_break, z_top + 250.0, 250.0),
+    ]))
+
+    def _height_average(field_t: NDArray) -> NDArray:
+        acc = np.zeros(z_grid.size)
+        for j in range(idx.size):
+            zj = z_t[:, j]
+            oj = np.argsort(zj)
+            acc += np.interp(z_grid, zj[oj], field_t[oj, j])  # clamp at the near-constant column ends
+        return acc / idx.size
+
+    return z_grid, _height_average(T[:, idx]), _height_average(P_t), _height_average(n_wv_t)
 
 
 @lru_cache(maxsize=32)
