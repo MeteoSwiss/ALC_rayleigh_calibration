@@ -907,14 +907,16 @@ def _do_sens(s, start, end, kalman_rows, shared=None):
 CLASSIFY_TYPES = {"CL31", "CL51", "CL61", "CHM15k"}  # ceiloclass has no Mini-MPL reader
 
 
-def _do_classification(s, start, end, shared=None):
+def _do_classification(s, start, end, shared=None, force=False):
     """Cloudnet target classification (ceiloclass) per stream-day, on the shared read-once grid.
 
     Builds the classifier input from the coarse working grid (rcs_0 -> beta, + CL61 depolarization)
     and the CAMS temperature -> writes a classification NetCDF (+ curtain PNG when PLOTS=1) under
-    ``<key>/classification/<wmo>/<year>/``. ``ceiloclass``/``ceilopyter`` are OPTIONAL deps: if
-    missing, log once and return. A day without CAMS temperature is skipped (no melting-layer
-    reference); any per-day failure is logged and skipped, never aborting the run.
+    ``<key>/classification/<wmo>/<year>/``. A day whose NetCDF already exists is skipped unless
+    ``force`` (resume: the daily run's backfill days are not re-classified every day).
+    ``ceiloclass``/``ceilopyter`` are OPTIONAL deps: if missing, log once and return. A day without
+    CAMS temperature is skipped (no melting-layer reference); any per-day failure is logged and
+    skipped, never aborting the run.
     """
     try:
         from calibration.classify import cams_to_model, ceilo_from_shared
@@ -934,6 +936,11 @@ def _do_classification(s, start, end, shared=None):
         if not fp.exists():
             continue
         ds = d.strftime("%Y%m%d")
+        cdir = OUT / key / "classification" / info.wmo_id / ds[:4]
+        out_nc = cdir / f"{key}_{ds}_classification.nc"
+        if out_nc.exists() and not force:
+            n_ok += 1                     # already classified (resume): skip the re-work
+            continue
         cams = next((c for c in (find_cams_file(f, ds) for f in (CAMS, CAMS_FALLBACK) if f is not None)
                      if c is not None), None)
         if cams is None:
@@ -952,16 +959,14 @@ def _do_classification(s, start, end, shared=None):
             alt = float(sub.altitude)
             model = cams_to_model(str(cams), s["lat"], s["lon"], ceilo.time, ceilo.range, alt)
             result = classify(ceilo, model, altitude=alt, use_wet_bulb=False)  # CAMS is dry-bulb
-            cdir = OUT / key / "classification" / info.wmo_id / ds[:4]
             cdir.mkdir(parents=True, exist_ok=True)
-            base = f"{key}_{ds}"
             write_classification(
-                result, cdir / f"{base}_classification.nc",
+                result, out_nc,
                 wavelength=float(ceilo.wavelength), altitude=alt,
                 latitude=s["lat"], longitude=s["lon"],
                 location=s.get("site", key), source_files=[str(fp)])
             if PLOT_ENABLED:
-                plot_classification(result, str(cdir / f"{base}_classification.png"),
+                plot_classification(result, str(out_nc.with_suffix("")) + ".png",
                                     beta=ceilo.beta, depol=ceilo.depol, histogram=True)
             n_ok += 1
         except Exception as exc:  # noqa: BLE001 - a classification failure must not lose the run
@@ -971,7 +976,7 @@ def _do_classification(s, start, end, shared=None):
 
 # --- One instrument stream --------------------------------------------------
 def _process_stream(payload):
-    s, start, end, methods, hk_only, do_sens, do_omb, no_cal, do_classify = payload
+    s, start, end, methods, hk_only, do_sens, do_omb, no_cal, do_classify, force = payload
     warnings.filterwarnings("ignore")
     logging.getLogger().setLevel(logging.CRITICAL)
     key = _key(s)
@@ -1032,7 +1037,7 @@ def _process_stream(payload):
     # Cloudnet target classification (independent of the calibration; rides on the shared read).
     if do_classify:
         try:
-            _do_classification(s, start, end, shared)
+            _do_classification(s, start, end, shared, force)
         except Exception as exc:  # noqa: BLE001 - classification must not lose the calibration
             print(f"{key}: classification failed: {type(exc).__name__}: {exc}", flush=True)
 
@@ -1120,7 +1125,7 @@ def main():
             print(f"stream {args.stream} not in census", flush=True)
             return
         _process_stream((s, start, end, methods, args.hk_only,
-                         args.sens, args.omb, args.no_cal, args.classify))
+                         args.sens, args.omb, args.no_cal, args.classify, args.force))
         return
 
     types = [t.strip() for t in args.types.split(",")]
@@ -1167,6 +1172,8 @@ def main():
             cmd.append("--sens")
         if args.classify:
             cmd.append("--classify")
+        if args.force:
+            cmd.append("--force")
         if args.no_cal:
             cmd.append("--no-cal")
         try:
