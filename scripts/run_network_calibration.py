@@ -287,7 +287,43 @@ def _make_shared_reader(s):
 
 
 # --- Rayleigh (per night) ---------------------------------------------------
-def _do_rayleigh(s, start, end, shared=None):
+def _classification_contam_profile(key, d):
+    """Per-height contaminated fraction (Cloudnet cloud/ice: droplet/drizzle/ice/supercooled, i.e. NOT
+    clear or aerosol) over the Rayleigh night for date ``d``, from the task-3 classification NetCDFs of
+    ``d-1`` (evening) + ``d`` (morning). Feeds the Rayleigh molecular-window screen (flag -11). Returns
+    an (n_height, 2) array [range_AGL, fraction] or None when neither NetCDF exists (ceiloclass not run
+    -> the screen is a no-op)."""
+    import netCDF4
+    contam_codes = (1, 2, 3, 4)   # droplet, drizzle_or_rain, ice, supercooled (0=clear, 5=aerosol)
+    wmo = key.rsplit("_", 1)[0]
+    grid = None
+    counts = None
+    n_prof = 0
+    for dd in (d - timedelta(days=1), d):
+        ds = dd.strftime("%Y%m%d")
+        f = OUT / key / "classification" / wmo / ds[:4] / f"{key}_{ds}_classification.nc"
+        if not f.is_file():
+            continue
+        try:
+            with netCDF4.Dataset(f) as nc:
+                rng = np.asarray(nc.variables["range"][:], dtype=float)          # AGL
+                tc = np.asarray(nc.variables["target_classification"][:])        # (time, range)
+        except OSError:
+            continue
+        c = np.isin(tc, contam_codes).sum(axis=0).astype(float)                  # per-height contam count
+        if grid is None:
+            grid, counts = rng, c
+        elif rng.shape == grid.shape and np.allclose(rng, grid):
+            counts = counts + c
+        else:                                                                    # rare: different grid
+            counts = counts + np.interp(grid, rng, c / max(tc.shape[0], 1)) * tc.shape[0]
+        n_prof += tc.shape[0]
+    if grid is None or n_prof == 0:
+        return None
+    return np.column_stack([grid, counts / n_prof])
+
+
+def _do_rayleigh(s, start, end, shared=None, screen=False):
     info = _info(s)
     key = _key(s)
     o = CalibrationOptions.from_json(REPO / "options.json")
@@ -304,8 +340,10 @@ def _do_rayleigh(s, start, end, shared=None):
         ds = d.strftime("%Y%m%d")
         try:
             idd = shared(ds) if shared is not None else None
+            contam = _classification_contam_profile(key, d) if screen else None
             r = calibrate_rayleigh(
-                ds, info, o, preloaded_data=(idd.working if idd is not None else None))
+                ds, info, o, preloaded_data=(idd.working if idd is not None else None),
+                contam_profile=contam)
             rows.append(dict(date=ds, method="rayleigh", flag=r.flag, cal_value=r.lidar_constant,
                              uncertainty=r.uncertainty, n_profiles="",
                              bottom_height=r.calibration_bottom_height,
@@ -1004,11 +1042,18 @@ def _process_stream(payload):
     # One shared night [D-1, D] read per day feeds every pass that needs the L1: Rayleigh
     # (.native), cloud (.slice_to_date) and OmB/sensitivity (.slice_to_date().to_omb_dict()).
     shared = _make_shared_reader(s)
+    # Cloudnet classification FIRST (when requested): it writes the per-day curtain NetCDFs that the
+    # Rayleigh screen (flag -11) then reads for the night, and rides on the same shared read.
+    if do_classify:
+        try:
+            _do_classification(s, start, end, shared, force)
+        except Exception as exc:  # noqa: BLE001 - classification must not lose the calibration
+            print(f"{key}: classification failed: {type(exc).__name__}: {exc}", flush=True)
     # --no-cal reuses the EXISTING calibration + Kalman (for a sens/omb-only pass);
     # otherwise (re)compute the per-night calibration, Kalman best estimate and HK.
     if not no_cal:
         if "rayleigh" in methods and s["type"] in RAYLEIGH_TYPES:
-            rows += _do_rayleigh(s, start, end, shared)
+            rows += _do_rayleigh(s, start, end, shared, do_classify)
         if "cloud" in methods and s["type"] in CLOUD_TYPES:
             rows += _do_cloud(s, start, end, shared)
         if rows:
@@ -1033,13 +1078,6 @@ def _process_stream(payload):
                 _do_sens(s, start, end, kalman_rows, shared)
         except Exception as exc:  # noqa: BLE001 - an add-on failure must not lose the calibration
             print(f"{key}: sens/omb failed: {type(exc).__name__}: {exc}", flush=True)
-
-    # Cloudnet target classification (independent of the calibration; rides on the shared read).
-    if do_classify:
-        try:
-            _do_classification(s, start, end, shared, force)
-        except Exception as exc:  # noqa: BLE001 - classification must not lose the calibration
-            print(f"{key}: classification failed: {type(exc).__name__}: {exc}", flush=True)
 
     return key, s["type"], len(rows), n_ok
 

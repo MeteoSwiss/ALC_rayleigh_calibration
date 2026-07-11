@@ -70,6 +70,7 @@ FLAG_MEANINGS = {
     -8: "Fit issue: |b| > a",
     -9: "Another layer with lower signal",
     -10: "Closest CAMS data too far",
+    -11: "Rayleigh window contaminated (classification)",
     -20: "Cloud: window transmission too low",
     -21: "Cloud: laser energy too low",
     -22: "Cloud: peak not sharp above",

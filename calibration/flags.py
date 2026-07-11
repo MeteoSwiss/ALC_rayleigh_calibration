@@ -37,6 +37,7 @@ FLAG_MEANINGS = {
     -8: "Fit issue: |b| > a",                        # Rayleigh-specific
     -9: "Another layer with lower signal",           # Rayleigh-specific
     -10: "Closest CAMS data too far",                # both (910 nm WV: station outside CAMS domain)
+    -11: "Rayleigh window contaminated (classification)",  # Rayleigh-specific (Cloudnet ice/cloud in the fit window)
     # Cloud-specific rejection reasons: when no profile survives the cloud filters, the dominant
     # rejection (the filter that removed the most profiles) is reported instead of the generic -1.
     -20: "Cloud: window transmission too low",       # Cloud-specific

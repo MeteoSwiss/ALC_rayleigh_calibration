@@ -243,6 +243,7 @@ def calibrate_rayleigh(
     std_atm_file: Optional[Path] = None,
     fit_inputs_out: Optional[dict] = None,
     preloaded_data: Optional[CeilometerData] = None,
+    contam_profile: Optional[NDArray] = None,
 ) -> CalibrationResult:
     """
     Perform Rayleigh calibration for a single instrument on a single date.
@@ -951,8 +952,23 @@ def calibrate_rayleigh(
                 logger.warning(f"Another layer with lower signal found: ratio {scat:.1f} > {thr}")
                 qc_flag, qc_message = -9, f"Another layer with lower signal found (signal ratio {scat:.1f})"
 
+    # Classification contamination screen (Q5): when the backscatter gates did NOT already reject,
+    # reject if the SELECTED molecular window overlaps a persistent ice/cloud layer the scattering-ratio
+    # gate misses (esp. a CL61 depol-ice layer). ``contam_profile`` is (height_AGL, contaminated_fraction
+    # over the night) from the task-3 Cloudnet classification; absent (no --classify) -> no change.
+    if (qc_flag is None and contam_profile is not None and np.size(contam_profile)
+            and np.isfinite(fit_result.range_start_m) and np.isfinite(fit_result.range_end_m)):
+        h = np.asarray(contam_profile[:, 0], dtype=float)
+        band = (h >= fit_result.range_start_m) & (h <= fit_result.range_end_m)
+        wfrac = (float(np.nanmean(np.asarray(contam_profile[:, 1], dtype=float)[band]))
+                 if np.any(band) else 0.0)
+        if wfrac > 0.30:   # >30 % of the fit-window height classified ice/cloud over the night
+            logger.warning(f"Rayleigh window contaminated (classification {wfrac * 100:.0f}%)")
+            qc_flag, qc_message = -11, (f"Rayleigh window contaminated "
+                                        f"(classification {wfrac * 100:.0f}% ice/cloud)")
+
     _outcome = {None: "OK", -3: "method disagreement", -6: "too noisy",
-                -9: "lower-signal layer found"}.get(qc_flag, "rejected")
+                -9: "lower-signal layer found", -11: "window contaminated"}.get(qc_flag, "rejected")
 
     # ── Plot: compact 4x4 Rayleigh diagnostics dashboard (success AND data-bearing rejections) ──
     if options.plot_main:

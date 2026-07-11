@@ -49,6 +49,45 @@ def _fractions(res) -> dict[str, float]:
 
 
 _HAVE_CAMS = _cams().is_file()
+_REPO = Path(__file__).resolve().parents[1]
+_L1_CHM = _L1_DIR / "L1_0-20000-0-06610_A20260304.nc"
+
+
+@pytest.mark.skipif(not (_L1_CHM.is_file() and _HAVE_CAMS), reason="Payerne L1/CAMS sample absent (CI)")
+def test_rayleigh_classification_screen_flags_contaminated_window():
+    """Q5 Rayleigh screen (calibrate_rayleigh ``contam_profile``): a successful night is rejected with
+    flag -11 when the contamination profile covers its selected molecular window, and is UNCHANGED when
+    the contamination is elsewhere or absent (so it never touches a clean night)."""
+    import tempfile
+
+    from calibration import CalibrationOptions, InstrumentInfo, calibrate_rayleigh
+    from calibration.config import DataLevel, InstrumentType
+
+    with tempfile.TemporaryDirectory() as td:
+        def opts():
+            o = CalibrationOptions.from_json(str(_REPO / "options.json"))
+            o.folder_root = _L1_DIR.parents[2]     # D:/E-PROFILE_L1_2026
+            o.data_level = DataLevel.L1
+            o.cams_folder = _cams().parent
+            o.plot_main = o.plot_all = False
+            o.folder_output = Path(td)
+            return o
+
+        info = InstrumentInfo(site_name="PAY", wmo_id="0-20000-0-06610", identifier="A",
+                              instrument_type=InstrumentType("CHM15k"),
+                              latitude=LAT, longitude=LON, altitude=490.0)
+        base = calibrate_rayleigh("20260304", info, opts())
+        if base.flag not in (1, 1.0, 0.5) or not np.isfinite(base.calibration_bottom_height):
+            pytest.skip("baseline night is not a Rayleigh success on this archive")
+
+        a, b = base.calibration_bottom_height, base.calibration_top_height
+        h = np.linspace(0.0, 8000.0, 200)
+        over = np.column_stack([h, ((h >= a - 50) & (h <= b + 50)).astype(float)])       # 100% in window
+        outside = np.column_stack([h, (h < max(a - 800.0, 500.0)).astype(float)])        # 100% below it
+
+        assert calibrate_rayleigh("20260304", info, opts(), contam_profile=over).flag == -11
+        assert calibrate_rayleigh("20260304", info, opts(), contam_profile=outside).flag == base.flag
+        assert calibrate_rayleigh("20260304", info, opts(), contam_profile=None).flag == base.flag
 
 
 @pytest.mark.skipif(not (_l1("C").is_file() and _HAVE_CAMS), reason="Payerne CL61 L1 / CAMS sample absent (CI)")
