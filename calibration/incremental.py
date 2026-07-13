@@ -127,16 +127,20 @@ def sens_cache_update(key_dir: Path, day_result) -> None:
     bd = np.asarray(day_result.bmin_day, dtype="float32")
     wl = float(getattr(day_result, "wavelength", float("nan")) or float("nan"))
     if p.exists():
-        c = np.load(p, allow_pickle=False)
-        if "wavelength" in c and not np.isfinite(wl):
-            wl = float(c["wavelength"])
-        if c["z_ctr"].size == z.size and np.allclose(c["z_ctr"], z, equal_nan=True):
-            old_dates = c["dates"].astype("datetime64[D]")
-            keep = ~np.isin(old_dates, dates)            # drop days we are replacing
-            dates = np.concatenate([old_dates[keep], dates])
-            bn = np.concatenate([c["bmin_night"][:, keep], bn], axis=1)
-            bd = np.concatenate([c["bmin_day"][:, keep], bd], axis=1)
-        # else: z grid changed (range-grid change) -> start a fresh cache
+        # Close the NpzFile BEFORE _savez_atomic's os.replace: on Windows an open read handle
+        # on the target blocks the rename (WinError 5). This cache is rewritten once per day
+        # (~90x over a reprocess), so a lingering handle is near-certain to hit -- and it is
+        # silent (the whole station's sensitivity product is dropped). Linux allows the rename.
+        with np.load(p, allow_pickle=False) as c:
+            if "wavelength" in c and not np.isfinite(wl):
+                wl = float(c["wavelength"])
+            if c["z_ctr"].size == z.size and np.allclose(c["z_ctr"], z, equal_nan=True):
+                old_dates = c["dates"].astype("datetime64[D]")
+                keep = ~np.isin(old_dates, dates)            # drop days we are replacing
+                dates = np.concatenate([old_dates[keep], dates])
+                bn = np.concatenate([c["bmin_night"][:, keep], bn], axis=1)
+                bd = np.concatenate([c["bmin_day"][:, keep], bd], axis=1)
+            # else: z grid changed (range-grid change) -> start a fresh cache
     order = np.argsort(dates)
     Path(key_dir).mkdir(parents=True, exist_ok=True)
     _savez_atomic(p, z_ctr=z, dates=dates[order].astype("datetime64[D]"),
@@ -151,18 +155,20 @@ def sens_cache_aggregate(key_dir: Path, start: Optional[str] = None, end: Option
     p = sens_cache_path(key_dir)
     if not p.exists():
         return None
-    c = np.load(p, allow_pickle=False)
-    dates = c["dates"].astype("datetime64[D]")
-    if dates.size == 0:
-        return None
-    bn, bd = c["bmin_night"], c["bmin_day"]
+    with np.load(p, allow_pickle=False) as c:   # close the handle (Windows os.replace safety)
+        dates = c["dates"].astype("datetime64[D]")
+        if dates.size == 0:
+            return None
+        z_ctr = np.array(c["z_ctr"])
+        bn = np.array(c["bmin_night"])
+        bd = np.array(c["bmin_day"])
+        wl = float(c["wavelength"]) if "wavelength" in c else float("nan")
     mask = _window_mask(dates, start, end)
     if mask is not None:
         if not mask.any():
             return None
         dates, bn, bd = dates[mask], bn[:, mask], bd[:, mask]
-    seed = SensResult(wavelength=float(c["wavelength"]) if "wavelength" in c else float("nan"),
-                      z_ctr=c["z_ctr"], dates=dates, bmin_night=bn, bmin_day=bd)
+    seed = SensResult(wavelength=wl, z_ctr=z_ctr, dates=dates, bmin_night=bn, bmin_day=bd)
     return combine_sens_results([seed])     # recomputes the derived fields
 
 

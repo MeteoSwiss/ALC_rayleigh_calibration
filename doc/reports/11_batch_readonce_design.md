@@ -92,7 +92,8 @@ CHM15k ≈ 0.7 GB).
 | M1 | Chunk loop in `_process_stream` + `slice_night()` + `_make_chunk_reader` (parity fallbacks) | done |
 | M2 | `_do_omb_sens`: OmB + sens as ONE interleaved chunked sweep (shared day dict) | done |
 | M3 | C-agnostic OmB/sens caches (apply C_L at aggregation) → drops sweep 2 entirely (≈1.03×); schema bump ⇒ one-off network cache rebuild | **deferred** — do not land the same week the reprocessed caches ship |
-| M4 | `tests/test_chunk_readonce.py` (slice_night/boundary parity — 3/3 pass) + `validation/diff_fullcal.py` golden diff on 06610 A/B/C × 2 months | done — see §7 |
+| M4 | `tests/test_chunk_readonce.py` (slice_night/boundary parity — 3/3 pass) + `validation/diff_fullcal.py` golden diff: 06610 A/B/C × 2 months (all products incl. OmB) **and** A × clear-night 3 months (sens+OmB). All IDENTICAL. | done — see §7 |
+| — | **Bonus:** two pre-existing Windows cache-write bugs fixed (`os.replace` retry + `np.load` handle-close) that would silently drop OmB/sensitivity products on a Windows reprocess | done |
 
 ## 5. Per-machine behaviour
 
@@ -141,16 +142,22 @@ the daily cron already appends per-day, so row order was never a semantic invari
 sorts before comparing). **OmB** compared identical where produced (B, `_omb.csv` 645 B).
 `test_chunk_readonce.py` 3/3 pass.
 
-Coverage honesty — **`_sens.csv` was NOT compared** in this window:
-- A/C got **0 successful rayleigh nights** in this aerosol-heavy May–June window → empty rayleigh-Kalman
-  → no rayleigh-method sens/omb by design (A/C use the rayleigh method).
-- B (CL31, cloud method) has a 40-row Kalman and *should* produce sens, but its `_sens_cache.npz`
-  write hit the Windows `os.replace` flake repeatedly **on the baseline** (main has no retry), so
-  there was no baseline sens to diff against.
-Sens is therefore covered here by (i) **OmB parity** — sens rides the identical `_do_omb_sens`
-day-sweep + incremental-cache pattern as OmB, which *is* identical; (ii) the read-path unit tests.
-A headline-sens golden diff needs a clear-night window (≥5 rayleigh successes) and the retry fix on
-both checkouts — worth a follow-up run before the branch merges.
+The aerosol-heavy May–June window gave A/C **0 successful rayleigh nights** → empty rayleigh-Kalman
+→ no rayleigh-method sens/omb by design, so **sens was not exercised** there. It was closed with a
+second golden diff on a **clear-night window** (Payerne A, **2025-01-01 → 2025-03-31**, 73 Kalman
+rows), baseline (main, pass-outer) vs chunk (worktree, chunk=31):
+
+> `_cn_base: _sens(539B) _omb(596B)` · `_cn_chunk: _sens(539B) _omb(596B)` · **A: IDENTICAL** —
+> **sens *and* OmB now bit-identical.**
+
+Getting there surfaced a **real, pre-existing Windows bug** (not chunk-related): `sens_cache_update`
+/ `sens_cache_aggregate` left the `np.load` `NpzFile` **handle open**, so `_savez_atomic`'s
+`os.replace` over the still-open target failed with WinError 5 — and since the sens cache is rewritten
+~90x per run, it fired every time, **silently dropping the whole station's sensitivity product** on a
+Windows reprocess (Linux/CSCS allow rename-over-open, so it never bit there — which is exactly why the
+first golden run's B-sens and this window's first attempt both failed). Fixed by closing the handle
+(context manager) in both functions; `omb_cache_update` already used `dict(np.load(...))` and never
+flaked, which is what pointed at the cause.
 
 Caveat on the numbers: this ran with the files warm in the Windows page cache (the baseline run
 touched them minutes earlier) and the M0 `read_bytes` probe reported ~0 GB on Windows — so the
