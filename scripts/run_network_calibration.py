@@ -275,7 +275,8 @@ def _make_shared_reader(s):
             try:
                 idd = load_instrument_day(
                     night, s["type"], CAMS, cams_folder_fallback=fb,
-                    read_cams=False, build_working=True)  # all passes use the coarse .working
+                    read_cams=False, build_working=False)  # Rayleigh uses .native; cloud/OmB/sens/
+                    # classify re-coarsen each day via slice_to_date (memoised) -- night grid unused
             except Exception:  # noqa: BLE001 - a bad read falls back to each step's own load
                 idd = None
         if len(cache) >= 3:  # bound memory (daily run = 1 day; backfill degrades gracefully)
@@ -342,7 +343,7 @@ def _do_rayleigh(s, start, end, shared=None, screen=False):
             idd = shared(ds) if shared is not None else None
             contam = _classification_contam_profile(key, d) if screen else None
             r = calibrate_rayleigh(
-                ds, info, o, preloaded_data=(idd.working if idd is not None else None),
+                ds, info, o, preloaded_data=(idd.native if idd is not None else None),
                 contam_profile=contam)
             rows.append(dict(date=ds, method="rayleigh", flag=r.flag, cal_value=r.lidar_constant,
                              uncertainty=r.uncertainty, n_profiles="",
@@ -391,7 +392,7 @@ def _do_cloud(s, start, end, shared=None):
                 idd = load_instrument_day(
                     [str(fp)], s["type"], CAMS,
                     cams_folder_fallback=(str(CAMS_FALLBACK) if CAMS_FALLBACK else ""),
-                    read_cams=False, build_working=True)
+                    read_cams=False, build_working=False)  # sliced per day; night grid unused
             if idd is not None:
                 # Read-once: cloud consumes the shared coarse read (30 s/10 m), sliced to this UTC
                 # day -- cloud no longer averages separately (config average_time_s/range = 0).
@@ -989,7 +990,7 @@ def _do_classification(s, start, end, shared=None, force=False):
                 idd = load_instrument_day(
                     [str(fp)], s["type"], CAMS,
                     cams_folder_fallback=(str(CAMS_FALLBACK) if CAMS_FALLBACK else ""),
-                    read_cams=False, build_working=True)
+                    read_cams=False, build_working=False)  # sliced per day; night grid unused
             if idd is None:
                 continue
             sub = idd.slice_to_date(d)                 # day D of the shared night read (coarse grid)

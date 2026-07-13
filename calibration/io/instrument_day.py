@@ -118,7 +118,17 @@ class InstrumentDayData:
         union read, so the files are opened once for the whole night yet each service sees
         only its day. Only ``native`` is sliced; the working grid / CAMS cell / WV transmission
         are dropped (rebuild if a sliced consumer needs them -- cloud does not).
+
+        Memoised per (instance, date): the cloud, OmB, sensitivity and classification passes each
+        call ``slice_to_date(d)`` on the same shared read, so they share ONE slice + re-coarsen of
+        the day instead of repeating it once per pass.
         """
+        cache = self.__dict__.get("_slice_cache")
+        if cache is None:
+            cache = self.__dict__["_slice_cache"] = {}
+        cached = cache.get(date)
+        if cached is not None:
+            return cached
         n = self.native
         t_days = np.asarray(n.time, dtype="float64")  # UTC days since 1970-01-01
         day0 = int((np.datetime64(date) - np.datetime64("1970-01-01")).astype("timedelta64[D]").astype(int))
@@ -152,11 +162,13 @@ class InstrumentDayData:
         working = average_ceilometer_data(
             sliced, average_time_s=self.target_time_s, average_range_m=self.target_range_m
         )
-        return dataclasses.replace(
+        result = dataclasses.replace(
             self, native=sliced, working=working,
             cams_time_num=None, cams_z_asl=None, cams_temperature=None, cams_nw=None,
             wv_transmission=None,
         )
+        cache[date] = result
+        return result
 
     def to_omb_dict(self) -> dict:
         """The ``load_l1_window`` dict (OmB / sensitivity input) built from this native read.
