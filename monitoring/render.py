@@ -294,8 +294,9 @@ def _existing_diag(diag: pd.DataFrame) -> pd.DataFrame:
 
     In IMAGES_IN_BUCKET mode the local PNGs may have been deleted (they live in the bucket and the
     site references their bucket URLs), so the existence filter is skipped and the full data-driven
-    diag list is kept. _copy_diagnostics still tries to stage each src and silently skips the ones
-    that are gone, so fresh local PNGs are still published while deleted ones are simply not staged."""
+    diag list is kept for the INDEX. _copy_diagnostics then stages a link only for a source that
+    still exists (removing any stale one whose source was pruned), so fresh PNGs are published while
+    deleted ones stay in the bucket without leaving a dangling stage link."""
     if not len(diag):
         return diag
     if config.IMAGES_IN_BUCKET:
@@ -336,14 +337,27 @@ def _copy_diagnostics(diag: pd.DataFrame, cal: pd.DataFrame, out_dir: Path) -> d
     """Place per-calibration diagnostic PNGs under the site (diag/<key>/<method>_<date>.png) and
     return the viewer index (see :func:`_diag_index_from`). By default the PNGs are SYMLINKED, not
     copied, so a ~100k-image / tens-of-GB diagnostic set is not duplicated (set ALC_DIAG_LINK=copy
-    for a portable site, or =hardlink)."""
+    for a portable site, or =hardlink).
+
+    Staging is DECOUPLED from indexing: the index keeps every diagnostic (in IMAGES_IN_BUCKET mode it
+    points at the bucket URL, so history stays visible after the local PNG is pruned), but a link is
+    STAGED only for a source that still exists. A source pruned after a prior upload is not re-staged,
+    and any stale stage link whose source is now gone is REMOVED -- otherwise the build manufactures
+    dangling symlinks that make ``aws s3 sync --follow-symlinks`` fail (exit 2). This runs over the
+    whole diag table every build, so it also clears links orphaned by the prune cycle."""
     d = _existing_diag(diag)
     for r in d.itertuples(index=False):
         dst = out_dir / "diag" / str(r.key) / f"{r.method}_{r.date}.png"
-        try:
-            _materialize(Path(str(r.src)), dst, _DIAG_LINK_MODE)
-        except OSError:
-            continue
+        if os.path.exists(str(r.src)):
+            try:
+                _materialize(Path(str(r.src)), dst, _DIAG_LINK_MODE)
+            except OSError:
+                continue
+        elif dst.is_symlink():           # source pruned (image now in the bucket) -> drop the dead link
+            try:
+                dst.unlink()
+            except OSError:
+                pass
     return _diag_index_from(d, cal)
 
 
