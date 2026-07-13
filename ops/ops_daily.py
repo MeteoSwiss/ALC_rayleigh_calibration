@@ -137,7 +137,9 @@ def update_opcoeff(ds: str) -> None:
            "--start", ds, "--end", ds]
     log(f"  opcoeff {ds}: extract_l2_opcoeff --start {ds} --end {ds}")
     try:
-        subprocess.run(cmd, cwd=str(REPO), timeout=1800)
+        rc = subprocess.run(cmd, cwd=str(REPO), timeout=1800).returncode
+        if rc != 0:
+            log(f"  opcoeff {ds}: FAILED \u2014 extract_l2_opcoeff exited {rc}; CSV NOT updated")
     except Exception as exc:  # noqa: BLE001
         log(f"  opcoeff {ds}: failed: {type(exc).__name__}: {exc}")
 
