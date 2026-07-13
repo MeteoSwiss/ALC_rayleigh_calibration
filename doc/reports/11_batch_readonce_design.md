@@ -124,7 +124,44 @@ window **2026-05-01 → 2026-06-30** · `--methods rayleigh,cloud --sens --omb -
 yearly `ALC_calibration_*.nc` arrays, classification NetCDF sets + sampled
 `target_classification` equality (`validation/diff_fullcal.py`).
 
-Results (2026-07-13 run, D: idle): **see the summary table appended below by the test run.**
+Results (2026-07-13, home i9-14900KF, single worker, warm page cache):
+
+| Stream | Baseline (pass-outer) | Chunked (31 d) | Wall |
+|---|---|---|---|
+| A · CHM15k (ray+classify) | 118.6 s | 83.6 s | −30 % |
+| B · CL31 (cloud) | 117.6 s | 121.6 s | ≈ |
+| C · CL61 (ray+cloud+depol classify) | 324.2 s | 216.7 s | −33 % |
+| **total** | **560.4 s** | **421.9 s** | **−25 %** |
+
+Correctness: **golden diff 3/3 IDENTICAL.** Bit-identical across A/B/C: `_cal.csv`, `_kalman.csv`,
+`_hk.csv`, `_status.csv`, the 51 classification NetCDFs (sampled `target_classification` equal),
+and the yearly `ALC_calibration_*.nc` (identical on time / lidar_constant / calibration_method once
+compared as a (method, time)-sorted set — chunked writes rows in append-order interleaved by chunk,
+the daily cron already appends per-day, so row order was never a semantic invariant; the golden diff
+sorts before comparing). **OmB** compared identical where produced (B, `_omb.csv` 645 B).
+`test_chunk_readonce.py` 3/3 pass.
+
+Coverage honesty — **`_sens.csv` was NOT compared** in this window:
+- A/C got **0 successful rayleigh nights** in this aerosol-heavy May–June window → empty rayleigh-Kalman
+  → no rayleigh-method sens/omb by design (A/C use the rayleigh method).
+- B (CL31, cloud method) has a 40-row Kalman and *should* produce sens, but its `_sens_cache.npz`
+  write hit the Windows `os.replace` flake repeatedly **on the baseline** (main has no retry), so
+  there was no baseline sens to diff against.
+Sens is therefore covered here by (i) **OmB parity** — sens rides the identical `_do_omb_sens`
+day-sweep + incremental-cache pattern as OmB, which *is* identical; (ii) the read-path unit tests.
+A headline-sens golden diff needs a clear-night window (≥5 rayleigh successes) and the retry fix on
+both checkouts — worth a follow-up run before the branch merges.
+
+Caveat on the numbers: this ran with the files warm in the Windows page cache (the baseline run
+touched them minutes earlier) and the M0 `read_bytes` probe reported ~0 GB on Windows — so the
+**I/O reduction is NOT what this benchmark measured**; even the −25 % wall is mostly the fewer
+decode/coarsen passes, and the real ×5 read win only appears on a **cold / disk-bound** run (the
+actual reprocess). The value proven here is *correctness parity* + a compute win; the I/O win is
+by construction (§6) and will be re-measured on the first cold CSCS/home batch.
+
+A Windows-only robustness fix rode along: `_savez_atomic` (incremental.py) now retries the cache
+`os.replace` (WinError 5/32 when AV/indexer scans the fresh `.tmp.npz`) — without it a network
+reprocess drops the occasional station's OmB/sensitivity product (hit twice in this very run).
 
 ## 8. Risks / notes
 

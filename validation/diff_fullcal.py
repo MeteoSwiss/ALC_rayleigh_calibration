@@ -65,11 +65,21 @@ def _cmp_yearly_nc(da, db, key, report):
             ok = False
             continue
         with netCDF4.Dataset(nca) as a, netCDF4.Dataset(ncb) as b:
+            def _sorted(nc):
+                cols = {v: np.ma.filled(nc.variables[v][:].astype("f8"), np.nan)
+                        for v in ("time", "lidar_constant", "calibration_method")
+                        if v in nc.variables}
+                if {"time", "calibration_method"} <= cols.keys():
+                    # Row order is order-of-computation (append-only; chunk vs pass-outer),
+                    # never a semantic invariant -- compare as a (method, time)-sorted set.
+                    o = np.lexsort((cols["time"], cols["calibration_method"]))
+                    cols = {k: v[o] for k, v in cols.items()}
+                return cols
+            ca_, cb_ = _sorted(a), _sorted(b)
             for var in ("time", "lidar_constant", "calibration_method"):
-                if var not in a.variables or var not in b.variables:
+                if var not in ca_ or var not in cb_:
                     continue
-                va = np.ma.filled(a.variables[var][:].astype("f8"), np.nan)
-                vb = np.ma.filled(b.variables[var][:].astype("f8"), np.nan)
+                va, vb = ca_[var], cb_[var]
                 if va.shape != vb.shape or not np.allclose(va, vb, rtol=RTOL, equal_nan=True):
                     report.append(f"  {nca.name}:{var}: arrays differ "
                                   f"(shapes {va.shape} vs {vb.shape})")

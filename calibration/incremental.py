@@ -26,6 +26,7 @@ to the cache (de-duplicating by date), and re-derives the snapshot from the cach
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -35,11 +36,23 @@ import numpy as np
 def _savez_atomic(path: Path, **arrays) -> None:
     """np.savez via a temp file + os.replace: these caches hold the station's FULL
     accumulated history and are rewritten on every daily update, so a crash mid-write
-    must never leave a corrupt (unloadable) archive behind."""
+    must never leave a corrupt (unloadable) archive behind.
+
+    On Windows the ``os.replace`` transiently races an antivirus / search-indexer scan of
+    the fresh ``.tmp.npz`` (WinError 5 / 32); a bounded retry rides it out. A network-wide
+    reprocess writes this file hundreds of times, so a single flaky replace must not drop a
+    station's OmB/sensitivity product."""
     path = Path(path)
     tmp = path.with_name(path.stem + ".tmp.npz")
     np.savez(tmp, **arrays)
-    os.replace(tmp, path)
+    for attempt in range(6):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if attempt == 5:
+                raise
+            time.sleep(0.3 * (attempt + 1))
 
 
 # ----------------------------------------------------------------------------
