@@ -4,7 +4,7 @@
 
 # --- repo + python environment ------------------------------------------------------------------
 export ALC_REPO="${ALC_REPO:-/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.0_code}"        # this repo's location on the server
-export ALC_VENV="${ALC_VENV:-$ALC_REPO/.venv}"                       # venv with deps (cfgrib, eccodes, plotly, netCDF4, pandas, cdsapi)
+export ALC_VENV="${ALC_VENV:-$ALC_REPO/.venv313}"                       # venv with deps (cfgrib, eccodes, plotly, netCDF4, pandas, cdsapi)
 export PATH="/data/zue/E_PROFILE/ALC/Calibration/tools/bin:$PATH"   # AWS CLI v2 (installed off the slow NFS home) for ops/publish.sh
 
 # --- data inputs --------------------------------------------------------------------------------
@@ -49,7 +49,7 @@ export ALC_BACKFILL_DAYS="${ALC_BACKFILL_DAYS:-5}"                  # also (re)t
 export ALC_WORKERS="${ALC_WORKERS:-6}"                             # parallel streams (slow no-sudo server -> keep modest)
 export STREAM_TIMEOUT="${STREAM_TIMEOUT:-1800}"                     # per-stream subprocess timeout (seconds)
 export PLOTS="${PLOTS:-1}"                                          # 1 = render diagnostic PNGs (needed for the per-calibration viewer)
-export ALC_CLASSIFY="${ALC_CLASSIFY:-0}"                           # 1 = also run Cloudnet target classification (needs ceiloclass in $ALC_VENV; set 1 after install)
+export ALC_CLASSIFY="${ALC_CLASSIFY:-1}"                           # 1 = also run Cloudnet target classification (needs ceiloclass in $ALC_VENV; set 1 after install)
 
 # --- network (no-sudo server behind a proxy): uncomment + set if CAMS download needs it ----------
 export https_proxy="http://proxy.meteoswiss.ch:8080"; export http_proxy="$https_proxy"; export no_proxy="localhost,127.0.0.1"
