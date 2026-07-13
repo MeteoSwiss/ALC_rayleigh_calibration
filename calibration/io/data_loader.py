@@ -65,6 +65,22 @@ class CeilometerData:
     # None when the variable is absent (e.g. CHM15k).
     vertical_visibility: Optional[NDArray[np.float64]] = None
 
+    # Laser pulse energy (%). Vaisala CL31/CL51/CL61 export ``laser_energy`` (or
+    # ``laser_pulse_energy``); the cloud calibration rejects profiles below
+    # ``energy_threshold``. CHM15k has no such variable (it reports ``status_laser``
+    # quality instead) → NaN-filled here, which the < threshold test treats as "keep".
+    laser_energy: Optional[NDArray[np.float64]] = None
+
+    # Linear volume depolarization ratio (time x range), CL61 only (``linear_depol_ratio``);
+    # None for the single-channel instruments. Carried for the Cloudnet target classification
+    # (the ice/liquid split); NaN where the L1 masks it.
+    depol: Optional[NDArray[np.float64]] = None
+
+    # L2 only: median ``calibration_constant_0`` baked into the file (the Wiegner C_L
+    # already applied). None for L1 (rcs_0 carries no per-file constant). Lets the cloud
+    # method report an absolute C_L on L2 input; see cloud ``build_cloud_input``.
+    calibration_constant_applied: Optional[float] = None
+
 
 def build_file_paths(
     date_str: str,
@@ -230,6 +246,8 @@ def load_l1_data(
     laser_life_list = []
     cal_pulse_list = []
     vert_vis_list = []
+    laser_energy_list = []
+    depol_list = []
 
     range_alc = None
     altitude = None
@@ -268,6 +286,13 @@ def load_l1_data(
             # Range-corrected signal
             rcs_list.append(data.variables['rcs_0'][:])
 
+            # Linear depolarization (CL61 only), time x range; NaN where masked.
+            if 'linear_depol_ratio' in data.variables:
+                depol_list.append(np.ma.filled(
+                    np.ma.masked_invalid(np.asarray(data.variables['linear_depol_ratio'][:], dtype="f8")), np.nan))
+            else:
+                depol_list.append(None)
+
             # Cloud base height
             cbh_list.append(data.variables['cloud_base_height'][:])
 
@@ -294,12 +319,15 @@ def load_l1_data(
                 status_detector_list.append(np.full(n_t, np.nan))
                 laser_life_list.append(np.full(n_t, np.nan))
                 cal_pulse_list.append(np.full(n_t, np.nan))
+                laser_energy_list.append(np.full(n_t, np.nan))
             else:
                 window_trans_list.append(_hk(data, 'window_transmission'))
                 status_laser_list.append(_hk(data, 'status_laser', 'state_laser'))
                 status_detector_list.append(_hk(data, 'status_detector', 'state_detector'))
                 laser_life_list.append(_hk(data, 'laser_life_time'))
                 cal_pulse_list.append(_hk(data, 'calibration_pulse'))
+                # Laser pulse energy (Vaisala): drives the cloud energy_rejected filter.
+                laser_energy_list.append(_hk(data, 'laser_energy', 'laser_pulse_energy'))
 
             # Fog indicator (Vaisala): NaN-filled if absent (CHM15k / Mini-MPL).
             vert_vis_list.append(_hk(data, 'vertical_visibility'))
@@ -331,6 +359,10 @@ def load_l1_data(
     laser_life = np.concatenate(laser_life_list)
     cal_pulse = np.concatenate(cal_pulse_list)
     vert_vis = np.concatenate(vert_vis_list)
+    laser_energy = np.concatenate(laser_energy_list)
+    # Depolarization: concatenate only if every file carried it (CL61); else None.
+    depol = (np.concatenate(depol_list, axis=0)
+             if depol_list and all(d is not None for d in depol_list) else None)
 
     # Convert time to datetime
     try:
@@ -362,6 +394,8 @@ def load_l1_data(
         laser_life_time=laser_life,
         calibration_pulse=cal_pulse,
         vertical_visibility=vert_vis,
+        laser_energy=laser_energy,
+        depol=depol,
         optical_module_id=om_id,
         instrument_serial_number=serial,
         instrument_firmware_version=firmware,
@@ -411,6 +445,9 @@ def _read_l2_file(filepath_str: str, mtime: float, no_cloud: float):
         cc = np.asarray(d.variables["calibration_constant_0"][:], dtype="f8")
         # rcs = attBsc * 1e-6 * calConst  (fixed factor, MATLAB loadL2Data.m parity)
         rcs = (atten * cc[:, None] * L2_RCS_FACTOR)[:, keep_range]
+        # Median applied constant (finite, positive) so cloud can report an absolute C_L.
+        cc_valid = cc[np.isfinite(cc) & (cc > 0)]
+        cal_const = float(np.median(cc_valid)) if cc_valid.size else float("nan")
 
         cbh = np.ma.filled(d.variables["cloud_base_height"][:].astype("f8"), np.nan)
         cbh[~np.isfinite(cbh) | (np.abs(cbh) > 1e30)] = no_cloud
@@ -422,10 +459,10 @@ def _read_l2_file(filepath_str: str, mtime: float, no_cloud: float):
         else:
             vert_vis = np.full(len(time), np.nan)
 
-    return (time, rcs, cbh, vert_vis, range_alc, station_alt, latitude, longitude, calendar, time_units)
+    return (time, rcs, cbh, vert_vis, range_alc, station_alt, latitude, longitude, calendar, time_units, cal_const)
 
 
-def _load_l2_data(
+def load_l2_data(
     file_list: List[Path],
     instrument_type: InstrumentType,
 ) -> Optional[CeilometerData]:
@@ -442,7 +479,7 @@ def _load_l2_data(
         return None
 
     no_cloud = instrument_type.no_cloud_value
-    time_list, rcs_list, cbh_list, vv_list = [], [], [], []
+    time_list, rcs_list, cbh_list, vv_list, cc_list = [], [], [], [], []
     range_alc = altitude = None
     latitude = longitude = 0.0
     calendar = time_units = None
@@ -450,12 +487,14 @@ def _load_l2_data(
     for filepath in file_list:
         if not filepath.exists():
             continue
-        (t, rcs_f, cbh_f, vv_f, rng, station_alt, lat, lon, cal, tu) = _read_l2_file(
+        (t, rcs_f, cbh_f, vv_f, rng, station_alt, lat, lon, cal, tu, cc) = _read_l2_file(
             str(filepath), os.path.getmtime(filepath), no_cloud)
         time_list.append(t)
         rcs_list.append(rcs_f)
         cbh_list.append(cbh_f)
         vv_list.append(vv_f)
+        if np.isfinite(cc):
+            cc_list.append(cc)
         if range_alc is None:
             range_alc, altitude = rng, station_alt
             latitude, longitude = lat, lon
@@ -468,6 +507,7 @@ def _load_l2_data(
     rcs = np.concatenate(rcs_list, axis=0)
     cbh = np.concatenate(cbh_list, axis=0)
     vert_vis = np.concatenate(vv_list)
+    cal_const_applied = float(np.median(cc_list)) if cc_list else None
     nan_hk = np.full(len(time), np.nan)
 
     try:
@@ -493,6 +533,7 @@ def _load_l2_data(
         laser_life_time=nan_hk.copy(),
         calibration_pulse=nan_hk.copy(),
         vertical_visibility=vert_vis,
+        calibration_constant_applied=cal_const_applied,
         calendar=calendar,
         time_units=time_units,
     )
@@ -632,7 +673,7 @@ def load_data(
         return load_l1_data(file_list, instrument_type)
     if data_level == DataLevel.RAW:
         return load_raw_data(file_list, instrument_type)
-    return _load_l2_data(file_list, instrument_type)
+    return load_l2_data(file_list, instrument_type)
 
 
 def _block_reduce_mean(arr: NDArray, factor: int, axis: int) -> NDArray:
@@ -658,6 +699,36 @@ def _block_reduce_mean(arr: NDArray, factor: int, axis: int) -> NDArray:
         return arr[:0]
     out = np.concatenate(out_blocks, axis=0)
     return np.moveaxis(out, 0, axis)
+
+
+def _block_reduce_cloud_base(arr: NDArray, factor: int, axis: int) -> NDArray:
+    """Block-reduce a cloud-base-height array by the LOWEST valid cloud base per block.
+
+    The cloud base is the lowest cloud point, so a block of profiles is summarised by the
+    *minimum* valid base, NOT the mean. Non-physical entries — the no-cloud sentinel, fill
+    values, non-positive or absurdly large heights — are treated as NaN and ignored; a block
+    with no valid cloud reduces to NaN (no cloud). Averaging instead (the previous behaviour)
+    blends real heights with the no-cloud sentinel, fabricating phantom low clouds and dragging
+    high cirrus below the low-cloud screen threshold -> spurious "not a clear night" rejections.
+    """
+    if factor <= 1:
+        return arr
+    a = np.moveaxis(np.asarray(arr, dtype="float64"), axis, 0)
+    a = np.where(np.isfinite(a) & (a > 0.0) & (a < 20000.0), a, np.nan)
+    n = a.shape[0]
+    n_full = n // factor
+    rem = n - n_full * factor
+    out_blocks = []
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)  # all-NaN block -> NaN (no cloud)
+        if n_full > 0:
+            full = a[: n_full * factor].reshape((n_full, factor) + a.shape[1:])
+            out_blocks.append(np.nanmin(full, axis=1))
+        if rem > 0:
+            out_blocks.append(np.nanmin(a[n_full * factor:], axis=0, keepdims=True))
+    if not out_blocks:
+        return a[:0]
+    return np.moveaxis(np.concatenate(out_blocks, axis=0), 0, axis)
 
 
 def _datetime64_block_mean(time_dt: List[datetime], factor: int) -> List[datetime]:
@@ -709,6 +780,9 @@ def average_ceilometer_data(
         calendar=data.calendar,
         time_units=data.time_units,
         vertical_visibility=(None if data.vertical_visibility is None else np.asarray(data.vertical_visibility, dtype="float64").copy()),
+        laser_energy=(None if data.laser_energy is None else np.asarray(data.laser_energy, dtype="float64").copy()),
+        depol=(None if data.depol is None else np.asarray(data.depol, dtype="float64").copy()),
+        calibration_constant_applied=data.calibration_constant_applied,
     )
 
     if len(out.time_datetime) > 1 and average_time_s is not None and average_time_s > 0:
@@ -721,7 +795,9 @@ def average_ceilometer_data(
                 out.time_datetime = _datetime64_block_mean(out.time_datetime, time_factor)
                 out.hours_since_start = _block_reduce_mean(out.hours_since_start, time_factor, axis=0)
                 if out.cbh.size:
-                    out.cbh = _block_reduce_mean(out.cbh, time_factor, axis=0)
+                    # cloud base = lowest point: reduce by min over valid bases, NOT mean
+                    # (mean blends the no-cloud sentinel into phantom low clouds).
+                    out.cbh = _block_reduce_cloud_base(out.cbh, time_factor, axis=0)
                 if out.temperature_optical_module.size:
                     out.temperature_optical_module = _block_reduce_mean(out.temperature_optical_module, time_factor, axis=0)
                 if out.window_transmission.size:
@@ -736,6 +812,10 @@ def average_ceilometer_data(
                     out.calibration_pulse = _block_reduce_mean(out.calibration_pulse, time_factor, axis=0)
                 if out.vertical_visibility is not None and out.vertical_visibility.size:
                     out.vertical_visibility = _block_reduce_mean(out.vertical_visibility, time_factor, axis=0)
+                if out.laser_energy is not None and out.laser_energy.size:
+                    out.laser_energy = _block_reduce_mean(out.laser_energy, time_factor, axis=0)
+                if out.depol is not None and out.depol.size:
+                    out.depol = _block_reduce_mean(out.depol, time_factor, axis=0)
                 out.rcs = _block_reduce_mean(out.rcs, time_factor, axis=0)
 
     if len(out.range_alc) > 1 and average_range_m is not None and average_range_m > 0:
@@ -747,6 +827,8 @@ def average_ceilometer_data(
                 out.range_alc = _block_reduce_mean(out.range_alc, range_factor, axis=0)
                 out.altitude_grid = out.range_alc + out.altitude
                 out.rcs = _block_reduce_mean(out.rcs, range_factor, axis=1)
+                if out.depol is not None and out.depol.size:
+                    out.depol = _block_reduce_mean(out.depol, range_factor, axis=1)
 
     return out
 
@@ -876,6 +958,8 @@ def filter_cloudy_profiles(
     data: CeilometerData,
     options: CalibrationOptions,
     no_cloud_value: float,
+    instrument_type: Optional["InstrumentType"] = None,
+    masks_out: Optional[dict] = None,
 ) -> Tuple[CeilometerData, bool, bool]:
     """
     Filter profiles affected by low clouds.
@@ -898,13 +982,24 @@ def filter_cloudy_profiles(
     # when fog/precip obscures the beam -> those profiles have no molecular column and must be
     # excluded from the Rayleigh fit (treated like a low cloud). (Edmonton 2026-02-01: ~1/3 of
     # the night was fog with cbh="no cloud", which previously slipped through.)
+    # ONLY for the Vaisalas: the CHM15k/Mini-MPL report a vertical visibility ALONGSIDE clouds in
+    # non-obscuring conditions, so treating their VV as fog would over-reject usable profiles.
     vv = getattr(data, "vertical_visibility", None)
-    has_fog = (np.isfinite(vv) & (vv > 0)) if vv is not None else np.zeros(len(data.cbh), dtype=bool)
+    use_vv_fog = instrument_type is not None and instrument_type.reports_vv_obscuration
+    if use_vv_fog and vv is not None:
+        has_fog = np.isfinite(vv) & (vv > 0)
+    else:
+        has_fog = np.zeros(len(data.cbh), dtype=bool)
 
-    # Check if completely clear (no cloud AND no fog)
-    is_clear_night = bool(np.all(data.cbh == no_cloud_value) and not np.any(has_fog))
+    # Check if completely clear (no cloud AND no fog). No-cloud is encoded either as the
+    # instrument sentinel (no_cloud_value) or as NaN — the cloud-aware time binning leaves a
+    # block with no valid cloud as NaN — so treat both as "no cloud".
+    cbh_is_no_cloud = np.isnan(data.cbh) | (data.cbh == no_cloud_value)
+    is_clear_night = bool(np.all(cbh_is_no_cloud) and not np.any(has_fog))
 
     if is_clear_night:
+        if masks_out is not None:
+            masks_out["keep_mask"] = np.ones(len(data.cbh), dtype=bool)   # nothing excluded
         return data, True, False
 
     # Profiles per minute. MUST stay a float: rounding to int collapses to 0 for coarse data
@@ -932,15 +1027,15 @@ def filter_cloudy_profiles(
     if n_clear < min_profiles:
         return data, False, False
 
-    # Mark profiles contaminated by nearby clouds (15 min window); >=1 profile even on coarse data
+    # Mark profiles contaminated by nearby clouds (15 min window); >=1 profile even on coarse data.
+    # Vectorised dilation of has_low_cloud by +/-(window-1): a profile within 15 min of any low
+    # cloud is contaminated. (The per-profile Python loop was O(N) -> too slow now the screen runs
+    # at native resolution, before the L2-grid binning.)
     contamination_window = max(1, int(round(profiles_per_min * 15)))
-    contaminated = np.zeros(len(data.time), dtype=bool)
-
-    for i in range(len(data.time)):
-        start_idx = max(0, i - contamination_window + 1)
-        end_idx = min(len(data.time), i + contamination_window)
-        if np.any(has_low_cloud[start_idx:end_idx]):
-            contaminated[i] = True
+    from scipy.ndimage import maximum_filter1d
+    contaminated = maximum_filter1d(
+        np.asarray(has_low_cloud, dtype=np.uint8),
+        size=2 * contamination_window - 1, mode="constant", cval=0) > 0
 
     n_remaining = np.sum(~contaminated)
 
@@ -976,19 +1071,35 @@ def filter_cloudy_profiles(
         time_units=data.time_units,
     )
 
-    # Mask signal above high clouds (500m below cloud base)
-    n_partial = 0
+    # Mask signal above clouds (500 m below the cloud base) on every remaining profile -- the
+    # attenuated signal above a cloud must never enter the fit. A profile is still USABLE for the
+    # Rayleigh fit if its molecular window survives the mask: it is cloud-free, OR the cloud sits high
+    # enough that the mask starts above the window top (cloud_base - 500 > range_end_m). Counting only
+    # the fully-cloud-free profiles (the previous behaviour) wrongly rejected otherwise-fine nights
+    # with persistent cirrus WELL ABOVE the 2-6 km window -- e.g. SOFIA 2025-01-28 had 349 fully-clear
+    # profiles (< the 3 h minimum) but 2161 with the cloud base >= 6.5 km, i.e. a clean 2-6 km column.
+    mask_margin = 500.0
+    window_top = options.range_end_m
+    n_cloud_masked = 0
+    n_usable = 0
     for i in range(len(filtered_data.time)):
         if filtered_data.cbh[i, 0] != no_cloud_value:
             cloud_height = filtered_data.cbh[i, 0]
-            mask_above = filtered_data.range_alc >= (cloud_height - 500)
-            filtered_data.rcs[i, mask_above] = np.nan
-            n_partial += 1
+            filtered_data.rcs[i, filtered_data.range_alc >= (cloud_height - mask_margin)] = np.nan
+            n_cloud_masked += 1
+            if (cloud_height - mask_margin) > window_top:   # mask starts above the window -> intact
+                n_usable += 1
+        else:
+            n_usable += 1
 
-    # Check if enough profiles remain after masking
-    n_final = len(filtered_data.time) - n_partial
-    if n_final < min_profiles:
+    # Enough profiles with a usable (clean) molecular window?
+    if n_usable < min_profiles:
         return data, False, False
 
-    is_partially_clear = n_partial > 0
+    # A night calibrated with some signal masked above clouds is a PARTIAL success (flag 0.5).
+    is_partially_clear = n_cloud_masked > 0
+    if masks_out is not None:
+        # over the INPUT profiles: which survived the screen (~contaminated) -> lets the diagnostic
+        # plot show the WHOLE night with the excluded (cloud/contaminated) profiles hatched, not gapped.
+        masks_out["keep_mask"] = keep_mask
     return filtered_data, True, is_partially_clear

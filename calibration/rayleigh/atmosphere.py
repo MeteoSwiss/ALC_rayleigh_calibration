@@ -268,7 +268,7 @@ def load_ecmwf_profile(
 
         T_raw = data.variables['t'][:, :, idx_lat, idx_lon]
         level = data.variables['level'][:]
-        z_ecmwf = data.variables['z'][:, :, idx_lat, idx_lon] / 9.80655  # Geopotential to height
+        z_ecmwf = data.variables['z'][:, :, idx_lat, idx_lon] / 9.80665  # Geopotential to height (g0, CODATA)
 
     # Use first time step, interpolate to instrument grid
     # (original code used index [1, :] but that seems like a bug - using [0, :])
@@ -324,7 +324,7 @@ def load_cams_atmosphere(
     AtmosphericProfile or None
         Temperature/pressure on altitude_grid, or None if CAMS is unavailable.
     """
-    from .water_vapor import cams_temperature_pressure_profile
+    from ..water_vapor_correction.water_vapor import cams_temperature_pressure_profile
 
     if np.ma.isMaskedArray(altitude_grid):
         if np.any(np.ma.getmaskarray(altitude_grid)):

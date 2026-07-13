@@ -11,6 +11,7 @@ calibration results.  Every function:
 from __future__ import annotations
 
 import logging
+import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING, List
@@ -48,6 +49,30 @@ def _save_and_close(fig, save_path: Optional[Path], dpi: int = 150):
         logger.info("Plot saved -> %s", save_path)
     plt = _get_plt()
     plt.close(fig)
+
+
+def _time_x(hours_since_start, time_datetime):
+    """X-coordinates for a time-height pcolor. When real timestamps are available, return
+    matplotlib date numbers (so the axis shows wall-clock hours + date); otherwise fall back
+    to hours-since-start. Returns ``(x_array, is_datetime)``."""
+    if time_datetime is not None and len(time_datetime) > 0:
+        from matplotlib import dates as mdates
+        return np.asarray(mdates.date2num(list(time_datetime)), dtype=float), True
+    return np.asarray(hours_since_start, dtype=float), False
+
+
+def _label_time_x(ax, is_datetime):
+    """Label a time-height x-axis: a real datetime axis (hours + date, via ConciseDateFormatter
+    which prints the date as a context label and at day boundaries) when timestamps were used,
+    else the old 'Hours since start'."""
+    if is_datetime:
+        from matplotlib import dates as mdates
+        loc = mdates.AutoDateLocator(minticks=4, maxticks=9)
+        ax.xaxis.set_major_locator(loc)
+        ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(loc))
+        ax.set_xlabel("Time (UTC)")
+    else:
+        ax.set_xlabel("Hours since start")
 
 
 def plot_cloud_diagnostics_compact(data, res, title: str = "",
@@ -811,10 +836,17 @@ def plot_rayleigh_diagnostics_compact(
     cloud_base_height: Optional[NDArray[np.float64]] = None,
     no_cloud_value: float = -9.0,
     z_low_cloud: Optional[float] = None,
+    rcs_range_alc: Optional[NDArray[np.float64]] = None,
+    time_datetime: Optional[List[datetime]] = None,
     title: str = "",
     save_path: Optional[Path] = None,
 ) -> "Figure":
-    """Wide Rayleigh dashboard: molecular, window, sensitivity and an annotated RCS panel."""
+    """Wide Rayleigh dashboard: molecular, window, sensitivity and an annotated RCS panel.
+
+    The RCS panel (``rcs``/``hours_since_start``/``cloud_base_height``/``used_profile_indices``) may be
+    on a different (e.g. full pre-screen, native-range) grid than the fit panels; pass its range axis
+    as ``rcs_range_alc`` (defaults to ``range_alc``) so excluded profiles can be shown hatched rather
+    than gapped."""
     plt = _get_plt()
 
     fig = plt.figure(figsize=(24, 14), layout="constrained")
@@ -925,21 +957,24 @@ def plot_rayleigh_diagnostics_compact(
     ax_s3.grid(True, axis="y", alpha=0.25)
 
     # --- Annotated RCS pcolor: molecular layer, cloud detections, profile usage ---
+    rr = rcs_range_alc if rcs_range_alc is not None else range_alc   # RCS panel may use its own range axis
     rcs_plot = np.asarray(rcs, dtype=float).copy().T
     rcs_plot[rcs_plot <= 0] = np.nan
-    log_rcs = np.log10(rcs_plot)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        log_rcs = np.log10(rcs_plot)
     valid = log_rcs[np.isfinite(log_rcs)]
     if valid.size:
         vmin, vmax = float(np.percentile(valid, 5)), float(np.percentile(valid, 95))
     else:
         vmin, vmax = 0.0, 6.0
 
-    hm = ax_r.pcolormesh(hours_since_start, range_alc * 1e-3, log_rcs,
+    x, _use_dt = _time_x(hours_since_start, time_datetime)
+    hm = ax_r.pcolormesh(x, rr * 1e-3, log_rcs,
                          shading="auto", cmap="viridis", vmin=vmin, vmax=vmax)
     plt.colorbar(hm, ax=ax_r, pad=0.01).set_label(r"log$_{10}$(RCS)")
 
-    n_t = int(hours_since_start.size)
-    dt = float(np.median(np.diff(hours_since_start))) if n_t > 1 else 1.0
+    n_t = int(x.size)
+    dt = float(np.median(np.diff(x))) if n_t > 1 else 1.0
 
     # per-profile low-cloud flag: a cloud base below the molecular window (or z_low_cloud)
     cbh0 = None
@@ -967,20 +1002,33 @@ def plot_rayleigh_diagnostics_compact(
         runs = np.split(idx, np.where(np.diff(idx) > 1)[0] + 1)
         first = True
         for run in runs:
-            x0 = hours_since_start[run[0]]
+            x0 = x[run[0]]
             j = run[-1]
-            x1 = hours_since_start[j + 1] if j < n_t - 1 else hours_since_start[j] + dt
+            x1 = x[j + 1] if j < n_t - 1 else x[j] + dt
             ax_r.axvspan(x0, x1, facecolor="none", edgecolor=facecolor, hatch=hatch,
                          linewidth=0.0, alpha=0.85, zorder=3,
                          label=(label if first else None))
             first = False
 
-    _hatched_runs(not_used & flagged, "red", "///", "flagged (low cloud)")
+    _hatched_runs(not_used & flagged, "red", "///", "excluded (low cloud)")
     _hatched_runs(not_used & ~flagged, "0.25", "\\\\", "screened / not used")
+
+    # High cloud KEPT for the fit (base above the molecular window): the signal ABOVE the cloud is
+    # masked out before fitting, so flag that masked region in cyan -- it is shown for context but was
+    # NOT used in the fit. (Low cloud columns are excluded outright above; this marks the used ones.)
+    if cbh0 is not None:
+        high_cloud = used & np.isfinite(cbh0) & ~flagged
+        if np.any(high_cloud):
+            y_hi = float(rr.max()) * 1e-3
+            y_lo = np.where(high_cloud, np.clip((cbh0 - 500.0) * 1e-3, 0.0, y_hi), y_hi)
+            ax_r.fill_between(x, y_lo, y_hi, where=high_cloud, step="mid",
+                              facecolor="none", edgecolor="#19d3f3", hatch="xx",
+                              linewidth=0.0, alpha=0.75, zorder=3,
+                              label="high cloud (masked above fit)")
 
     # cloud detections (lowest cloud base over time)
     if cbh0 is not None and np.any(np.isfinite(cbh0)):
-        ax_r.scatter(hours_since_start, cbh0 * 1e-3, s=7, c="white",
+        ax_r.scatter(x, cbh0 * 1e-3, s=7, c="white",
                      edgecolors="k", linewidths=0.2, zorder=5, label="cloud base")
 
     # molecular layer = the Rayleigh fit window (range AGL)
@@ -990,13 +1038,125 @@ def plot_rayleigh_diagnostics_compact(
     ax_r.axhline(z_lo, color="gold", lw=1.6, zorder=4)
     ax_r.axhline(z_hi, color="gold", lw=1.6, zorder=4, label="molecular layer")
 
-    ax_r.set_xlabel("Hours since start")
+    _label_time_x(ax_r, _use_dt)
     ax_r.set_ylabel("Range (km)")
-    ax_r.set_title("Range-corrected signal — full matrix, molecular layer (gold), "
-                   "cloud base (dots), excluded profiles hatched")
+    ax_r.set_title("Range-corrected signal — full night; molecular layer (gold), cloud base (dots); "
+                   "excluded hatched (red=low cloud, grey=screened), high-cloud masked region (cyan)")
     ax_r.grid(True, alpha=0.2)
     ax_r.legend(loc="upper right", fontsize=7, framealpha=0.85, ncol=2)
 
     fig.suptitle(title or "Rayleigh Diagnostics", fontsize=14)
     _save_and_close(fig, save_path)  # constrained layout solves on save (no tight_layout)
+    return fig
+
+
+def plot_rayleigh_diagnostics_failure(
+    *,
+    range_alc: NDArray[np.float64],
+    hours_since_start: NDArray[np.float64],
+    rcs: NDArray[np.float64],
+    reason: str,
+    altitude: float = 0.0,
+    cbh: Optional[NDArray[np.float64]] = None,
+    no_cloud_value: float = -9.0,
+    p_mol: Optional[NDArray[np.float64]] = None,
+    molecular_window: Optional[tuple] = None,
+    z_low_cloud: Optional[float] = None,
+    range_start_m: float = 2000.0,
+    range_end_m: float = 6000.0,
+    time_datetime: Optional[List[datetime]] = None,
+    title: str = "",
+    save_path: Optional[Path] = None,
+) -> "Figure":
+    """Diagnostic for a night that did NOT calibrate (cloudy / quality flag / no window).
+
+    Deliberately tolerant of missing fit products: it always draws the RCS time-height
+    matrix (so clouds and contamination are visible) and, when the night-mean signal and a
+    molecular reference are available, the mean profile against the molecular shape with the
+    attempted window. Saved under the SAME ``<tag>_rayleigh_diag_compact.png`` name as a
+    successful night so the dashboard's per-night viewer lists it uniformly; the red banner
+    states why the night was rejected.
+    """
+    plt = _get_plt()
+    fig = plt.figure(figsize=(18, 6), layout="constrained")
+    gs = fig.add_gridspec(1, 3)
+    ax_r = fig.add_subplot(gs[0, 0:2])
+    ax_p = fig.add_subplot(gs[0, 2])
+
+    range_alc = np.asarray(range_alc, dtype=float)
+    rcs_full = np.asarray(rcs, dtype=float)
+    hours = np.asarray(hours_since_start, dtype=float)
+    has_window = molecular_window is not None and np.all(np.isfinite(molecular_window))
+
+    # --- RCS time-height matrix (always available when there are profiles) ---
+    # Native L1 can be thousands x thousands of cells (CL61 raw especially); stride the mesh to
+    # <=~800 per axis so a failure plot stays fast and light. Visual only -- the mean-profile panel
+    # below still uses the full-resolution data.
+    st_t = max(1, int(np.ceil(rcs_full.shape[0] / 800)))
+    st_r = max(1, int(np.ceil(rcs_full.shape[1] / 800)))
+    rcs_t = rcs_full[::st_t, ::st_r].T.copy()
+    rcs_t[rcs_t <= 0] = np.nan
+    x_full, _use_dt = _time_x(hours, time_datetime)
+    x_hm = x_full[::st_t]
+    range_hm = range_alc[::st_r]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        log_rcs = np.log10(rcs_t)
+    valid = log_rcs[np.isfinite(log_rcs)]
+    vmin, vmax = (float(np.percentile(valid, 5)), float(np.percentile(valid, 95))) if valid.size else (0.0, 6.0)
+    hm = ax_r.pcolormesh(x_hm, range_hm * 1e-3, log_rcs,
+                         shading="auto", cmap="viridis", vmin=vmin, vmax=vmax)
+    plt.colorbar(hm, ax=ax_r, pad=0.01).set_label(r"log$_{10}$(RCS)")
+    if cbh is not None:
+        c = np.asarray(cbh, dtype=float)
+        c0 = c[:, 0] if c.ndim > 1 else c
+        c0 = np.where((c0 == no_cloud_value) | (c0 <= 0), np.nan, c0)[::st_t]
+        if np.any(np.isfinite(c0)):
+            ax_r.scatter(x_hm, c0 * 1e-3, s=7, c="white",
+                         edgecolors="k", linewidths=0.2, zorder=5, label="cloud base")
+    if has_window:
+        z_lo, z_hi = molecular_window[0] * 1e-3, molecular_window[1] * 1e-3
+        ax_r.axhspan(z_lo, z_hi, color="gold", alpha=0.20, zorder=4)
+        ax_r.axhline(z_lo, color="gold", lw=1.4, zorder=4)
+        ax_r.axhline(z_hi, color="gold", lw=1.4, zorder=4, label="molecular window (attempted)")
+    ax_r.set_ylim(0, float(range_alc.max()) * 1e-3)
+    _label_time_x(ax_r, _use_dt)
+    ax_r.set_ylabel("Range (km)")
+    ax_r.set_title("Range-corrected signal — full night")
+    ax_r.grid(True, alpha=0.2)
+    if ax_r.get_legend_handles_labels()[0]:
+        ax_r.legend(loc="upper right", fontsize=8, framealpha=0.85)
+
+    # --- Night-mean profile vs molecular shape (best effort) ---
+    z_km = (range_alc + altitude) * 1e-3
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        rcs_mean = np.nanmean(np.asarray(rcs, dtype=float), axis=0)
+        sig = rcs_mean / (range_alc ** 2)
+    finite = np.isfinite(sig)
+    if finite.any():
+        ax_p.plot(sig[finite], z_km[finite], color="#1f77b4", lw=0.8, label="signal / range²")
+        if p_mol is not None:
+            pm = np.asarray(p_mol, dtype=float)
+            band = (range_alc >= range_start_m) & (range_alc <= range_end_m) & finite & np.isfinite(pm)
+            if band.any() and np.nanmedian(pm[band]) > 0:
+                scale = np.nanmedian(sig[band]) / np.nanmedian(pm[band])
+                ax_p.plot(pm * scale, z_km, color="#d62728", lw=0.9, ls="--", label="molecular (scaled)")
+        if has_window:
+            ax_p.axhspan((molecular_window[0] + altitude) * 1e-3,
+                         (molecular_window[1] + altitude) * 1e-3, color="gold", alpha=0.15)
+        ax_p.set_xscale("log")
+        ax_p.legend(fontsize=8)
+    else:
+        ax_p.text(0.5, 0.5, "no usable profiles", ha="center", va="center",
+                  transform=ax_p.transAxes, fontsize=11)
+    ax_p.set_ylim(0, float(z_km.max()) if np.isfinite(z_km).any() else 1.0)
+    ax_p.set_xlabel("Signal (a.u.)")
+    ax_p.set_ylabel("Altitude (km ASL)")
+    ax_p.set_title("Night-mean profile vs molecular")
+    ax_p.grid(True, which="both", alpha=0.25)
+
+    banner = f"{title}  —  NOT CALIBRATED: {reason}" if title else f"NOT CALIBRATED: {reason}"
+    fig.suptitle(banner, fontsize=13, color="#b00020")
+    _save_and_close(fig, save_path)
     return fig

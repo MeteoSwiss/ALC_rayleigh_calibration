@@ -81,6 +81,13 @@ h2 { font-size: 17px; margin: 22px 0 10px; }
   padding: 8px; margin: 12px 0; }
 @media (max-width: 900px) { .grid2, .kpis { grid-template-columns: 1fr; } }
 
+/* Top-of-page action links (download NetCDF, CEDA L2) */
+.links { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+.btnlink { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 600;
+  text-decoration: none; color: var(--brand); background: var(--card); border: 1px solid var(--line);
+  border-radius: 8px; padding: 5px 11px; }
+.btnlink:hover { border-color: var(--accent); color: var(--accent); background: #eef4fb; }
+
 /* Metadata bar */
 .metabar { display: flex; flex-wrap: wrap; gap: 8px 18px; background: var(--card);
   border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin-bottom: 6px; }
@@ -170,6 +177,60 @@ td a:hover { text-decoration: underline; }
 .cal-day.avail.rejected:hover { background: #c4c9ce; }
 .cal-day.none { color: #ccd2d8; }
 .cal-day.sel { outline: 2px solid #d62728; }
+.cal-day.pout { opacity: 0.28; }   /* day outside the selected time-period window (still clickable) */
+.cal-nav { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+.cal-nav .cal-select { font-size: 10px; padding: 1px 2px; max-width: 110px; }
+.cal-prev, .cal-next { font-size: 13px; line-height: 1; padding: 0 7px; cursor: pointer;
+  border: 1px solid #ccd2d8; background: #f7f8fa; border-radius: 3px; }
+.cal-prev:disabled, .cal-next:disabled { opacity: .35; cursor: default; }
+.cal-window { display: flex; flex-direction: column; gap: 10px; }
 .cal-key { display: inline-block; width: 11px; height: 11px; border-radius: 3px; vertical-align: -1px; margin: 0 1px; }
 .cal-key.cal-ok { background: #2ca02c; }
 .cal-key.cal-bad { background: #d9dde1; border: 1px solid #b9bfc5; }
+
+/* QC flag comment dialog */
+.qcm-overlay { position: fixed; inset: 0; z-index: 2000; background: rgba(12,22,38,.45);
+  display: flex; align-items: center; justify-content: center; }
+.qcm-dialog { background: var(--card); color: var(--ink); border: 1px solid var(--line);
+  border-radius: 11px; box-shadow: 0 14px 44px rgba(0,0,0,.32); width: 460px; max-width: 92vw; padding: 18px 20px; }
+.qcm-head { font-weight: 700; font-size: 15px; }
+.qcm-sub { color: var(--muted); font-size: 12px; margin: 3px 0 14px;
+  font-family: ui-monospace, "Cascadia Code", monospace; }
+.qcm-presets { display: flex; flex-direction: column; gap: 8px; }
+.qcm-preset { text-align: left; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px;
+  background: #f3f6fb; color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; }
+.qcm-preset b { display: inline-block; min-width: 16px; color: var(--brand); }
+.qcm-preset:hover { background: #e7eff8; border-color: var(--accent); }
+.qcm-label { display: block; margin: 14px 0 5px; font-size: 12px; color: var(--muted); }
+.qcm-text { width: 100%; font: inherit; font-size: 13px; padding: 7px 9px; border: 1px solid var(--line);
+  border-radius: 7px; resize: vertical; background: #fff; color: var(--ink); }
+.qcm-text:focus { outline: none; border-color: var(--accent); }
+.qcm-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 16px; }
+.qcm-right { display: flex; gap: 8px; }
+.qcm-actions button { font: inherit; font-size: 13px; padding: 7px 14px; border-radius: 7px;
+  cursor: pointer; border: 1px solid var(--line); background: #fff; color: var(--ink); }
+.qcm-save { background: var(--brand); color: #fff; border-color: var(--brand); }
+.qcm-save:hover { background: #0d4a76; }
+.qcm-cancel:hover { background: #f0f2f5; }
+.qcm-remove { color: #a3261f; border-color: #e3b3ae; }
+.qcm-remove:hover { background: #fbecea; }
+
+/* Cloudnet-style daily availability bar + legend + per-day status field */
+.availcard h2 { margin-top: 4px; }
+.avail-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center;
+  font-size: 12px; color: var(--muted); margin: 2px 2px 6px; }
+.avail-legend .ak { display: inline-block; width: 12px; height: 12px; border-radius: 3px;
+  vertical-align: -1px; margin-right: 3px; border: 1px solid rgba(0,0,0,.12); }
+.ak-pass { background: #3cb371; }
+.ak-warning { background: #f4c430; }
+.ak-error { background: #e03131; }
+.ak-nodata { background: #e9ecef; }
+
+.diag-status { margin: 10px 2px 2px; font-size: 13px; padding: 7px 11px; border-radius: 7px;
+  border-left: 4px solid var(--line); background: #f7f8fa; color: var(--ink); }
+.diag-status:empty { display: none; }
+.diag-status::before { content: "Status: "; color: var(--muted); font-weight: 600; }
+.diag-status.q-pass { border-left-color: #3cb371; }
+.diag-status.q-warning { border-left-color: #f4c430; background: #fff9e6; }
+.diag-status.q-error { border-left-color: #e03131; background: #fdecec; }
+.diag-status.q-nodata { border-left-color: #cbd2d9; color: var(--muted); }

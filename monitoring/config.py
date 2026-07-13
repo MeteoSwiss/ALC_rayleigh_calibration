@@ -20,6 +20,38 @@ DEFAULT_L2_DIR = Path(os.environ.get("ALC_L2_DIR", "A:/E-PROFILE_L2_monthly"))  
 DEFAULT_OUT_DIR = Path(os.environ.get("ALC_DASHBOARD_DIR", str(_PROJECT / "dashboard_l1_2026")))   # generated static site
 DB_NAME = "calib_index.sqlite"
 
+
+def _norm_base_url(u: str) -> str:
+    """Normalize an image base URL: strip whitespace and ensure a single trailing slash. '' stays ''."""
+    u = (u or "").strip()
+    if not u:
+        return ""
+    return u if u.endswith("/") else u + "/"
+
+
+# Public base URL for the bulky per-image assets (per-night diagnostic PNGs, OmB / sensitivity figures,
+# flag examples). When set (ALC_IMG_BASE_URL, or --img-base-url), the site references those images as
+# ABSOLUTE URLs under this base instead of site-relative paths -- so they can live in object storage
+# (e.g. an EWC S3 bucket https://object-store.os-api.cci2.ecmwf.int/<bucket>/) while the HTML is served
+# from a small web server. Empty (default) -> unchanged site-relative behaviour. The bucket layout
+# mirrors the site: <base>diag/<key>/<method>_<date>.png, <base>ombsens/<key>/..., <base>flagex/...
+IMG_BASE_URL = _norm_base_url(os.environ.get("ALC_IMG_BASE_URL", ""))
+
+# "Images in bucket" mode: the per-image PNG assets (per-night diagnostics, OmB/sensitivity) are already
+# mirrored in the object-storage bucket pointed at by IMG_BASE_URL, so the local diagnostic PNGs may be
+# deleted to reclaim disk. When ON, the dashboard enumerates the diagnostic/OmB/sens panels from the
+# persistent CSVs instead of the on-disk PNGs (whose existence is no longer required), and emits the
+# bucket URLs -- so a rebuild keeps the full diag history even after the local PNGs are gone. Fresh local
+# PNGs that still exist are staged for publishing as usual; deleted ones are simply not staged. Default
+# OFF -> unchanged behaviour (panels enumerated by scanning the local PNGs).
+IMAGES_IN_BUCKET = os.environ.get("ALC_IMAGES_IN_BUCKET", "").strip() not in ("", "0", "false", "False")
+
+
+def nc_url(key: str, fname: str) -> str:
+    """Public URL for a per-station calibration NetCDF. Absolute under the bucket base when set
+    (mirrors diag/ombsens), else site-relative from a station page (stations/<key>.html)."""
+    return (f"{IMG_BASE_URL}nc/{key}/{fname}" if IMG_BASE_URL else f"../nc/{key}/{fname}")
+
 # --- Flag meanings ----------------------------------------------------------
 # MIRROR of calibration/flags.py :: FLAG_MEANINGS (the homogenized cloud/Rayleigh table).
 # Kept local on purpose so the dashboard runs without importing (or installing) the heavy
@@ -36,7 +68,9 @@ FLAG_MEANINGS = {
     -6: "Uncertainty exceeds value",
     -7: "Negative fit slope",
     -8: "Fit issue: |b| > a",
-    -9: "Aerosol below molecular window",
+    -9: "Another layer with lower signal",
+    -10: "Closest CAMS data too far",
+    -11: "Rayleigh window contaminated (classification)",
     -20: "Cloud: window transmission too low",
     -21: "Cloud: laser energy too low",
     -22: "Cloud: peak not sharp above",
@@ -69,6 +103,7 @@ FLAG_COLORS = {
     -7: "#d73027",
     -8: "#a50026",
     -9: "#e07b39",
+    -10: "#5e3c99",
     -20: "#fff2cc", -21: "#ffe699", -22: "#ffd966", -23: "#f1c232",
     -24: "#e69138", -25: "#d79b00", -26: "#bf9000",
     -99: "#000000",
@@ -84,6 +119,36 @@ TYPE_COLORS = {
 }
 TYPE_ORDER = ["CHM15k", "CL31", "CL51", "CL61", "Mini-MPL"]
 
+# Plotly marker symbol per instrument type — used on EVERY network map so the symbol encodes the
+# instrument family (colour is then free to encode the data value). scattergeo honours a per-POINT
+# marker.symbol array (verified), so the maps stay single-trace and filter.js needs no restructure.
+TYPE_SYMBOLS = {
+    "CHM15k": "circle",
+    "CL31": "square",
+    "CL51": "diamond",
+    "CL61": "triangle-up",
+    "Mini-MPL": "star",
+}
+
+
+def type_symbol(itype) -> str:
+    """Plotly marker symbol for an instrument type (falls back to circle)."""
+    return TYPE_SYMBOLS.get(str(itype), "circle")
+
+# --- Instrument health / availability classes (Cloudnet-style daily bar) ---------------------------
+# Per-day instrument health decoded from the status strings (calibration/status/decode.py) + data
+# availability + housekeeping thresholds. Cloudnet's legend is Pass/Info/Warning/Error/No data; we
+# drop "info" (informational Vaisala (S) / CHM15k Note bits are ignored per operator decision) -> the
+# four classes below. Written per day to <key>_status.csv (quality column) by the runner.
+QUALITY_ORDER = ["error", "warning", "pass", "nodata"]
+QUALITY_COLORS = {"pass": "#3cb371", "warning": "#f4c430", "error": "#e03131", "nodata": "#e9ecef"}
+QUALITY_LABELS = {"pass": "Pass", "warning": "Warning", "error": "Error", "nodata": "No data"}
+
+
+def quality_color(q) -> str:
+    """Colour for a daily quality class (falls back to the 'no data' grey)."""
+    return QUALITY_COLORS.get(str(q), QUALITY_COLORS["nodata"])
+
 # Theoretical (reference) lidar constant per instrument type, on the C_L scale. Used to express a
 # station's median C_L as a percent of the nominal value. Mirrors INSTRUMENT_CAL_DEFAULT in the
 # cloud calibration core.
@@ -98,6 +163,20 @@ def theoretical_cl(itype):
 METHOD_LABELS = {"rayleigh": "Rayleigh", "cloud": "Liquid-cloud"}
 METHOD_COLORS = {"rayleigh": "#1f77b4", "cloud": "#2ca02c"}
 METHOD_ORDER = ["rayleigh", "cloud"]
+
+# --- Instrument monitoring panel (station pages) ---------------------------------------------------
+# Canonical housekeeping field (column in <key>_hk.csv) -> (label, unit, axis group). Two y-axes:
+# laser power/energy and window transmission share the "pct" (%) axis; temperatures use the "temp"
+# (degC) axis. The panel draws only the fields a stream actually reports (others are blank -> skipped).
+HK_PANEL = [
+    ("laser",         "Laser power/energy",  "%",  "pct"),
+    ("window",        "Window transmission", "%",  "pct"),
+    ("temp_optics",   "Optics/laser temp",   "degC", "temp"),
+    ("temp_internal", "Internal temp",       "degC", "temp"),
+    ("temp_detector", "Detector temp",       "degC", "temp"),
+]
+HK_COLORS = {"laser": "#d62728", "window": "#1f77b4", "temp_optics": "#ff7f0e",
+             "temp_internal": "#2ca02c", "temp_detector": "#9467bd"}
 
 
 def method_label(method) -> str:
@@ -226,21 +305,22 @@ FLAG_DOCS = [
      "detail": "A consistency check on the molecular-fit coefficients failed — the offset term dominates the slope term, flagging an ill-conditioned fit rather than a clean molecular signal.",
      "recognize": "Rayleigh-only molecular-fit diagnostic."},
     {"value": -9, "methods": "Rayleigh",
-     "summary": "Aerosol layer below the molecular window (scattering-ratio gate).",
-     "detail": "A dedicated aerosol-contamination QC. Each candidate molecular window's fit slope is "
-               "a lidar-constant proxy; in clean air these are nearly equal across the 2–6 km search "
-               "range (molecular two-way transmittance varies < 1 %). When an aerosol layer sits in "
-               "or just below the chosen window, that window's slope is inflated relative to the "
-               "cleanest (least-attenuated) window. The night is rejected when the chosen window's "
+     "summary": "Another candidate window has much lower signal than the one chosen.",
+     "detail": "A molecular-window selection QC. Each candidate window's fit slope is a lidar-constant "
+               "proxy; in clean air these are nearly equal across the 2–6 km search range (molecular "
+               "two-way transmittance varies < 1 %). When the chosen window carries excess backscatter "
+               "(typically an aerosol layer in or near it), its slope is inflated relative to the "
+               "cleanest (lowest-signal) candidate window — meaning a cleaner molecular layer was "
+               "available and the selection is suspect. The night is rejected when the chosen window's "
                "slope exceeds a robust cleanest reference (10th percentile of the clean-window "
                "slopes) by more than the threshold (default 2.0). Validated on L1 Mar–May 2026: "
                "clean nights cluster at ~1.1–1.4 (p95 = 1.4) with a clear gap to the aerosol tail "
                "above ~2.8 (e.g. STORNAWAY-type residual free-tropospheric aerosol; 0-20000-0-10838 "
                "on 2026-03-03 scores ~2.8). It catches contamination that the slope-vs-window "
                "cross-check (−3) lets through.",
-     "recognize": "Message reads 'Aerosol contamination below window: scattering ratio X'. In the "
-                  "Rayleigh diagnostic the range-corrected-signal panel shows an enhanced layer "
-                  "below the chosen molecular window."},
+     "recognize": "Message reads 'Another layer with lower signal found (signal ratio X)'. In the "
+                  "Rayleigh diagnostic the range-corrected-signal panel shows a cleaner (lower-signal) "
+                  "layer than the chosen molecular window."},
     {"value": -20, "methods": "Cloud",
      "summary": "Cloud rejected — window transmission too low.",
      "detail": "Cloud rejection reasons (−20…−26) replace the generic 'no liquid cloud' when a cloud "

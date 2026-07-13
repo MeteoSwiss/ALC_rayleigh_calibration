@@ -7,7 +7,7 @@ E-PROFILE publications.
 
 Main Features
 -------------
-- Support for multiple instrument types (CHM15k, CL51, CL61, Mini-MPL)
+- Support for multiple instrument types (CHM15k, CL61, Mini-MPL)
 - Automatic detection of optimal molecular scattering window
 - Klett inversion for extinction retrieval
 - Quality control and validation

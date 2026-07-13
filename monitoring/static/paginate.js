@@ -17,9 +17,9 @@
     nav.appendChild(prev); nav.appendChild(label); nav.appendChild(next);
     table.parentNode.insertBefore(nav, table.nextSibling);
 
-    function active() {  // rows in current DOM order (respects sort), minus filter-hidden ones
+    function active() {  // rows in DOM order (respects sort), minus filter- and period-hidden ones
       return Array.prototype.filter.call(tbody.rows, function (r) {
-        return r.getAttribute("data-fhidden") !== "1";
+        return r.getAttribute("data-fhidden") !== "1" && r.getAttribute("data-phidden") !== "1";
       });
     }
     function render() {

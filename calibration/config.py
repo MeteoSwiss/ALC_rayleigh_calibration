@@ -86,6 +86,17 @@ class InstrumentType(str, Enum):
         return -9.0
 
     @property
+    def reports_vv_obscuration(self) -> bool:
+        """Whether a reported vertical visibility means the beam is OBSCURED (no molecular column).
+
+        The Vaisala CL31/CL51/CL61 report a vertical visibility INSTEAD of a cloud base when fog or
+        precipitation obscures the beam, so VV > 0 marks a profile with no usable molecular signal.
+        The Lufft CHM15k (and Mini-MPL) report a vertical visibility ALONGSIDE clouds even in
+        non-obscuring conditions, so their VV must NOT be treated as fog — doing so wrongly excludes
+        a large fraction of otherwise-usable profiles (~25 % of CHM night profiles at Payerne)."""
+        return self in {InstrumentType.CL31, InstrumentType.CL51, InstrumentType.CL61}
+
+    @property
     def lidar_constant_units(self) -> str:
         """Return the units for lidar constant for this instrument type."""
         if self in {InstrumentType.CL31, InstrumentType.CL51, InstrumentType.CL61}:
@@ -249,11 +260,12 @@ class CalibrationOptions:
     min_window_r2: float = 0.5
     max_window_rel_error: float = 50.0
     # Molecular-window detection strategy, keyed by E-PROF version (see molecular_methods.py):
-    # 'eprof_v1.2' (default, production = improved), 'eprof_v1.1' (legacy main, sign-corrected),
-    # 'eprof_v0.25' (MATLAB Auto_Calib_25), 'earlinet', 'eprof_v2' (optimal), 'bellini'.
-    # Legacy aliases (improved/main/matlab/optimal) are still accepted. The min_window_*/
-    # max_window_* gates above apply to 'eprof_v1.2'; other methods use their own defaults.
-    molecular_method: str = "eprof_v1.2"
+    # 'eprof_v2' (default, production = optimal: composite score + time-resolved aerosol flagging,
+    # C8 defaults), 'eprof_v1.2' (legacy improved), 'eprof_v1.1' (legacy main, sign-corrected),
+    # 'eprof_v0.25' (MATLAB Auto_Calib_25), 'earlinet', 'bellini'. Legacy aliases
+    # (improved/main/matlab/optimal) are still accepted. The min_window_*/max_window_* gates above
+    # apply only to 'eprof_v1.2'; eprof_v2 and the other methods use their own tuned defaults.
+    molecular_method: str = "eprof_v2"
 
     # E-PROF v1.0 baseline ONLY: reproduce the pre-a4e7140 calibration (the Klett
     # sign error + total-OD reference). Default False = the production, corrected
@@ -301,7 +313,7 @@ class CalibrationOptions:
             min_window_start_m=float(data.get("min_window_start_m", 2000)),
             min_window_r2=float(data.get("min_window_r2", 0.5)),
             max_window_rel_error=float(data.get("max_window_rel_error", 50.0)),
-            molecular_method=str(data.get("molecular_method", "eprof_v1.2")),
+            molecular_method=str(data.get("molecular_method", "eprof_v2")),
             sign_error_v10=bool(data.get("sign_error_v10", 0)),
             apply_wv_correction=bool(data.get("apply_wv_correction", 0)),
             cams_folder=Path(data.get("cams_folder", "D:/CAMS/")),

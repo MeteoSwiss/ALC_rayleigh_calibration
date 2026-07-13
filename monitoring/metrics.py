@@ -39,8 +39,9 @@ def network_summary(cal: pd.DataFrame, series: pd.DataFrame, st: pd.DataFrame) -
     """Headline KPIs + per-(type, method) breakdown for the summary page."""
     n_ok = int(cal["success"].sum())
     n_total = int(len(cal))
-    # Suitable = attemptable days (exclude no-data flag 0 and unsuitable-conditions flag -1).
-    n_suit = int((~cal["flag"].isin([0, -1])).sum())
+    # Success rate = valid / ALL days: no-data (0), no-cloud/not-clear-night (-1) and the quality
+    # rejections all count as non-success (true daily yield), consistent with the per-series rate.
+    n_suit = int((~cal["flag"].isin([0, -1])).sum())   # attemptable days, kept for reference
     as_of = str(cal["date"].max()) if n_total else None
 
     by_tm = (
@@ -49,7 +50,7 @@ def network_summary(cal: pd.DataFrame, series: pd.DataFrame, st: pd.DataFrame) -
              n_success=("n_success", "sum"), n_suitable=("n_suitable", "sum"))
         .reset_index()
     )
-    by_tm["success_rate"] = 100.0 * by_tm["n_success"] / by_tm["n_suitable"].replace(0, np.nan)
+    by_tm["success_rate"] = 100.0 * by_tm["n_success"] / by_tm["n_dates"].replace(0, np.nan)
     by_tm = by_tm.sort_values(["itype", "method"])
 
     return dict(
@@ -58,7 +59,7 @@ def network_summary(cal: pd.DataFrame, series: pd.DataFrame, st: pd.DataFrame) -
         n_series=int(len(series)),
         n_calibrations=n_total,
         n_success=n_ok,
-        success_rate=(100.0 * n_ok / n_suit) if n_suit else float("nan"),
+        success_rate=(100.0 * n_ok / n_total) if n_total else float("nan"),
         date_min=str(cal["date"].min()) if n_total else None,
         date_max=as_of,
         by_type_method=by_tm,

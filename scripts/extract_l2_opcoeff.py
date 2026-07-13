@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
 import netCDF4  # noqa: E402
-import run_all_l1_2026 as R  # noqa: E402
+import run_network_calibration as R  # noqa: E402
 
 _FNAME = re.compile(r"L2_(.+?)(\d{8})\.nc$", re.IGNORECASE)
 

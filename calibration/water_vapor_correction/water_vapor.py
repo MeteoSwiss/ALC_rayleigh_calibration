@@ -14,6 +14,7 @@ Faithful Python port of the validated MATLAB routines:
 """
 from __future__ import annotations
 
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -140,6 +141,191 @@ _B137 = np.array([
 _RD_CAMS = 287.06  # J/(kg K), as in get_Beta_CAMS_oper_monthly.m
 
 
+def cams_nearest_offset_deg(cams_file, latitude: float, longitude: float):
+    """(offset_deg, grid_spacing_deg) from (lat,lon) to the NEAREST CAMS grid point.
+    offset_deg = max(|dlat|, |dlon wrapped to +-180|); grid_spacing_deg = max(lat,lon spacing)."""
+    import xarray as xr
+    with xr.open_dataset(cams_file) as ds:
+        if _is_station_format(ds):
+            # Per-station MARS file: report the distance to the nearest station (an exact
+            # match), so the out-of-domain guard never trips for a station we extracted.
+            k = _nearest_station_index(ds, latitude, longitude)
+            slat = float(np.asarray(ds["lat"].values)[k])
+            slon = float(np.asarray(ds["lon"].values)[k])
+            return (max(abs(latitude - slat),
+                        abs(((longitude - slon + 180.0) % 360.0) - 180.0)), 0.1)
+        lats = np.asarray(ds["latitude"].values, dtype=float)
+        lons = np.asarray(ds["longitude"].values, dtype=float)
+    glat = float(lats[np.abs(lats - latitude).argmin()])
+    dlon_arr = np.abs(((lons - longitude + 180.0) % 360.0) - 180.0)
+    glon = float(lons[int(dlon_arr.argmin())])
+    dlat = abs(latitude - glat)
+    dlon = abs(((longitude - glon + 180.0) % 360.0) - 180.0)
+
+    def _sp(a):
+        u = np.unique(a[np.isfinite(a)])
+        return float(np.median(np.abs(np.diff(np.sort(u))))) if u.size > 1 else 1.0
+    return max(dlat, dlon), max(_sp(lats), _sp(lons))
+
+
+def cams_point_too_far(cams_file, latitude: float, longitude: float) -> bool:
+    """True if a station is OUTSIDE the (regional) CAMS domain: its nearest grid point is farther
+    than ~1.5 grid cells (and >= 1 deg) away. The CAMS download is regional (Europe/N-Atlantic), so
+    for an out-of-domain station (e.g. New Zealand) ``.sel(method='nearest')`` silently returns the
+    domain-EDGE cell thousands of km away and yields a bogus water-vapor correction. Guarding on this
+    lets the calibration emit flag -10 ('Closest CAMS data too far') instead of a false success."""
+    if not (np.isfinite(latitude) and np.isfinite(longitude)):
+        return False   # unknown location -> let the normal path decide
+    try:
+        off, sp = cams_nearest_offset_deg(cams_file, latitude, longitude)
+    except Exception:
+        return False   # never let the guard itself break a calibration
+    return off > max(1.0, 1.5 * sp)
+
+
+def _is_station_format(ds) -> bool:
+    """True for the per-station MARS extraction (global attr ``format='mars_wv_station_v1'``):
+    a ``station`` dimension carrying ``lat``/``lon``, instead of a regular latitude x longitude
+    grid. Lets the same readers consume both the gridded CAMS_Beta_*.nc and the MARS files."""
+    return "station" in getattr(ds, "dims", {})
+
+
+def _nearest_station_index(ds, latitude: float, longitude: float) -> int:
+    """Index of the station nearest (latitude, longitude). Profiles are extracted AT the
+    station locations, so this is an exact match; the cos-weighted metric is only a
+    tie-break / safety net for a slightly-off request coordinate."""
+    lats = np.asarray(ds["lat"].values, dtype=float)
+    lons = np.asarray(ds["lon"].values, dtype=float)
+    dlon = ((lons - longitude + 180.0) % 360.0) - 180.0
+    return int(np.nanargmin((lats - latitude) ** 2 + (dlon * np.cos(np.radians(latitude))) ** 2))
+
+
+def _cams_surface_series(sub, name: str) -> NDArray:
+    """Per-time surface-field series (z or lnsp) from the gridded layout, where the surface
+    field is stored at a single finite model-level slot."""
+    a = np.asarray(sub[name].transpose("time", "level").values, dtype="float64")  # (n_t, n_lev)
+    finite = np.where(np.all(np.isfinite(a), axis=0))[0]
+    col = int(finite[0]) if finite.size else int(np.argmax(np.isfinite(a).sum(axis=0)))
+    return a[:, col]
+
+
+@lru_cache(maxsize=32)
+def _read_cams_columns(
+    cams_file: str, latitude: float, longitude: float,
+) -> Tuple[NDArray, NDArray, NDArray, NDArray, NDArray, NDArray]:
+    """THE CAMS model-level reader: T/q profiles + surface z/lnsp at the nearest grid cell
+    (gridded CAMS_Beta) or station (per-station MARS), for ALL time steps (no window, no
+    averaging). The single reader shared by the Rayleigh window-average path
+    (:func:`_cams_levels`) and the cloud per-time path (:func:`cams_levels_all_times`).
+
+    Cached by (file, lat, lon): a station processes many days from the same monthly file at one
+    location. The returned arrays are read-only (callers only average/integrate copies of them).
+
+    Returns
+    -------
+    time_dt : (n_t,)   datetime64 model times
+    level   : (n_lev,) ascending model-level numbers (1=top .. 137=surface)
+    T, q    : (n_lev, n_t)  temperature [K], specific humidity [kg/kg]
+    z_surf  : (n_t,)   surface geopotential [m^2/s^2]
+    lnsp    : (n_t,)   ln surface pressure
+    """
+    import xarray as xr
+
+    ds = xr.open_dataset(cams_file)
+    try:
+        if _is_station_format(ds):
+            sub = ds.isel(station=_nearest_station_index(ds, latitude, longitude))
+            z_surf = np.full(int(sub.sizes["time"]), float(np.asarray(sub["z"].values)), dtype="float64")
+            lnsp = np.asarray(sub["lnsp"].values, dtype="float64").ravel()
+        else:
+            sub = ds.sel(latitude=latitude, longitude=longitude, method="nearest")
+            z_surf = _cams_surface_series(sub, "z")
+            lnsp = _cams_surface_series(sub, "lnsp")
+        time_dt = np.asarray(sub["time"].values)
+        level = np.asarray(ds["level"].values, dtype=int)
+        T = np.asarray(sub["t"].transpose("level", "time").values, dtype="float64")
+        q = np.asarray(sub["q"].transpose("level", "time").values, dtype="float64")
+    finally:
+        ds.close()
+
+    # Ascending level order (1=top .. 137=surface); the hydrostatic walk keys the top-of-atmos
+    # singularity on level number 1 (idx==0). CAMS is already ascending, so this is a no-op in
+    # practice but makes the routine robust to a reordered level axis.
+    order = np.argsort(level)
+    return time_dt, level[order], T[order], q[order], z_surf, lnsp
+
+
+def _hydrostatic_z_p(level, T, q, z_surf, lnsp):
+    """ECMWF L137 half-level hydrostatic integration -> (z_model [m ASL], P_level [Pa]).
+
+    Model-level pressure from the L137 a/b coefficients (CAMS z/lnsp are SURFACE fields, not
+    profiles), geopotential integrated hydrostatically from the surface upward. ``T``/``q`` may be
+    (n_lev,) [a single averaged profile] or (n_lev, n_t) [per time step]; ``z_surf``/``lnsp`` are
+    scalar or (n_t,). ``level`` must be ascending (1=top .. 137=surface). Output has the same
+    trailing shape as ``T``.
+    """
+    T2 = np.asarray(T, dtype="float64")
+    q2 = np.asarray(q, dtype="float64")
+    one_d = T2.ndim == 1
+    if one_d:
+        T2 = T2[:, None]
+        q2 = q2[:, None]
+    n_lev, n_t = T2.shape
+    z_s = np.broadcast_to(np.asarray(z_surf, dtype="float64").ravel(), (n_t,))
+    ln = np.broadcast_to(np.asarray(lnsp, dtype="float64").ravel(), (n_t,))
+    lev = np.asarray(level, dtype=int)
+    T_moist = T2 * (1.0 + 0.609133 * q2)
+    z_f = np.full((n_lev, n_t), np.nan)
+    P_level = np.full((n_lev, n_t), np.nan)
+    for t in range(n_t):
+        surface_pressure = np.exp(ln[t])
+        z_h = z_s[t]
+        for i in range(n_lev - 1, -1, -1):
+            idx = int(lev[i]) - 1                 # half-level (level_num-1); A/B indexed by level number
+            Ph_lev = _A137[idx] + _B137[idx] * surface_pressure
+            Ph_levp1 = _A137[idx + 1] + _B137[idx + 1] * surface_pressure
+            P_level[i, t] = 0.5 * (Ph_lev + Ph_levp1)
+            if idx == 0:
+                # Top of atmosphere: upper half-level pressure is exactly 0 (A[0]=B[0]=0),
+                # so log(Ph_levp1/Ph_lev) would diverge -> ECMWF replacement (0.1 Pa, ln2).
+                dlogP = np.log(Ph_levp1 / 0.1)
+                alpha = np.log(2.0)
+            else:
+                dlogP = np.log(Ph_levp1 / Ph_lev)
+                alpha = 1.0 - (Ph_lev / (Ph_levp1 - Ph_lev)) * dlogP
+            TRd = T_moist[i, t] * _RD_CAMS
+            z_f[i, t] = z_h + TRd * alpha
+            z_h = z_h + TRd * dlogP
+    z_model = z_f / G0
+    if one_d:
+        return z_model[:, 0], P_level[:, 0]
+    return z_model, P_level
+
+
+def _wv_number_density(q, P, T):
+    """Water-vapour number density [m^-3] from the DIRECT ideal-gas route -- the SINGLE
+    water-vapour number-density calculation, shared by the Rayleigh and cloud paths::
+
+        e    = q*P / (EPS + (1-EPS)*q)     (vapour partial pressure [Pa])
+        n_wv = e / (kB * T)                (ideal gas)
+
+    Replaces the cloud's former relative-humidity round trip (Murphy-Koop es -> RH ->
+    Wagner-Pruss Pws), whose only net effect was the ~0.1-0.3 % Pws/es ratio of two mismatched
+    saturation formulae.
+    """
+    q = np.asarray(q, dtype="float64")
+    P = np.asarray(P, dtype="float64")
+    T = np.asarray(T, dtype="float64")
+    e = q * P / (EPS + (1.0 - EPS) * q)
+    return e / (KB * T)
+
+
+def _matlab_datenum_days(dt64) -> NDArray:
+    """datetime64 -> MATLAB datenum (days; datenum(1970,1,1)=719529). Matches the cloud
+    ``CeiloData.time_num`` convention so the WV nearest-time interpolation is consistent."""
+    return 719529.0 + np.asarray(dt64, dtype="datetime64[ns]").astype("int64") / 86400e9
+
+
 def _cams_levels(
     cams_file: Path,
     latitude: float,
@@ -147,92 +333,71 @@ def _cams_levels(
     t_start: np.datetime64,
     t_end: np.datetime64,
 ) -> Optional[Tuple[NDArray, NDArray, NDArray, NDArray]]:
+    """Window-averaged CAMS model-level profile at the nearest grid point (Rayleigh path).
+
+    Reads once via the shared :func:`_read_cams_columns`, averages T/q/z/lnsp over the time
+    window, integrates the L137 half-level geopotential (:func:`_hydrostatic_z_p`) and takes the
+    direct ideal-gas water-vapour number density (:func:`_wv_number_density`) -- the same single WV
+    calculation the cloud path now uses.
+
+    Returns (H, T, P_level, n_wv) sorted ascending in altitude, or None if no data.
     """
-    Core CAMS model-level read + hydrostatic integration over a time window at the
-    nearest grid point. Shared by the water-vapor correction and the optional CAMS
-    molecular profile.
-
-    Faithful port of get_Beta_CAMS_oper_monthly.m: model-level pressure from the
-    ECMWF L137 a/b coefficients (CAMS z/lnsp are SURFACE fields, not profiles),
-    geopotential integrated hydrostatically from the surface, then
-        Pw   = q*P / (eps + (1-eps)*q)   (water-vapor partial pressure)
-        n_wv = Pw / (kB * T)             (number density) [m^-3]
-
-    Returns
-    -------
-    (H, T, P_level, n_wv) each sorted ascending in altitude, or None if no data:
-        H        : geopotential height [m ASL]
-        T        : temperature [K]
-        P_level  : full model-level pressure [Pa]
-        n_wv     : water-vapor number density [m^-3]
-    """
-    import xarray as xr
-
-    ds = xr.open_dataset(cams_file)
-    try:
-        sub = ds.sel(latitude=latitude, longitude=longitude, method="nearest")
-        tmask = (sub.time.values >= t_start) & (sub.time.values <= t_end)
-        if not np.any(tmask):
-            it = int(np.abs(sub.time.values - (t_start + (t_end - t_start) / 2)).argmin())
-            tmask = np.zeros(sub.time.size, dtype=bool)
-            tmask[it] = True
-        sub = sub.isel(time=np.where(tmask)[0])
-
-        level = np.asarray(ds["level"].values, dtype=int)                 # model level numbers
-        T = np.asarray(sub["t"].mean("time").values, dtype=float)         # [level] K
-        q = np.asarray(sub["q"].mean("time").values, dtype=float)         # [level] kg/kg
-        z_raw = np.asarray(sub["z"].mean("time").values, dtype=float)     # surface geopotential (one finite level)
-        lnsp = np.asarray(sub["lnsp"].mean("time").values, dtype=float)   # ln surface pressure (one finite level)
-    finally:
-        ds.close()
-
-    # Sort levels ascending (1=top .. 137=surface). The hydrostatic integration
-    # below starts at the surface (last index) and walks up, and the top-of-atmos
-    # special case is keyed off the half-level pressure being zero (idx==0); both
-    # require ascending order. CAMS files are already ascending, so this is a no-op
-    # in practice but makes the routine robust to a reordered level axis.
-    sort_idx = np.argsort(level)
-    level = level[sort_idx]
-    T = T[sort_idx]
-    q = q[sort_idx]
-
-    # z and lnsp are surface fields stored at a single level slot -> take the finite value
-    z_surf = z_raw[np.isfinite(z_raw)]
-    lnsp_s = lnsp[np.isfinite(lnsp)]
-    if z_surf.size == 0 or lnsp_s.size == 0:
+    time_dt, level, T, q, z_surf, lnsp = _read_cams_columns(str(cams_file), latitude, longitude)
+    tmask = (time_dt >= t_start) & (time_dt <= t_end)
+    if not np.any(tmask):
+        it = int(np.abs(time_dt - (t_start + (t_end - t_start) / 2)).argmin())
+        tmask = np.zeros(time_dt.size, dtype=bool)
+        tmask[it] = True
+    idx = np.where(tmask)[0]
+    if not (np.all(np.isfinite(z_surf[idx])) and np.all(np.isfinite(lnsp[idx]))):
         return None
-    surface_pressure = float(np.exp(lnsp_s[0]))
-    z_h = float(z_surf[0])                       # surface geopotential [m^2/s^2]
+    # Integrate EACH time step to geometric height first, then average the fields ON HEIGHT.
+    # Averaging on model-level *index* (the old behaviour) is only valid at constant surface
+    # pressure: model level k sits at pressure A[k]+B[k]*ps, so when ps varies across the window
+    # (e.g. a frontal passage) a fixed index maps to different altitudes at different times, and
+    # blending them manufactures a spurious profile. On Payerne 2026-01-27 an 8.7 hPa ps swing
+    # invented a +3.6 degC warm layer and threw the 0 degC isotherm ~1.4 km too high. Averaging the
+    # per-time geometric-height profiles removes the artifact and is a no-op when ps is steady.
+    z_t, P_t = _hydrostatic_z_p(level, T[:, idx], q[:, idx], z_surf[idx], lnsp[idx])  # (n_lev, n_t)
+    n_wv_t = _wv_number_density(q[:, idx], P_t, T[:, idx])
+    # Average on a FIXED geometric-height grid, independent of the model-level index -- fine through
+    # the troposphere (the 2-6 km Rayleigh window + the WV column), coarser above. A grid tied to the
+    # per-level *mean* height would just map each time back onto its own level values and reproduce
+    # model-level averaging (the artifact); a fixed grid samples every time at the SAME altitudes.
+    z_bottom = float(np.floor(z_t.min()))
+    z_top = float(np.ceil(z_t.max()))
+    z_break = min(8000.0, z_top)
+    z_grid = np.unique(np.concatenate([
+        np.arange(z_bottom, z_break, 20.0),
+        np.arange(z_break, z_top + 250.0, 250.0),
+    ]))
 
-    T_moist = T * (1.0 + 0.609133 * q)
-    nlev = len(level)
-    z_f = np.full(nlev, np.nan)
-    P_level = np.full(nlev, np.nan)
+    def _height_average(field_t: NDArray) -> NDArray:
+        acc = np.zeros(z_grid.size)
+        for j in range(idx.size):
+            zj = z_t[:, j]
+            oj = np.argsort(zj)
+            acc += np.interp(z_grid, zj[oj], field_t[oj, j])  # clamp at the near-constant column ends
+        return acc / idx.size
 
-    # Integrate from the surface (highest level number / last index) upward.
-    for i in range(nlev - 1, -1, -1):
-        idx = int(level[i]) - 1                  # half-level (level_num-1); A/B indexed by level number
-        Ph_lev = _A137[idx] + _B137[idx] * surface_pressure
-        Ph_levp1 = _A137[idx + 1] + _B137[idx + 1] * surface_pressure
-        P_level[i] = 0.5 * (Ph_lev + Ph_levp1)
-        if idx == 0:
-            # Top of atmosphere: upper half-level pressure is exactly 0 (A[0]=B[0]=0),
-            # so log(Ph_levp1/Ph_lev) would diverge -> ECMWF replacement (0.1 Pa, ln2).
-            dlogP = np.log(Ph_levp1 / 0.1)
-            alpha = np.log(2.0)
-        else:
-            dlogP = np.log(Ph_levp1 / Ph_lev)
-            alpha = 1.0 - (Ph_lev / (Ph_levp1 - Ph_lev)) * dlogP
-        TRd = T_moist[i] * _RD_CAMS
-        z_f[i] = z_h + TRd * alpha
-        z_h = z_h + TRd * dlogP
+    return z_grid, _height_average(T[:, idx]), _height_average(P_t), _height_average(n_wv_t)
 
-    H = z_f / G0                                  # geopotential height [m ASL]
-    Pw = q * P_level / (EPS + (1.0 - EPS) * q)    # water-vapor partial pressure [Pa]
-    n_wv = Pw / (KB * T)                          # [m^-3]
 
-    order = np.argsort(H)
-    return H[order], T[order], P_level[order], n_wv[order]
+@lru_cache(maxsize=32)
+def cams_levels_all_times(
+    cams_file: str, latitude: float, longitude: float,
+) -> Tuple[NDArray, NDArray, NDArray, NDArray]:
+    """Per-time CAMS geopotential height + water-vapour number density (direct ideal-gas route),
+    for the cloud two-way WV transmission. Reads once via the shared :func:`_read_cams_columns`,
+    integrates every time step (:func:`_hydrostatic_z_p`) and takes the direct n_wv.
+
+    Returns (time_num [MATLAB datenum], z_model [m ASL] (n_lev,n_t), T [K] (n_lev,n_t),
+    n_wv [m^-3] (n_lev,n_t)) in ascending level order.
+    """
+    time_dt, level, T, q, z_surf, lnsp = _read_cams_columns(str(cams_file), latitude, longitude)
+    z_model, P_level = _hydrostatic_z_p(level, T, q, z_surf, lnsp)
+    n_wv = _wv_number_density(q, P_level, T)
+    return _matlab_datenum_days(time_dt), z_model, T, n_wv
 
 
 def cams_water_vapor_profile(

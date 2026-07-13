@@ -1,8 +1,14 @@
 {% extends "base.html" %}
 {% block title %}{{ key }} — calibration{% endblock %}
-{% block headerextra %}<a class="back" href="{{ base }}index.html">&larr; summary</a>{% endblock %}
+{% block headerextra %}<a class="back" href="{{ base }}index.html">&larr; summary</a>
+{% if prev_station %}<a class="back" href="{{ prev_station }}" title="Previous station (Up arrow)">&uarr; prev station</a>{% endif %}
+{% if next_station %}<a class="back" href="{{ next_station }}" title="Next station (Down arrow)">&darr; next station</a>{% endif %}
+{% if periods %}<select id="period-sel" class="navfilter" title="Time window — zooms every chart, the calibration list and the OmB/sensitivity panels">
+  {% for p in periods %}<option value="{{ p.key }}"{% if p.key == 'all' %} selected{% endif %}>{{ p.label }}</option>{% endfor %}
+</select>{% endif %}{% endblock %}
 
 {% block content %}
+<div id="station-nav" data-prev="{{ prev_station }}" data-next="{{ next_station }}" hidden></div>
 <h1>{{ key }} <span class="badge">{{ meta.itype }}</span>
   {% for b in blocks %}<span class="mtag mtag-{{ b.method }}">{{ b.label }}</span>{% endfor %}
 </h1>
@@ -14,11 +20,35 @@
   {% if bits %}{{ bits | join("  ·  ") }}{% else %}<span class="muted">station metadata unavailable</span>{% endif %}
 </p>
 
+{% if nc_files or ceda_url %}
+<section class="links">
+  {% for f in nc_files %}<a class="btnlink" href="{{ f.url }}" download
+     title="Download the calibration NetCDF for {{ f.year }}">&#8681; Calibration NetCDF {{ f.year }}</a>{% endfor %}
+  {% if ceda_url %}<a class="btnlink" href="{{ ceda_url }}" target="_blank" rel="noopener"
+     title="E-PROFILE L2 daily files for this instrument on the CEDA archive">&#8599; CEDA L2 data</a>{% endif %}
+</section>
+{% endif %}
+
 <section class="metabar">
   <span><b>WMO</b> {{ meta.wmo or "—" }}</span>
   <span><b>Lat/Lon</b> {{ meta.lat | fmt('{:.3f}') }}, {{ meta.lon | fmt('{:.3f}') }}</span>
   <span><b>Alt</b> {{ meta.alt | fmt('{:.0f}') }} m</span>
 </section>
+
+{% if availability %}
+<section class="card availcard">
+  <h2>Data availability &amp; instrument status
+    <span class="muted">— per day, decoded from the instrument status strings; click a day to load its diagnostic below</span></h2>
+  <div class="avail-legend">
+    <span class="ak ak-pass"></span> Pass
+    <span class="ak ak-warning"></span> Warning
+    <span class="ak ak-error"></span> Error
+    <span class="ak ak-nodata"></span> No data
+  </div>
+  {{ availability | safe }}
+</section>
+{% if status_json %}<script type="application/json" id="status-index">{{ status_json | safe }}</script>{% endif %}
+{% endif %}
 
 {% if overlay %}
 <section class="card">{{ overlay | safe }}</section>
@@ -38,17 +68,20 @@
       <span class="diag-nav">
         <button type="button" class="diag-prev" title="Previous valid calibration (←)">‹ prev cal</button>
         <button type="button" class="diag-next" title="Next valid calibration (→)">next cal ›</button>
-        <button type="button" class="diag-up" title="Previous day (↑)">↑ day</button>
-        <button type="button" class="diag-down" title="Next day (↓)">↓ day</button>
-        <button type="button" class="diag-flag" title="Flag this date / instrument / method for QC review — saved in your browser; export via the widget at bottom-right">⚑ flag</button>
+        <button type="button" class="diag-up" title="Previous day, incl. rejected (Ctrl+←)">‹ day</button>
+        <button type="button" class="diag-down" title="Next day, incl. rejected (Ctrl+→)">day ›</button>
+        <button type="button" class="diag-flag" title="Flag this calibration for QC review — opens a comment box (shortcut 0). Quick-flag: 1 = aerosol, 2 = cloud, 3 = low signal. Saved in your browser; export via the widget at bottom-right">⚑ flag</button>
       </span>
-      <span class="muted diag-hint">— <b>← →</b> valid calibrations, <b>↑ ↓</b> all days
+      <span class="muted diag-hint">— <b>← →</b> valid calibrations, <b>Ctrl+← →</b> all days, <b>↑ ↓</b> change station,
+        <b>0</b> flag + note (<b>1</b> aerosol · <b>2</b> cloud · <b>3</b> low signal)
         (<span class="cal-key cal-ok"></span> good calibration · <span class="cal-key cal-bad"></span> rejected)</span>
     </h3>
     <div class="diag-body">
       <div class="diag-cal"></div>
       <a class="diag-imglink" target="_blank" rel="noopener"><img class="diag-img" alt="calibration diagnostic"></a>
     </div>
+    <div class="diag-status q-nodata" aria-live="polite"
+         title="Instrument status reported on this day (decoded from the status strings)"></div>
     <script type="application/json" class="diag-data">{{ b.diags | tojson }}</script>
   </section>
   {% endif %}
@@ -63,7 +96,7 @@
     <thead><tr><th>Date</th><th>Flag</th><th>C_L</th><th>Uncertainty</th><th>Extra</th><th>Message</th></tr></thead>
     <tbody>
     {% for r in b.recent %}
-      <tr>
+      <tr data-date="{{ r.date }}">
         <td>{% if r.date in b.diag_dates %}<a class="diaglink" data-date="{{ r.date }}" href="#diag-{{ b.method }}">{{ r.date }}</a>{% else %}{{ r.date }}{% endif %}</td>
         <td><span class="dot" style="background:{{ flag_color(r.flag) }}"></span>
             <a class="flaglink" href="{{ base }}flags.html#flag-{{ flag_anchor(r.flag) }}">{{ r.flag }}</a>
@@ -78,4 +111,53 @@
   </table>
 </section>
 {% endfor %}
+
+{% if class_diags %}
+<section class="block">
+  <h2>Cloudnet target classification
+    <span class="muted">— {{ class_diags | length }} day{{ 's' if class_diags | length != 1 else '' }} · aerosol / cloud / drizzle / ice / supercooled (ceiloclass, driven by CAMS T)</span></h2>
+  <section class="diag card" id="diag-classification" data-key="{{ key }}" data-method="classification"
+           data-itype="{{ meta.itype }}" tabindex="0">
+    <h3>Classification — <span class="diag-date muted">latest</span>
+      <span class="diag-nav">
+        <button type="button" class="diag-up" title="Previous day (Ctrl+←)">‹ day</button>
+        <button type="button" class="diag-down" title="Next day (Ctrl+→)">day ›</button>
+      </span>
+      <span class="muted diag-hint">— <b>Ctrl+← →</b> step days, or click a day in the calendar</span>
+    </h3>
+    <div class="diag-body">
+      <div class="diag-cal"></div>
+      <a class="diag-imglink" target="_blank" rel="noopener"><img class="diag-img" alt="target classification curtain"></a>
+    </div>
+    <script type="application/json" class="diag-data">{{ class_diags | tojson }}</script>
+  </section>
+</section>
+{% endif %}
+
+{% if monitoring %}
+<section class="card">
+  <h2>Instrument monitoring <span class="muted">— daily averages: laser power, window transmission, temperatures</span></h2>
+  {{ monitoring | safe }}
+</section>
+{% endif %}
+
+{% if ombsens and ombsens.omb %}
+<section class="card">
+  <h2>Observation &#8722; Background (CAMS) <span class="muted">— calibrated backscatter vs CAMS model over the selected window</span></h2>
+  <a href="{{ ombsens.omb }}" target="_blank" rel="noopener"><img class="diag-img" data-period-img
+       src="{{ ombsens.omb }}" data-src-all="{{ ombsens.omb }}"
+       {%- if ombsens.omb_periods %}{% for pk, url in ombsens.omb_periods.items() %} data-src-{{ pk }}="{{ url }}"{% endfor %}{% endif %}
+       alt="Observation minus background (CAMS) diagnostic" style="max-width:100%;height:auto;"></a>
+</section>
+{% endif %}
+
+{% if ombsens and ombsens.sens %}
+<section class="card">
+  <h2>Instrument sensitivity / detection limit <span class="muted">— ICAO detection altitude &amp; nighttime noise floor</span></h2>
+  <a href="{{ ombsens.sens }}" target="_blank" rel="noopener"><img class="diag-img" data-period-img
+       src="{{ ombsens.sens }}" data-src-all="{{ ombsens.sens }}"
+       {%- if ombsens.sens_periods %}{% for pk, url in ombsens.sens_periods.items() %} data-src-{{ pk }}="{{ url }}"{% endfor %}{% endif %}
+       alt="Instrument sensitivity / detection limit diagnostic" style="max-width:100%;height:auto;"></a>
+</section>
+{% endif %}
 {% endblock %}

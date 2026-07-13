@@ -41,6 +41,7 @@ from ..water_vapor_correction.water_vapor import (
     laser_spectrum_for,
     cams_water_vapor_profile,
     two_way_wv_transmission,
+    cams_point_too_far,
 )
 from .rayleigh_fit import (
     find_optimal_molecular_window,
@@ -53,6 +54,7 @@ from ..io.cams import ensure_cams_file
 from ..plotting import (
     plot_rcs_timeseries,
     plot_rayleigh_diagnostics_compact,
+    plot_rayleigh_diagnostics_failure,
 )
 
 
@@ -78,6 +80,34 @@ def _plot_dir(options: CalibrationOptions, info: InstrumentInfo, date_str: str) 
 def _plot_tag(info: InstrumentInfo, date_str: str) -> str:
     """File-name prefix for a plot, e.g. '20260101_0-20000-0-06610'."""
     return f"{date_str}_{info.wmo_id}"
+
+
+def _emit_failure_plot(options: CalibrationOptions, info: InstrumentInfo, date_str: str, *,
+                       rcs, range_alc, hours_since_start, reason: str,
+                       cbh=None, altitude: float = 0.0, p_mol=None,
+                       molecular_window=None, time_datetime=None) -> None:
+    """Save a Rayleigh *failure* diagnostic for a night that did not calibrate, under the
+    SAME ``<tag>_rayleigh_diag_compact.png`` filename as a success so the monitoring viewer
+    lists it. Gated on ``plot_main`` (like the success dashboard); never raises."""
+    if not getattr(options, "plot_main", False):
+        return
+    try:
+        pdir = _plot_dir(options, info, date_str)
+        tag = _plot_tag(info, date_str)
+        plot_rayleigh_diagnostics_failure(
+            range_alc=range_alc, hours_since_start=hours_since_start, rcs=rcs,
+            time_datetime=time_datetime,
+            reason=reason, altitude=altitude, cbh=cbh,
+            no_cloud_value=info.instrument_type.no_cloud_value,
+            p_mol=p_mol, molecular_window=molecular_window,
+            z_low_cloud=getattr(options, "z_low_cloud", None),
+            range_start_m=getattr(options, "range_start_m", 2000.0),
+            range_end_m=getattr(options, "range_end_m", 6000.0),
+            title=f"{info.site_name} ({info.wmo_id}) — {date_str}",
+            save_path=pdir / f"{tag}_rayleigh_diag_compact.png",
+        )
+    except Exception as exc:  # noqa: BLE001 - a plot failure must never lose the calibration
+        logger.warning(f"failure diagnostic plot failed: {exc}")
 
 
 @dataclass
@@ -212,6 +242,8 @@ def calibrate_rayleigh(
     options: CalibrationOptions,
     std_atm_file: Optional[Path] = None,
     fit_inputs_out: Optional[dict] = None,
+    preloaded_data: Optional[CeilometerData] = None,
+    contam_profile: Optional[NDArray] = None,
 ) -> CalibrationResult:
     """
     Perform Rayleigh calibration for a single instrument on a single date.
@@ -263,23 +295,30 @@ def calibrate_rayleigh(
     # =========================================================================
     # Step 1: Load L1 data
     # =========================================================================
-    candidate_files = build_file_paths(date_str, info, options)
+    if preloaded_data is not None:
+        # Read-once path (see calibration.io.instrument_day): reuse the already-loaded L1
+        # instead of re-opening the file(s). `preloaded_data` must be exactly what
+        # `load_data(file_list, instrument_type, L1)` returns for this night, so the result
+        # is identical to the default path below.
+        data = preloaded_data
+    else:
+        candidate_files = build_file_paths(date_str, info, options)
 
-    # Keep only files that exist (chronological order preserved)
-    file_list = [f for f in candidate_files if f.exists()]
+        # Keep only files that exist (chronological order preserved)
+        file_list = [f for f in candidate_files if f.exists()]
 
-    if not file_list:
-        logger.warning(f"No data files found for {date_str}")
-        return CalibrationResult(
-            lidar_constant=-1,
-            flag=0,
-            uncertainty=0,
-            message="No data files found",
-        )
+        if not file_list:
+            logger.warning(f"No data files found for {date_str}")
+            return CalibrationResult(
+                lidar_constant=-1,
+                flag=0,
+                uncertainty=0,
+                message="No data files found",
+            )
 
-    logger.info(f"Loading {len(file_list)} {options.data_level.value} file(s)")
+        logger.info(f"Loading {len(file_list)} {options.data_level.value} file(s)")
 
-    data = load_data(file_list, info.instrument_type, options.data_level)
+        data = load_data(file_list, info.instrument_type, options.data_level)
     if data is None:
         logger.warning("Failed to load data")
         return CalibrationResult(
@@ -291,32 +330,11 @@ def calibrate_rayleigh(
 
     logger.info(f"Loaded {len(data.time)} profiles")
 
-    # Optional pre-averaging: reduces the Rayleigh input to coarser blocks before any
-    # filtering or fitting, matching the cloud-calibration speedup.
-    avg_time_s = getattr(options, "average_time_s", None)
-    avg_range_m = getattr(options, "average_range_m", None)
-    # Native L1/RAW are on a fine grid (e.g. CHM15k 15 m x 15 s, CL61 raw 4.8 m x ~60 s) that the
-    # gated molecular methods (v2/earlinet) over-reject even though the signal matches L2's beta_att;
-    # bin to the standard L2 grid (30 m x 300 s) so L1/RAW and L2 calibrate consistently. Only when
-    # the level is L1 or RAW and no explicit averaging was requested (L2 is already on that grid -> a
-    # no-op; a coarser native grid is also a no-op). See network_v2_vs_v11_report.md ("L1 vs L2 - the
-    # tie on L1 is a native-grid effect") and attbsc_validation_technical.md sec 7.6.
-    if (avg_time_s is None and avg_range_m is None
-            and getattr(options, "data_level", None) in (DataLevel.L1, DataLevel.RAW)
-            and getattr(options, "l1_bin_to_l2_grid", True)):
-        avg_time_s = getattr(options, "l1_grid_time_s", 300.0)
-        avg_range_m = getattr(options, "l1_grid_range_m", 30.0)
-        logger.info("L1 native grid -> binning to the L2 grid (%.0f s x %.0f m)", avg_time_s, avg_range_m)
-    data = average_ceilometer_data(
-        data,
-        average_time_s=avg_time_s,
-        average_range_m=avg_range_m,
-    )
-    if avg_time_s or avg_range_m:
-        logger.info(
-            "Averaged Rayleigh input to %s profiles x %s range bins",
-            len(data.time), len(data.range_alc),
-        )
+    # NOTE: the L1->L2-grid binning is DEFERRED to after the cloud screen (Step 3b) so the
+    # clear-night screen sees the cloud base at NATIVE resolution. Binning the cloud flag first
+    # blew a single 30-s low cloud up to a whole 5-min block, spuriously rejecting otherwise-clear
+    # nights; screening native and binning the cleaned profiles afterwards avoids that while still
+    # giving the molecular fit the L2-grid signal.
 
     # =========================================================================
     # Step 2: Filter to nighttime window (solar time)
@@ -361,10 +379,20 @@ def calibrate_rayleigh(
     # Step 3: Filter cloudy profiles
     # =========================================================================
     no_cloud_value = info.instrument_type.no_cloud_value
-    data, is_clear, is_partial = filter_cloudy_profiles(data, options, no_cloud_value)
+    data_precloud = data   # keep the unscreened night so the diagnostic plots can show the clouds
+    cloud_masks = {}       # filled with keep_mask (over data_precloud) for the hatched RCS panel
+    data, is_clear, is_partial = filter_cloudy_profiles(
+        data, options, no_cloud_value, info.instrument_type, masks_out=cloud_masks)
 
     if not is_clear:
         logger.warning("Not a clear night")
+        _emit_failure_plot(
+            options, info, date_str, rcs=data_precloud.rcs,
+            range_alc=data_precloud.range_alc,
+            hours_since_start=data_precloud.hours_since_start,
+            time_datetime=data_precloud.time_datetime,
+            reason="Not a clear night (cloud/fog in or below the molecular window)",
+            cbh=data_precloud.cbh, altitude=data_precloud.altitude)
         return CalibrationResult(
             lidar_constant=-1,
             flag=-1,
@@ -373,6 +401,26 @@ def calibrate_rayleigh(
         )
 
     logger.info(f"After cloud filtering: {len(data.time)} profiles (partial: {is_partial})")
+
+    # =========================================================================
+    # Step 3b: Bin the cloud-screened NATIVE profiles to the L2 grid (deferred from before the
+    # screen). Native L1/RAW sit on a fine grid (CHM15k 15 m x 15 s, CL61 ~4.8 m x ~30 s) that the
+    # gated molecular methods (v2/earlinet) over-reject even though the signal matches L2's beta_att;
+    # binning to the standard L2 grid (30 m x 300 s) makes L1/RAW and L2 calibrate consistently. It
+    # runs on the already-clean profiles, so cloudy periods are excluded at native resolution first.
+    # =========================================================================
+    avg_time_s = getattr(options, "average_time_s", None)
+    avg_range_m = getattr(options, "average_range_m", None)
+    if (avg_time_s is None and avg_range_m is None
+            and getattr(options, "data_level", None) in (DataLevel.L1, DataLevel.RAW)
+            and getattr(options, "l1_bin_to_l2_grid", True)):
+        avg_time_s = getattr(options, "l1_grid_time_s", 300.0)
+        avg_range_m = getattr(options, "l1_grid_range_m", 30.0)
+        logger.info("L1 native grid -> binning to the L2 grid (%.0f s x %.0f m)", avg_time_s, avg_range_m)
+    data = average_ceilometer_data(data, average_time_s=avg_time_s, average_range_m=avg_range_m)
+    if avg_time_s or avg_range_m:
+        logger.info("Averaged Rayleigh input to %s profiles x %s range bins",
+                    len(data.time), len(data.range_alc))
 
     # =========================================================================
     # Step 4: Load atmospheric model
@@ -400,6 +448,7 @@ def calibrate_rayleigh(
             options.cams_folder, date_str,
             auto_download=getattr(options, "auto_download_cams", False),
             scope=getattr(options, "cams_download_scope", "day"),
+            latitude=info.latitude, longitude=info.longitude,
             log=logger,
         )
         if cams_mol_file is None:
@@ -409,6 +458,13 @@ def calibrate_rayleigh(
             return CalibrationResult(
                 lidar_constant=-1, flag=-4, uncertainty=0,
                 message="No CAMS for molecular profile",
+            )
+        if cams_point_too_far(cams_mol_file, info.latitude, info.longitude):
+            logger.warning(f"Closest CAMS grid point too far from station "
+                           f"({info.latitude:.2f},{info.longitude:.2f}); outside CAMS domain")
+            return CalibrationResult(
+                lidar_constant=-1, flag=-10, uncertainty=0,
+                message="Closest CAMS data too far (station outside CAMS domain)",
             )
         atm_profile = load_cams_atmosphere(
             cams_mol_file, info.latitude, info.longitude, t_start, t_end, altitude_grid
@@ -451,6 +507,7 @@ def calibrate_rayleigh(
             options.cams_folder, date_str,
             auto_download=getattr(options, "auto_download_cams", False),
             scope=getattr(options, "cams_download_scope", "day"),
+            latitude=info.latitude, longitude=info.longitude,
             log=logger,
         )
         if cams_file is None:
@@ -459,23 +516,44 @@ def calibrate_rayleigh(
                 lidar_constant=-1, flag=-4, uncertainty=0,
                 message="No CAMS for water-vapor correction",
             )
+        if cams_point_too_far(cams_file, info.latitude, info.longitude):
+            logger.warning(f"Closest CAMS grid point too far from station "
+                           f"({info.latitude:.2f},{info.longitude:.2f}); outside CAMS domain")
+            return CalibrationResult(
+                lidar_constant=-1, flag=-10, uncertainty=0,
+                message="Closest CAMS data too far (station outside CAMS domain)",
+            )
         lam0_nm, fwhm_nm = laser_spectrum_for(info.instrument_type.value, nominal_wl_nm)
         prof = cams_water_vapor_profile(cams_file, info.latitude, info.longitude, t_start, t_end)
-        if prof is not None:
-            h_wv, n_wv = prof
-            wv_alt_grid = info.altitude + data.range_alc        # ASL, aligned to range_alc
-            t2_wv = two_way_wv_transmission(
-                wv_alt_grid, info.altitude, h_wv, n_wv,
-                Path(options.abs_cs_lookup_table), lam0_nm, fwhm_nm,
+        if prof is None:
+            # CAMS file present but no usable WV profile for the night: a 910 nm night
+            # is NEVER calibrated WV-free (same strictness as the cloud method), so
+            # flag -4 like a missing CAMS file. 1064/532 nm never enter this block.
+            logger.warning(f"CAMS WV profile unusable ({cams_file}); "
+                           "skipping WV-required 910 nm night")
+            return CalibrationResult(
+                lidar_constant=-1, flag=-4, uncertainty=0,
+                message="CAMS water-vapor profile unusable",
             )
-            # Remove WV absorption from the measured range-corrected signal so the
-            # downstream fit / Klett / lidar-constant recover a WV-free CL:
-            #   rcs / T2_wv = CL * beta_tot * T2_scattering.
-            if t2_wv.shape[0] == data.rcs.shape[1]:
-                data.rcs = data.rcs / t2_wv[None, :]
-                logger.info(f"WV correction applied to RCS (median T2_wv={np.nanmedian(t2_wv):.3f})")
-            else:
-                logger.warning("WV transmission length mismatch; correction skipped")
+        h_wv, n_wv = prof
+        wv_alt_grid = info.altitude + data.range_alc        # ASL, aligned to range_alc
+        t2_wv = two_way_wv_transmission(
+            wv_alt_grid, info.altitude, h_wv, n_wv,
+            Path(options.abs_cs_lookup_table), lam0_nm, fwhm_nm,
+        )
+        if t2_wv.shape[0] != data.rcs.shape[1]:
+            # Grid mismatch means the correction cannot be applied -> same no-fallback
+            # rule: refuse to calibrate rather than emit a WV-biased constant.
+            logger.warning("WV transmission length mismatch; 910 nm night not calibrated")
+            return CalibrationResult(
+                lidar_constant=-1, flag=-4, uncertainty=0,
+                message="WV transmission grid mismatch",
+            )
+        # Remove WV absorption from the measured range-corrected signal so the
+        # downstream fit / Klett / lidar-constant recover a WV-free CL:
+        #   rcs / T2_wv = CL * beta_tot * T2_scattering.
+        data.rcs = data.rcs / t2_wv[None, :]
+        logger.info(f"WV correction applied to RCS (median T2_wv={np.nanmedian(t2_wv):.3f})")
 
     logger.info(f"Time elapsed: {timing.time() - start_time:.1f}s")
 
@@ -544,7 +622,7 @@ def calibrate_rayleigh(
         min_window_start_m=options.min_window_start_m,
         min_r2=options.min_window_r2,
         max_rel_error=options.max_window_rel_error,
-        method=getattr(options, "molecular_method", "eprof_v1.2"),
+        method=getattr(options, "molecular_method", "eprof_v2"),
         signal_stack=signal_stack,
     )
 
@@ -616,6 +694,12 @@ def calibrate_rayleigh(
     # than emitting a spurious constant.
     if not np.isfinite(fit_result.slope) or not np.isfinite(fit_result.relative_error):
         logger.warning("No eligible molecular window (signal not proportional to molecular)")
+        _emit_failure_plot(
+            options, info, date_str, rcs=data.rcs, range_alc=data.range_alc,
+            hours_since_start=data.hours_since_start,
+            time_datetime=data.time_datetime,
+            reason="No molecular window passed the validity gates",
+            cbh=data.cbh, altitude=data.altitude, p_mol=mol_props.p_mol)
         return CalibrationResult(
             lidar_constant=-1,
             flag=-2,
@@ -624,8 +708,15 @@ def calibrate_rayleigh(
         )
 
     if not fit_result.is_valid:
+        win = (fit_result.range_start_m, fit_result.range_end_m)
         if fit_result.slope <= 0:
             logger.warning("Negative Rayleigh fit slope")
+            _emit_failure_plot(
+                options, info, date_str, rcs=data.rcs, range_alc=data.range_alc,
+                hours_since_start=data.hours_since_start,
+                time_datetime=data.time_datetime,
+                reason="Negative Rayleigh fit slope", cbh=data.cbh,
+                altitude=data.altitude, p_mol=mol_props.p_mol, molecular_window=win)
             return CalibrationResult(
                 lidar_constant=-1,
                 flag=-7,
@@ -634,6 +725,12 @@ def calibrate_rayleigh(
             )
         else:
             logger.warning("Rayleigh fit issue: |b| > a")
+            _emit_failure_plot(
+                options, info, date_str, rcs=data.rcs, range_alc=data.range_alc,
+                hours_since_start=data.hours_since_start,
+                time_datetime=data.time_datetime,
+                reason="Rayleigh fit unstable (|intercept| > slope)", cbh=data.cbh,
+                altitude=data.altitude, p_mol=mol_props.p_mol, molecular_window=win)
             return CalibrationResult(
                 lidar_constant=-1,
                 flag=-8,
@@ -643,6 +740,14 @@ def calibrate_rayleigh(
 
     if fit_result.relative_error > options.threshold_quality:
         logger.warning(f"Poor Rayleigh fit quality: {fit_result.relative_error:.1f}%")
+        _emit_failure_plot(
+            options, info, date_str, rcs=data.rcs, range_alc=data.range_alc,
+            hours_since_start=data.hours_since_start,
+            time_datetime=data.time_datetime,
+            reason=(f"Signal not proportional to molecular "
+                    f"(fit rel. error {fit_result.relative_error:.0f}% > {options.threshold_quality:.0f}%)"),
+            cbh=data.cbh, altitude=data.altitude, p_mol=mol_props.p_mol,
+            molecular_window=(fit_result.range_start_m, fit_result.range_end_m))
         return CalibrationResult(
             lidar_constant=-1,
             flag=-2,
@@ -699,6 +804,13 @@ def calibrate_rayleigh(
 
     if n_ok == 0:
         logger.warning("All perturbation runs failed")
+        _emit_failure_plot(
+            options, info, date_str, rcs=data.rcs, range_alc=data.range_alc,
+            hours_since_start=data.hours_since_start,
+            time_datetime=data.time_datetime,
+            reason="All Klett / lidar-constant perturbations failed", cbh=data.cbh,
+            altitude=data.altitude, p_mol=mol_props.p_mol,
+            molecular_window=(fit_result.range_start_m, fit_result.range_end_m))
         return CalibrationResult(
             lidar_constant=-1,
             flag=-5,
@@ -807,7 +919,7 @@ def calibrate_rayleigh(
     error_pct = abs((cl_slope - cl_median) / cl_median * 100)
 
     # ── Quality control: decide the outcome but DEFER the return, so a diagnostic image is still
-    #    produced for data-bearing rejections (-3 method disagreement, -6 too noisy, -9 aerosol). ──
+    #    produced for data-bearing rejections (-3 method disagreement, -6 too noisy, -9 lower-signal layer). ──
     qc_flag = None
     qc_message = None
     if error_pct > options.threshold_quality:
@@ -817,11 +929,12 @@ def calibrate_rayleigh(
         logger.warning(f"Uncertainty exceeds CL value: {uncertainty:.2e} > {cl_median:.2e}")
         qc_flag, qc_message = -6, f"Uncertainty exceeds value: {uncertainty:.2e} > {cl_median:.2e}"
     elif getattr(options, "aerosol_qc_enabled", True) and fit_result.search_diagnostics is not None:
-        # Scattering-ratio gate -- aerosol layer in/below the chosen molecular window. Each candidate
-        # window's fit slope is a C_L proxy; in clean air they are nearly equal across the 2-6 km
-        # search range (molecular two-way transmittance varies <1 %). When aerosol sits in/just below
-        # the chosen window its slope is inflated vs the cleanest (least-attenuated) window. Validated
-        # on L1 Mar-May 2026: clean nights p95=1.4; aerosol (e.g. 0-20000-0-10838 2026-03-03) >2.8.
+        # "Another layer with lower signal" gate. Each candidate window's fit slope is a C_L proxy;
+        # in clean air they are nearly equal across the 2-6 km search range (molecular two-way
+        # transmittance varies <1 %). When the CHOSEN window's slope is much higher than the cleanest
+        # (lowest-signal) candidate window, a cleaner molecular layer exists elsewhere -> the chosen
+        # window carries excess backscatter (typically aerosol) and the selection is suspect. Validated
+        # on L1 Mar-May 2026: clean nights p95=1.4; contaminated (e.g. 0-20000-0-10838 2026-03-03) >2.8.
         d = fit_result.search_diagnostics
         slp = np.asarray(d.slopes, dtype=float)
         r2g = np.asarray(d.r_squared, dtype=float)
@@ -836,11 +949,26 @@ def calibrate_rayleigh(
             scat = chosen_slope / c_ref if (np.isfinite(chosen_slope) and c_ref > 0) else np.nan
             thr = float(getattr(options, "aerosol_scattering_threshold", 2.0))
             if np.isfinite(scat) and scat > thr:
-                logger.warning(f"Aerosol below molecular window: scattering ratio {scat:.1f} > {thr}")
-                qc_flag, qc_message = -9, f"Aerosol contamination below window: scattering ratio {scat:.1f}"
+                logger.warning(f"Another layer with lower signal found: ratio {scat:.1f} > {thr}")
+                qc_flag, qc_message = -9, f"Another layer with lower signal found (signal ratio {scat:.1f})"
+
+    # Classification contamination screen (Q5): when the backscatter gates did NOT already reject,
+    # reject if the SELECTED molecular window overlaps a persistent ice/cloud layer the scattering-ratio
+    # gate misses (esp. a CL61 depol-ice layer). ``contam_profile`` is (height_AGL, contaminated_fraction
+    # over the night) from the task-3 Cloudnet classification; absent (no --classify) -> no change.
+    if (qc_flag is None and contam_profile is not None and np.size(contam_profile)
+            and np.isfinite(fit_result.range_start_m) and np.isfinite(fit_result.range_end_m)):
+        h = np.asarray(contam_profile[:, 0], dtype=float)
+        band = (h >= fit_result.range_start_m) & (h <= fit_result.range_end_m)
+        wfrac = (float(np.nanmean(np.asarray(contam_profile[:, 1], dtype=float)[band]))
+                 if np.any(band) else 0.0)
+        if wfrac > 0.30:   # >30 % of the fit-window height classified ice/cloud over the night
+            logger.warning(f"Rayleigh window contaminated (classification {wfrac * 100:.0f}%)")
+            qc_flag, qc_message = -11, (f"Rayleigh window contaminated "
+                                        f"(classification {wfrac * 100:.0f}% ice/cloud)")
 
     _outcome = {None: "OK", -3: "method disagreement", -6: "too noisy",
-                -9: "aerosol below window"}.get(qc_flag, "rejected")
+                -9: "lower-signal layer found", -11: "window contaminated"}.get(qc_flag, "rejected")
 
     # ── Plot: compact 4x4 Rayleigh diagnostics dashboard (success AND data-bearing rejections) ──
     if options.plot_main:
@@ -866,6 +994,23 @@ def calibrate_rayleigh(
             and fit_result.search_diagnostics is not None
         ):
             diag = fit_result.search_diagnostics
+            # RCS panel shows the FULL time-filtered night so cloud/contaminated profiles appear
+            # HATCHED, not as gaps: feed data_precloud (pre-screen) and mark "used" = the profiles
+            # the cloud screen kept (~contaminated). Native L1 can be huge -> stride (visual only).
+            keep_native = cloud_masks.get("keep_mask")
+            if keep_native is not None and len(keep_native) == data_precloud.rcs.shape[0]:
+                _st = max(1, int(np.ceil(data_precloud.rcs.shape[0] / 1000)))
+                disp_rcs = data_precloud.rcs[::_st]
+                disp_hours = data_precloud.hours_since_start[::_st]
+                disp_dt = list(data_precloud.time_datetime)[::_st]
+                disp_cbh = data_precloud.cbh[::_st]
+                disp_range = data_precloud.range_alc          # native range axis for this panel
+                disp_used = np.where(np.asarray(keep_native, dtype=bool)[::_st])[0]
+            else:                                   # fallback: the screened/binned data (old behaviour)
+                disp_rcs, disp_hours, disp_cbh = data.rcs, data.hours_since_start, data.cbh
+                disp_dt = list(data.time_datetime)
+                disp_range = data.range_alc
+                disp_used = np.asarray(keep_idx, dtype=int)
             try:
                 plot_rayleigh_diagnostics_compact(
                     range_alc=data.range_alc,
@@ -888,12 +1033,14 @@ def calibrate_rayleigh(
                     cl_matrix=cl_matrix,
                     cl_median=cl_median,
                     cl_uncertainty=uncertainty,
-                    hours_since_start=data.hours_since_start,
-                    rcs=data.rcs,
-                    used_profile_indices=np.asarray(keep_idx, dtype=int),
-                    cloud_base_height=data.cbh,
+                    hours_since_start=disp_hours,
+                    time_datetime=disp_dt,
+                    rcs=disp_rcs,
+                    used_profile_indices=disp_used,
+                    cloud_base_height=disp_cbh,
                     no_cloud_value=info.instrument_type.no_cloud_value,
                     z_low_cloud=options.z_low_cloud,
+                    rcs_range_alc=disp_range,
                     title=f"{plot_title_base} — Rayleigh diagnostics (compact) [{_outcome}]",
                     save_path=pdir / f"{tag}_rayleigh_diag_compact.png",
                 )

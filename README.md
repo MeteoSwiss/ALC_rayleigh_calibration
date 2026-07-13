@@ -208,6 +208,16 @@ Primary output: CSV at `C:\DATA\Projects\202606_E-PROFILE_calibration\E-PROFILE_
 
 ## Changelog
 
+### 2026-06 — OmB (observation − CAMS aerosol) redesign
+
+E-PROFILE aerosol-processing recommendation, applied to the OmB diagnostic (`calibration/omb/`):
+- **5-min pre-average** of the calibrated attenuated backscatter (reproduces the L2 cadence), then a **top-2 km SNR screen** (drop gates with signal < `snr_min`·σ; σ = robust 1.4826·MAD of the de-range-corrected signal `β/r²` over the top `noise_top_m` = 2 km — the instrument noise floor, C_L-invariant), then a **morphological opening** of the 2-D (5min-time × range) keep mask (`scipy.ndimage.binary_opening`) to delete isolated/transient speckle. The opening removes the one-sided cut's positive-noise tail, which otherwise biased O−B high and growing with altitude.
+- CAMS matching is a **±15 min** window centred on each CAMS step (was forward 3 h).
+- Period statistics keep altitudes valid in **≥ `valid_frac_min` = 25 %** of CAMS steps; interpolation onto the CAMS levels is **gap-capped** (`interp_max_gap_m` = 300 m) so large flagged gaps are not bridged → `valid_frac` is honest and drawn on a second x-axis of the median-profile panel.
+- **Vaisala fog/precip**: a non-NaN `vertical_visibility` (CL31/CL51/CL61 report it instead of a cloud base under fog/strong precipitation) is treated as a low cloud base in `io/l1_window.py` (`np.fmin` with the cloud base); CHM15k (`vor`) / Mini-MPL unaffected.
+- The observation pcolor now shows **all data** with a translucent grey wash where flagged (cloud / SNR / morphology) plus cloud-base markers.
+- Files: `omb/omb.py`, `omb/figures.py`, `incremental.py`, `io/l1_window.py`. The OmB cache (`_omb_cache.npz`) schema gained `obsfull__*` / `cloud_base` / `full_srcs` → **rebuild OmB caches from scratch** (cannot append to old caches).
+
 ### 2026 — uv packaging + package rename
 
 - Switched packaging from Poetry to **uv** / PEP 621 (`pyproject.toml` `[project]` + hatchling build backend); removed `setup.py`. Install with `uv pip install -e ".[plotting]"`.
@@ -220,7 +230,7 @@ Primary output: CSV at `C:\DATA\Projects\202606_E-PROFILE_calibration\E-PROFILE_
 - Loose scripts sorted into `scripts/` (runners + `data/`), `validation/` (studies), `examples/` (notebooks) and `lost_and_found/` (R&D scratch + logs); root `test_*.py` consolidated into `tests/`.
 - Figures and result archives moved out of the repo to `C:\DATA\Projects\202606_E-PROFILE_calibration`; hardcoded output paths in the scripts updated accordingly.
 
-### 2026 (this session)
+### 2026 
 
 - **WV correction** added (`water_vapor.py`): spectral two-way T²_wv from CAMS + HITRAN LUT; mandatory for 910 nm (flag −4 on missing CAMS, no fallback). Effect: Payerne CL61 Feb-28 C_L +20 %.
 - **Six molecular methods** (`molecular_methods.py`): `main`/`improved`/`optimal`/`calipso`/`earlinet`/`bellini`; selectable via `molecular_method` in options.json.
@@ -232,7 +242,11 @@ Primary output: CSV at `C:\DATA\Projects\202606_E-PROFILE_calibration\E-PROFILE_
 - **Long-run validation**: 14 sites (10 CHM15k + 4 Mini-MPL), full archive, 7 methods; results in `figs_paper_validation/molecular_methods_longrun/`.
 - **Sign-error fix** (commit a4e7140): corrected sign convention in Rayleigh slope; all post-fix CSVs in `fullcal_all/`.
 
-### v2.0.0 (2024)
+### v1.0.2 (2026)
+- Complete rewrite with AI
+
+
+### v1.0.1 (2024)
 
 - Complete rewrite with modern Python practices; type hints, dataclasses, vectorised calculations.
 

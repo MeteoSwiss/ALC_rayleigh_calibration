@@ -11,12 +11,11 @@ Usage
 
 Options
 -------
-    --date YYYYMMDD [YYYYMMDD]  Process one date or a date range (default: yesterday)
+    --date YYYYMMDD [YYYYMMDD]  Process one date or a date range (default: yesterday UTC)
     --config PATH               Path to options JSON file
     --instruments PATH          Path to instruments JSON file
     --output PATH               Override output directory
     --verbose                   Enable verbose logging
-    --dry-run                   Don't write output files
 
 Example
 -------
@@ -31,7 +30,7 @@ import logging
 import os
 import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 
@@ -102,12 +101,6 @@ def parse_args() -> argparse.Namespace:
         "--verbose", "-v",
         action="store_true",
         help="Enable verbose logging",
-    )
-    
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Don't write output files",
     )
     
     parser.add_argument(
@@ -310,9 +303,10 @@ def main() -> int:
     logger = logging.getLogger(__name__)
     start_time = datetime.now()
     
-    # Determine date(s) to process
+    # Determine date(s) to process (UTC: the whole pipeline keys days in UTC, and a
+    # local-time "yesterday" would pick the wrong day between 00:00 and 02:00 CET/CEST)
     if args.date is None:
-        yesterday = date.today() - timedelta(days=1)
+        yesterday = datetime.now(timezone.utc).date() - timedelta(days=1)
         dates_to_process = [yesterday.strftime("%Y%m%d")]
     elif len(args.date) == 1:
         dates_to_process = [args.date[0]]

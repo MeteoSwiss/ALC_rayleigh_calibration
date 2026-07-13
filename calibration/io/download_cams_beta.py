@@ -18,20 +18,28 @@ Computed and added:
 
 Usage
 -----
-    python download_cams_beta.py 20260601            # one day
-    python download_cams_beta.py 20260601 20260605   # inclusive range
-    python download_cams_beta.py 202606              # whole month
+    python download_cams_beta.py 20260601                    # one day -> CAMS_Beta_20260601.nc
+    python download_cams_beta.py 20260601 20260605           # inclusive range -> one combined file
+    python download_cams_beta.py 202606                      # whole month -> CAMS_Beta_202606.nc
+    python download_cams_beta.py --daily 20260601 20260605   # one CAMS_Beta_YYYYMMDD.nc per day
+    python download_cams_beta.py --out D:/CAMS 202606         # write into a chosen folder
+
+All forms include the full variable set (aerosol extinction + ground backscatter at
+355/532/1064 nm, plus t/q/z/lnsp). The calibration auto-download is the only path that
+trims to t/q/z/lnsp; for aerosol work use this CLI (or download_daily_files()).
 
 Notes
 -----
 * These optical fields exist only as type=forecast (no analysis version), so the
   request always uses type=forecast, the 00 UTC run, steps 3..24 (8 valid times
   per day -> matches the 248 steps in a 31-day file).
+* Requests are chunked by day (one ADS request per date) to stay under the ADS
+  per-request cost limit, with an automatic variable-split fallback for big days.
 * ADS pre-interpolates to a regular 0.4 deg grid and ignores the 'grid' keyword.
   Set REGRID_TO_1DEG = True to bilinearly resample onto the historical 1 deg grid
   (-27..45 E, 27.5..73.5 N) so the series matches older MARS-derived files.
-* GRIB -> netCDF uses the eccodes tool `grib_to_netcdf` (same as your current
-  pipeline). It must be on PATH.
+* GRIB -> netCDF uses cfgrib (pure Python; the eccodes binary ships in the pip
+  wheel, no conda), or the eccodes `grib_to_netcdf` CLI if it is on PATH.
 """
 
 import os
@@ -59,7 +67,60 @@ DATASET = "cams-global-atmospheric-composition-forecasts"
 # time setup: log in at https://ads.atmosphere.copernicus.eu and accept the site licences.
 ADS_URL = "https://ads.atmosphere.copernicus.eu/api"
 OUTPUT_DIR = "."
-AREA = [73.5, -27, 27.5, 45]          # North, West, South, East
+# North, West, South, East. Europe + Arctic box covering ~427 E-PROFILE census
+# stations at 0.4 deg (the north edge reaches 80 N to include Hopen 76.5 N and
+# Bjornoya 74.5 N). Override via the ALC_CAMS_AREA env var ("N,W,S,E") for a
+# different domain. The few affiliates OUTSIDE this box are served by their own
+# small regional boxes below (CAMS_REGIONS) rather than one global download.
+EUROPE_AREA = [float(x) for x in os.environ.get("ALC_CAMS_AREA", "80,-30,27,45").split(",")]
+AREA = EUROPE_AREA   # module default (the CLI and the legacy CAMS_Beta_<date>.nc file)
+
+# Regional CAMS domains for the census stations that fall OUTSIDE the Europe box.
+# A global CAMS download would be ~8.6 GB/day; instead each far-flung cluster gets a
+# small 0.4 deg box (a few MB/day) and each station is routed to the box covering its
+# lat/lon (region_for). The Europe box stays the default ('europe' -> EUROPE_AREA) and
+# keeps the un-suffixed CAMS_Beta_<date>.nc name; every small box writes a SUFFIXED file
+# CAMS_Beta_<region>_<date>.nc. Areas are [North, West, South, East]. To add a station
+# outside all boxes, add a region here (and it is picked up automatically by the prefetch
+# cron + the calibration routing). Boxes are padded ~1.5 deg around the cluster so the
+# nearest-grid-point lookup (water_vapor.cams_point_too_far) stays well inside the domain.
+CAMS_REGIONS = {
+    # name           : [N,      W,       S,      E]
+    "namerica_west":   [55.5,  -116.5,  51.5,  -112.0],   # Edmonton CL51/CL61   (53.55, -114.10)
+    "ontario":         [44.5,  -83.0,   41.5,  -79.5],    # Western/London ON CHM15k (43.01, -81.27)
+    "caribbean":       [14.0,  -70.5,   10.5,  -66.5],    # Bonaire CHM15k       (12.13, -68.28)
+    "newzealand":      [-35.0,  168.0, -46.5,  176.5],    # Lauder CL61 (-45.04,169.68) + Auckland CL31 (-36.85,174.77)
+}
+
+
+def region_area(region):
+    """Area [N,W,S,E] for *region*; ``None``/``'europe'`` -> the default Europe box."""
+    if region in (None, "europe"):
+        return list(EUROPE_AREA)
+    try:
+        return list(CAMS_REGIONS[region])
+    except KeyError:
+        raise ValueError(f"Unknown CAMS region {region!r} (known: {', '.join(CAMS_REGIONS)})")
+
+
+def region_for(latitude, longitude):
+    """Return the CAMS region serving (*latitude*, *longitude*): the SMALLEST small-box
+    that contains the point (small boxes are more specific than the continental Europe
+    box), else ``'europe'`` if inside the Europe box, else ``None`` (no domain — the
+    station cannot be calibrated until a box is added for it)."""
+    best = None
+    best_area = None
+    for name, (N, W, S, E) in CAMS_REGIONS.items():
+        if S <= latitude <= N and W <= longitude <= E:
+            a = (N - S) * (E - W)
+            if best is None or a < best_area:
+                best, best_area = name, a
+    if best is not None:
+        return best
+    N, W, S, E = EUROPE_AREA
+    if S <= latitude <= N and W <= longitude <= E:
+        return "europe"
+    return None
 RUN_TIME = ["00:00"]
 LEADTIME = ["3", "6", "9", "12", "15", "18", "21", "24"]
 MODEL_LEVELS = ["1"] + [str(k) for k in range(38, 138)]   # 1 (for z) + 38..137
@@ -85,6 +146,21 @@ VARIABLES = [
 # the auto-download omits them — that cuts the ADS request cost ~60% (the per-request limit
 # scales with variables x levels x steps x dates) and keeps the daily files small.
 CALIBRATION_VARIABLES = [
+    "temperature",
+    "specific_humidity",
+    "logarithm_of_surface_pressure",
+    "geopotential",
+]
+
+# Lean set for OmB + water-vapour work: aerosol backscatter at the ceilometer
+# wavelengths (532 nm = Mini-MPL native, 1064 nm = CHM15k native, 910 nm derived
+# via the Angstrom exponent between 532 and 1064) PLUS the molecular/WV fields.
+# Skips 355 nm (no E-PROFILE instrument) and the extinction fields (OmB uses
+# backscatter), so it is ~40% cheaper than the full VARIABLES set while still
+# carrying everything OmB and the WV correction need.
+OMB_VARIABLES = [
+    "attenuated_backscatter_due_to_aerosol_532nm_from_ground",
+    "attenuated_backscatter_due_to_aerosol_1064nm_from_ground",
     "temperature",
     "specific_humidity",
     "logarithm_of_surface_pressure",
@@ -213,12 +289,15 @@ def _request_too_large(exc) -> bool:
     return ("cost limit" in s) or ("too large" in s) or ("reduce your selection" in s)
 
 
-def _retrieve_day(client, day, variables, out_handle, grib_path):
+def _retrieve_day(client, day, variables, out_handle, grib_path, area=None):
     """Retrieve one day's model-level GRIB and append it to *out_handle*. The ADS caps the
     cost of a single request (~ variables x levels x steps); if a day is rejected as too
     large, split the variable list in half and recurse — adapting to the limit without
     hard-coding it. GRIB messages are self-describing, so appended parts form one valid
-    multi-message file that cfgrib / grib_to_netcdf read as a whole."""
+    multi-message file that cfgrib / grib_to_netcdf read as a whole. *area* ([N,W,S,E])
+    defaults to the module Europe box; a regional download passes its own small box."""
+    if area is None:
+        area = AREA
     part = f"{grib_path}.{day}.{len(variables)}.part"
     try:
         client.retrieve(
@@ -230,7 +309,7 @@ def _retrieve_day(client, day, variables, out_handle, grib_path):
                 "type": ["forecast"],
                 "variable": variables,
                 "model_level": MODEL_LEVELS,
-                "area": AREA,
+                "area": area,
                 "data_format": "grib",
                 "download_format": "unarchived",
             },
@@ -240,8 +319,8 @@ def _retrieve_day(client, day, variables, out_handle, grib_path):
         if _request_too_large(exc) and len(variables) > 1:
             mid = len(variables) // 2
             print(f"[download]   {day}: request too large; splitting {len(variables)} vars")
-            _retrieve_day(client, day, variables[:mid], out_handle, grib_path)
-            _retrieve_day(client, day, variables[mid:], out_handle, grib_path)
+            _retrieve_day(client, day, variables[:mid], out_handle, grib_path, area)
+            _retrieve_day(client, day, variables[mid:], out_handle, grib_path, area)
             return
         raise
     with open(part, "rb") as f:
@@ -249,22 +328,25 @@ def _retrieve_day(client, day, variables, out_handle, grib_path):
     os.remove(part)
 
 
-def download(dates, grib_path, variables=None):
+def download(dates, grib_path, variables=None, area=None):
     """Retrieve the model-level GRIB for *dates* into *grib_path*.
 
     Chunked by day (one ADS request per date) to stay under the ADS per-request cost
     limit, with an automatic variable-split fallback for any day that is still too large.
     *variables* defaults to the full archive set; the calibration auto-download passes the
-    smaller ``CALIBRATION_VARIABLES`` (t/q/z/lnsp) it actually needs.
+    smaller ``CALIBRATION_VARIABLES`` (t/q/z/lnsp) it actually needs. *area* ([N,W,S,E])
+    defaults to the Europe box; pass a regional box for a far-flung station cluster.
     """
     if variables is None:
         variables = VARIABLES
-    print(f"[download] {len(dates)} day(s) x {len(variables)} var(s): {dates[0]} .. {dates[-1]}")
+    if area is None:
+        area = AREA
+    print(f"[download] {len(dates)} day(s) x {len(variables)} var(s) over {area}: {dates[0]} .. {dates[-1]}")
     c = _ads_client()
     with open(grib_path, "wb") as out:
         for d in dates:
             print(f"[download]   {d}")
-            _retrieve_day(c, d, list(variables), out, grib_path)
+            _retrieve_day(c, d, list(variables), out, grib_path, area)
 
 
 def grib_to_netcdf(grib_path, nc_path):
@@ -459,22 +541,31 @@ def build_output(ds, out_path):
 
 
 # ----------------------------------------------------------------------------
-def download_to_netcdf(dates, out_path, variables=None, keep_intermediate=KEEP_INTERMEDIATE):
+def download_to_netcdf(dates, out_path, variables=None, keep_intermediate=KEEP_INTERMEDIATE,
+                       area=None):
     """Download *dates* from the ADS and write the calibration-ready CAMS_Beta netCDF.
 
     This is the importable core of the CLI (and what the calibration's CAMS auto-download
     calls): ADS retrieve -> GRIB->netCDF (cfgrib or the eccodes CLI) -> build_output.
     *dates* is a list of "YYYY-MM-DD" strings (as produced by parse_args). *variables*
     defaults to the full archive set; pass ``CALIBRATION_VARIABLES`` for the lean t/q/z/lnsp
-    file the calibration needs. Returns *out_path*.
+    file the calibration needs. *area* ([N,W,S,E]) defaults to the Europe box; pass a
+    regional box (``region_area(name)``) to fetch a far-flung station cluster. Returns *out_path*.
     """
     out_path = str(out_path)
-    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-    workdir = tempfile.mkdtemp(prefix="cams_")
+    out_dir = os.path.dirname(out_path) or "."
+    os.makedirs(out_dir, exist_ok=True)
+    # Stage scratch (the GRIB + raw netCDF, up to a few GB) on the SAME filesystem as
+    # the output, NEVER /tmp: on the ops host /tmp is a tiny separate volume that fills
+    # up and aborts the download with [Errno 28] No space left on device. The CAMS
+    # output dir lives on the big /data share. Override with CAMS_TMPDIR if needed.
+    tmp_base = os.environ.get("CAMS_TMPDIR") or out_dir
+    os.makedirs(tmp_base, exist_ok=True)
+    workdir = tempfile.mkdtemp(prefix="cams_", dir=tmp_base)
     grib_path = os.path.join(workdir, "cams.grib")
     raw_nc = os.path.join(workdir, "cams_raw.nc")
 
-    download(dates, grib_path, variables=variables)
+    download(dates, grib_path, variables=variables, area=area)
     grib_to_netcdf(grib_path, raw_nc)
 
     with xr.open_dataset(raw_nc) as ds:
@@ -496,10 +587,42 @@ def download_to_netcdf(dates, out_path, variables=None, keep_intermediate=KEEP_I
     return out_path
 
 
+def download_daily_files(dates, out_dir=OUTPUT_DIR, variables=None):
+    """Download each day in *dates* to its OWN ``CAMS_Beta_YYYYMMDD.nc`` (one file per
+    day), with the full variable set by default (aerosol optical fields + t/q/z/lnsp).
+
+    *dates* is a list of "YYYY-MM-DD" strings (as produced by parse_args). Days whose
+    file already exists are skipped, so an interrupted run resumes cleanly. Returns the
+    list of written paths.
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    written = []
+    for d in dates:
+        ymd = d.replace("-", "")
+        out_path = os.path.join(out_dir, f"CAMS_Beta_{ymd}.nc")
+        if os.path.exists(out_path):
+            print(f"[skip] {out_path} already exists")
+        else:
+            download_to_netcdf([d], out_path, variables=variables)
+        written.append(out_path)
+    return written
+
+
 def main():
-    dates, label = parse_args(sys.argv[1:])
-    final_nc = os.path.join(OUTPUT_DIR, f"CAMS_Beta_{label}.nc")
-    download_to_netcdf(dates, final_nc)
+    argv = list(sys.argv[1:])
+    out_dir = OUTPUT_DIR
+    if "--out" in argv:
+        i = argv.index("--out")
+        out_dir = argv[i + 1]
+        del argv[i:i + 2]
+    per_day = "--daily" in argv
+    argv = [a for a in argv if a != "--daily"]
+
+    dates, label = parse_args(argv)
+    if per_day:
+        download_daily_files(dates, out_dir)
+    else:
+        download_to_netcdf(dates, os.path.join(out_dir, f"CAMS_Beta_{label}.nc"))
 
 
 if __name__ == "__main__":

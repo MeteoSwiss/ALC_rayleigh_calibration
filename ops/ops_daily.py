@@ -7,7 +7,7 @@ backfill of the last few days that have not been processed yet (self-healing aft
   1. ensures the CAMS file for that day (downloads it from the ADS if missing; retried -- this is the
      slow, network-dependent step, deliberately isolated so a failure is one clear log line);
   2. runs the calibration for that day across the whole network: Rayleigh + liquid-cloud + Kalman
-     (scripts/run_all_l1_2026.py, which now MERGES into the per-stream CSVs instead of overwriting);
+     (scripts/run_network_calibration.py, which now MERGES into the per-stream CSVs instead of overwriting);
 
 then, once, if anything changed:
 
@@ -49,10 +49,17 @@ FULLCAL_DIR = _envp("ALC_FULLCAL_DIR", str(REPO / "_fullcal"))
 DASHBOARD_DIR = _envp("ALC_DASHBOARD_DIR", str(REPO / "_dashboard"))
 OPCOEFF_CSV = os.environ.get("ALC_OPCOEFF_CSV") or ""
 L2_DIR = os.environ.get("ALC_L2_DIR") or ""
+CEDA_LINKS = os.environ.get("ALC_CEDA_LINKS") or ""   # {key: CEDA-L2 URL} map (build_ceda_links.py)
 DAY_LAG = int(os.environ.get("ALC_DAY_LAG") or "1")
 BACKFILL_DAYS = int(os.environ.get("ALC_BACKFILL_DAYS") or "5")
 WORKERS = str(os.environ.get("ALC_WORKERS") or "6")
 PY = sys.executable
+PUBLISH = (os.environ.get("ALC_PUBLISH") or "0") == "1"
+# Cloudnet target classification (per stream-day NetCDF + curtain PNG on the dashboard). Off by
+# default; flip on with ALC_CLASSIFY=1 once ceiloclass/ceilopyter are in $ALC_VENV. The runner
+# degrades gracefully (skips) if the deps or CAMS temperature are absent, so this never fails a run.
+CLASSIFY = (os.environ.get("ALC_CLASSIFY") or "0") == "1"
+PUBLISH_SH = REPO / "ops" / "publish.sh"
 
 PROCESSED = DASHBOARD_DIR / ".processed_days"     # one YYYYMMDD per line: days CAMS was present + run
 HEARTBEAT = DASHBOARD_DIR / ".last_success"
@@ -60,6 +67,19 @@ HEARTBEAT = DASHBOARD_DIR / ".last_success"
 
 def log(msg: str) -> None:
     print(f"[{datetime.now(timezone.utc):%Y-%m-%d %H:%M:%S}Z] {msg}", flush=True)
+
+
+def refresh_census() -> None:
+    """Refresh the station census from the live L1 archive BEFORE calibrating, so a
+    newly-installed station is picked up the same day (scripts/refresh_census.py merges
+    new streams in place, never dropping existing ones). Best-effort: a failure here is
+    logged but must not block the daily calibration (the previous census is still valid)."""
+    cmd = [PY, str(REPO / "scripts" / "refresh_census.py")]
+    log(f"  census: refresh_census.py (scan {os.environ.get('ALC_L1_ROOT', '?')})")
+    try:
+        subprocess.run(cmd, cwd=str(REPO), timeout=1800)
+    except Exception as exc:  # noqa: BLE001 - census refresh must never fail the run
+        log(f"  census: refresh failed: {type(exc).__name__}: {exc}")
 
 
 def load_processed() -> set:
@@ -98,11 +118,28 @@ def fetch_cams(ds: str, retries: int = 3) -> bool:
 
 
 def calibrate(ds: str) -> bool:
-    cmd = [PY, str(REPO / "scripts" / "run_all_l1_2026.py"),
+    cmd = [PY, str(REPO / "scripts" / "run_network_calibration.py"),
            "--start", ds, "--end", ds, "--per-type", "0", "--ignore-coverage",
-           "--workers", WORKERS, "--methods", "rayleigh,cloud", "--force"]
+           "--workers", WORKERS, "--methods", "rayleigh,cloud", "--force",
+           "--sens", "--omb"]
+    if CLASSIFY:
+        cmd.append("--classify")
     log(f"  calibrate {ds}: {' '.join(cmd[1:])}")
     return subprocess.run(cmd, cwd=str(REPO)).returncode == 0
+
+
+def update_opcoeff(ds: str) -> None:
+    """Append the day's operational L2 calibration_constant_0 to the opcoeff CSV (the
+    dashboard's %-of-operational ratio). Resumable + best-effort -- never fails the run."""
+    if not (L2_DIR and OPCOEFF_CSV):
+        return
+    cmd = [PY, str(REPO / "scripts" / "extract_l2_opcoeff.py"), L2_DIR, OPCOEFF_CSV,
+           "--start", ds, "--end", ds]
+    log(f"  opcoeff {ds}: extract_l2_opcoeff --start {ds} --end {ds}")
+    try:
+        subprocess.run(cmd, cwd=str(REPO), timeout=1800)
+    except Exception as exc:  # noqa: BLE001
+        log(f"  opcoeff {ds}: failed: {type(exc).__name__}: {exc}")
 
 
 def update_dashboard() -> bool:
@@ -112,18 +149,36 @@ def update_dashboard() -> bool:
         cmd += ["--l2dir", L2_DIR]
     if OPCOEFF_CSV:
         cmd += ["--opcoeff", OPCOEFF_CSV]
+    if CEDA_LINKS and Path(CEDA_LINKS).exists():
+        cmd += ["--ceda-links", CEDA_LINKS]
     log(f"  dashboard: {' '.join(cmd[1:])}")
     return subprocess.run(cmd, cwd=str(REPO)).returncode == 0
+
+
+def publish() -> bool:
+    """Publish the freshly-built site to the EWC (images -> S3 bucket, HTML -> web VM) via
+    ops/publish.sh. Best-effort: a publish failure is logged and flagged in the heartbeat but does NOT
+    fail the run -- the calibration and the local dashboard already succeeded."""
+    if not PUBLISH_SH.exists():
+        log("  publish: ops/publish.sh missing -> skip")
+        return False
+    log(f"  publish: bash {PUBLISH_SH}")
+    return subprocess.run(["bash", str(PUBLISH_SH)], cwd=str(REPO)).returncode == 0
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--day", default=None, help="process this single day YYYYMMDD (overrides D-LAG + backfill)")
     ap.add_argument("--no-dashboard", action="store_true", help="run the calibration only, skip the dashboard")
+    ap.add_argument("--no-publish", action="store_true", help="skip the EWC publish step even if ALC_PUBLISH=1")
     ap.add_argument("--force-all", action="store_true", help="ignore the processed-days record (reprocess the window)")
     args = ap.parse_args()
 
     log(f"ALC daily pipeline starting | CAMS={CAMS_DIR} | fullcal={FULLCAL_DIR} | dashboard={DASHBOARD_DIR}")
+
+    # Refresh the census from the live L1 archive first, so any station installed since the
+    # last run is calibrated today (new streams merged in place; existing ones never dropped).
+    refresh_census()
 
     if args.day:
         days = [args.day]
@@ -146,22 +201,29 @@ def main() -> int:
             cams_failures.append(ds)
             continue
         ok = calibrate(ds)
+        update_opcoeff(ds)
         mark_processed(ds)                       # CAMS was present + we ran; don't redo even if some streams failed
         ran.append(ds)
         log(f"day {ds}: calibration {'ok' if ok else 'completed WITH ERRORS (see per-stream output)'}")
 
     dash_ok = True
+    published = None
     if ran and not args.no_dashboard:
         log("updating dashboard (incremental) ...")
         dash_ok = update_dashboard()
         log(f"dashboard update {'ok' if dash_ok else 'FAILED'}")
+        if dash_ok and PUBLISH and not args.no_publish:
+            log("publishing to the EWC ...")
+            published = publish()
+            log(f"publish {'ok' if published else 'FAILED (non-fatal)'}")
     elif not ran:
         log("no day processed -> dashboard not updated")
 
     HEARTBEAT.parent.mkdir(parents=True, exist_ok=True)
     HEARTBEAT.write_text(
         f"{datetime.now(timezone.utc):%Y-%m-%d %H:%M:%S}Z ran={','.join(ran) or '-'} "
-        f"cams_missing={','.join(cams_failures) or '-'} dashboard={'ok' if dash_ok else 'fail'}\n",
+        f"cams_missing={','.join(cams_failures) or '-'} dashboard={'ok' if dash_ok else 'fail'}"
+        f"{'' if published is None else (' publish=' + ('ok' if published else 'fail'))}\n",
         encoding="utf-8")
 
     # hard failure: dashboard build failed, or there was work but nothing could be processed

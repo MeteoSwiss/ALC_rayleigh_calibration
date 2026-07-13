@@ -23,6 +23,7 @@ from typing import Iterable, Optional
 import numpy as np
 import pandas as pd
 
+from monitoring import config
 from monitoring.config import DB_NAME, SUCCESS_FLAGS
 
 _CAL_COLS = ["key", "method", "date", "datetime", "flag", "success", "cal_value",
@@ -71,11 +72,71 @@ def _read_kalman_csv(path: Path, key: str) -> pd.DataFrame:
     return df[["key", "method", "date", "kalman", "kalman_std"]]
 
 
+def _diag_rows_from_csv(fullcal_dir: Path, keys) -> list:
+    """Enumerate the per-calibration diagnostic images from each key's <key>_cal.csv instead of from
+    the on-disk PNGs (used in IMAGES_IN_BUCKET mode, where the local PNGs may have been deleted).
+
+    Every cal row with method in {rayleigh, cloud} corresponds 1:1 to a diagnostic PNG, so the
+    complete diag list is data-driven. ``src`` is the *expected* PNG path the runner would have
+    written (<fullcal>/<key>/plots/<wmo>/<YYYY>/<date>_<wmo>_<method>_diag_compact.png); the renderer
+    still tries to stage it and silently skips any that no longer exist on disk."""
+    rows = []
+    for key in keys:
+        csv = Path(fullcal_dir) / key / f"{key}_cal.csv"
+        if not csv.exists():
+            continue
+        try:
+            df = pd.read_csv(csv, dtype={"date": str})
+        except Exception:
+            continue
+        if not len(df) or "date" not in df.columns:
+            continue
+        method_col = df["method"].astype(str) if "method" in df.columns else pd.Series(["rayleigh"] * len(df))
+        wmo = key.rsplit("_", 1)[0]
+        for date, method in zip(df["date"].astype(str), method_col):
+            if not date.isdigit() or len(date) < 4:
+                continue
+            if method not in ("rayleigh", "cloud"):
+                continue
+            src = (Path(fullcal_dir) / key / "plots" / wmo / date[:4]
+                   / f"{date}_{wmo}_{method}_diag_compact.png")
+            rows.append(dict(key=key, method=method, date=date, src=str(src)))
+    return rows
+
+
+def _classification_rows(fullcal_dir: Path, keys) -> list:
+    """Cloudnet classification curtain rows (method='classification'), one per
+    ``<key>/classification/<wmo>/<YYYY>/<key>_<YYYYMMDD>_classification.nc``. Enumerating the NetCDF
+    (which is never pruned) works in BOTH on-disk and IMAGES_IN_BUCKET modes; ``src`` is the sibling
+    PNG -- staged if it still exists on disk, else served from the bucket by (key, method, date)."""
+    import re
+    rows = []
+    for key in keys:
+        cdir = Path(fullcal_dir) / key / "classification"
+        if not cdir.exists():
+            continue
+        for nc in cdir.rglob("*_classification.nc"):
+            m = re.search(r"_(\d{8})_classification", nc.name)
+            if m:
+                rows.append(dict(key=key, method="classification", date=m.group(1),
+                                 src=str(nc.with_name(nc.stem + ".png"))))
+    return rows
+
+
 def _scan_diagnostics(fullcal_dir: Path, keys) -> pd.DataFrame:
     """Find per-calibration diagnostic PNGs the runner emitted under <key>/plots/**/*.png.
 
     Filenames are '<YYYYMMDD>_<wmo>_<method>_diag_compact.png'; we key each image by
-    (key, method, date) and keep its absolute source path for the renderer to copy in."""
+    (key, method, date) and keep its absolute source path for the renderer to copy in.
+
+    In IMAGES_IN_BUCKET mode the rows are derived from each key's <key>_cal.csv instead, so the diag
+    list survives even when the local PNGs have been deleted (they live in the bucket). The ``src``
+    path is the expected on-disk location; the renderer stages whatever still exists and skips the
+    rest."""
+    cols = ["key", "method", "date", "src"]
+    if config.IMAGES_IN_BUCKET:
+        return pd.DataFrame(_diag_rows_from_csv(fullcal_dir, keys)
+                            + _classification_rows(fullcal_dir, keys), columns=cols)
     rows = []
     for key in keys:
         pdir = Path(fullcal_dir) / key / "plots"
@@ -90,7 +151,7 @@ def _scan_diagnostics(fullcal_dir: Path, keys) -> pd.DataFrame:
             if method is None:
                 continue
             rows.append(dict(key=key, method=method, date=date, src=str(png)))
-    cols = ["key", "method", "date", "src"]
+    rows += _classification_rows(fullcal_dir, keys)   # per-day classification curtains
     return pd.DataFrame(rows, columns=cols)
 
 
@@ -131,11 +192,15 @@ def _enrich_metadata(stations: pd.DataFrame, l2_dir: Path) -> pd.DataFrame:
         wmo, ident = str(s["wmo"]), str(s["identifier"])
         if not wmo or wmo == "nan":
             wmo, _, ident = str(s["key"]).rpartition("_")
-        matches = sorted(Path(l2_dir).glob(f"{wmo}/*/L2_{wmo}_{ident}*.nc"))
-        if not matches:
+        # L2 archives nest as <wmo>/YYYY/MM/L2_*.nc (2 levels) or <wmo>/<sub>/L2_*.nc (1 level);
+        # take the FIRST match lazily -- site/country/institution are constant per station, so any
+        # file works, and next() avoids enumerating the whole (large) per-station L2 tree.
+        match = (next(Path(l2_dir).glob(f"{wmo}/*/*/L2_{wmo}_{ident}*.nc"), None)
+                 or next(Path(l2_dir).glob(f"{wmo}/*/L2_{wmo}_{ident}*.nc"), None))
+        if not match:
             continue
         try:
-            with netCDF4.Dataset(matches[-1]) as d:
+            with netCDF4.Dataset(match) as d:
                 site = str(getattr(d, "site_location", "") or "")
                 inst = str(getattr(d, "institution", "") or "")
         except OSError:
@@ -155,17 +220,18 @@ def _series_aggregates(cal: pd.DataFrame) -> pd.DataFrame:
         g = g.sort_values("datetime")
         ok = g[g["success"] == 1]
         last = g.iloc[-1]
-        # Success rate counts ATTEMPTABLE days: exclude only no-data (0) and unsuitable conditions
-        # (-1 = cloudy night for Rayleigh / clear sky for cloud -- genuinely no opportunity). Every
-        # other non-success, including the cloud rejections (-20..-26: dirty window, low laser energy,
-        # cloud not a clean stratocumulus), counts as a FAILURE -- so the rate measures "of the days a
-        # calibration could be attempted, how often it succeeded", consistent with both the headline
-        # KPI (metrics.network_summary) and how Rayleigh already counts its own quality failures.
+        # Success rate = valid calibrations / ALL days with a file. EVERY non-success counts against
+        # it: no data (0), no liquid cloud / not a clear night (-1), AND the quality rejections
+        # (-20..-26 dirty window/low laser/etc., signal-not-proportional, ...). This is the true daily
+        # yield -- so a cloud method that only lands on cloudy days reads ~50 %, not ~100 % (the old
+        # formula excluded flag -1, which for cloud is almost all the non-successes). Identical for both
+        # methods. n_suitable (attemptable days, excl. 0/-1) is retained for reference only.
         n_suitable = int((~g["flag"].isin([0, -1])).sum())
+        n_dates = int(len(g))
         records.append(dict(
             key=key, method=method,
-            n_dates=int(len(g)), n_success=int(len(ok)), n_suitable=n_suitable,
-            success_rate=float(100.0 * len(ok) / n_suitable) if n_suitable else float("nan"),
+            n_dates=n_dates, n_success=int(len(ok)), n_suitable=n_suitable,
+            success_rate=float(100.0 * len(ok) / n_dates) if n_dates else float("nan"),
             median_cl=float(ok["cal_value"].median()) if len(ok) else float("nan"),
             median_rel_unc=float(ok["rel_uncertainty"].median()) if len(ok) else float("nan"),
             first_date=str(g.iloc[0]["date"]), last_date=str(last["date"]),
