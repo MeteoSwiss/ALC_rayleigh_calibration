@@ -18,7 +18,9 @@ set -uo pipefail
 
 OPS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
-source "$OPS_DIR/config.sh"
+# Config file is overridable via ALC_CONFIG (e.g. a home/laptop config with no proxy and local
+# paths); defaults to the committed server config.sh so cron behaviour is unchanged.
+source "${ALC_CONFIG:-$OPS_DIR/config.sh}"
 
 SITE="${ALC_DASHBOARD_DIR:?ALC_DASHBOARD_DIR not set}"
 if [ ! -d "$SITE" ]; then
