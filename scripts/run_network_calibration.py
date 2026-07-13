@@ -287,6 +287,74 @@ def _make_shared_reader(s):
     return get
 
 
+# --- Chunk-outer read-once: one batched multi-day read shared by every pass --
+# ALC_CHUNK_DAYS sets how many days are read per batched L1 load (+1 head day so the first
+# night of a chunk has its D-1 evening). The daily run's 1-day window is a single 1-day
+# chunk, i.e. exactly the [D-1, D] pair read once -- operations are unaffected. Larger
+# chunks amortise file opens/decode into one sequential read (31 for reprocessing; the
+# default 7 keeps per-worker memory modest on small servers).
+CHUNK_DAYS = max(1, int(os.environ.get("ALC_CHUNK_DAYS", "7") or "7"))
+
+
+def _chunks(start, end, ndays):
+    """Split [start, end] (inclusive datetimes) into consecutive ndays-long windows."""
+    c = start
+    while c <= end:
+        ce = min(c + timedelta(days=ndays - 1), end)
+        yield c, ce
+        c = ce + timedelta(days=1)
+
+
+def _make_chunk_reader(s, start, end, chunk_days=None):
+    """Chunk-aware drop-in for ``_make_shared_reader``: ``get(ds) -> night view [D-1, D]``.
+
+    Loads the L1 files of a whole chunk (+1 head day) in ONE batched read and serves each
+    night as ``slice_night(D)`` of that read, so a pass walking the window in day order
+    triggers one archive read per chunk instead of one two-file read per night. Chunks are
+    aligned to *start*, so the per-chunk calibration trio and the full-window OmB/sens
+    sweep resolve identical chunk bounds and reuse is exact.
+
+    Behaviour parity with the per-night reader:
+      * a night with NO file for D-1 nor D returns ``None`` (consumers skip / fall back);
+      * if the batched chunk read fails (e.g. a mid-chunk range-grid change breaks the
+        concatenation) the reader falls back to per-night loads for that chunk, which is
+        exactly today's behaviour.
+    """
+    ndays = chunk_days or CHUNK_DAYS
+    fallback = _make_shared_reader(s)          # today's per-night reader
+    state = {"key": None, "idd": None, "failed": False}
+
+    def get(ds):
+        d = datetime.strptime(ds, "%Y%m%d")
+        if d < start or d > end:               # out of window (defensive) -> per-night read
+            return fallback(ds)
+        # exact parity with build_file_paths(): no file for either night day -> None
+        if not (_l1_file(s["wmo"], s["ident"], d - timedelta(days=1)).exists()
+                or _l1_file(s["wmo"], s["ident"], d).exists()):
+            return None
+        k = (d - start).days // ndays
+        cs = start + timedelta(days=k * ndays)
+        ce = min(cs + timedelta(days=ndays - 1), end)
+        if state["key"] != (cs, ce):
+            state["key"], state["idd"], state["failed"] = (cs, ce), None, False
+            files = [str(_l1_file(s["wmo"], s["ident"], dd))
+                     for dd in _days(cs - timedelta(days=1), ce)
+                     if _l1_file(s["wmo"], s["ident"], dd).exists()]
+            if files:
+                try:
+                    state["idd"] = load_instrument_day(
+                        files, s["type"], CAMS,
+                        cams_folder_fallback=(str(CAMS_FALLBACK) if CAMS_FALLBACK else ""),
+                        read_cams=False, build_working=False)
+                except Exception:  # noqa: BLE001 - degrade to per-night reads for this chunk
+                    state["idd"], state["failed"] = None, True
+        if state["idd"] is None:
+            return fallback(ds) if state["failed"] else None
+        return state["idd"].slice_night(d.date())
+
+    return get
+
+
 # --- Rayleigh (per night) ---------------------------------------------------
 def _classification_contam_profile(key, d):
     """Per-height contaminated fraction (Cloudnet cloud/ice: droplet/drizzle/ice/supercooled, i.e. NOT
@@ -789,64 +857,66 @@ def _cache_coverage_regression(key, sdir, cache_name, output_name):
     return False  # brand-new station (no cache, no output) -> proceed normally
 
 
-def _do_omb(s, start, end, kalman_rows, shared=None):
-    """Observation-minus-Background vs CAMS (operational + our-calibrated). Writes
-    <key>_omb.png and a one-row <key>_omb.csv. Returns the summary row or None."""
-    from calibration.cloud.calibration import INSTRUMENT_CAL_DEFAULT
+def _omb_cams_for_day(ds8):
+    """The day's CAMS file WITH aerosol backscatter (0.4 deg, then the 1 deg fallback), or None."""
     from calibration.io.cams import find_cams_file, _has_backscatter
-    from calibration.omb.omb import compute_omb
-    from calibration.omb.figures import plot_omb_station
+    for _folder in (CAMS, CAMS_FALLBACK):
+        if _folder is None:
+            continue
+        _c = find_cams_file(_folder, ds8)
+        if _c is not None and _has_backscatter(_c):
+            return _c
+    return None
+
+
+def _omb_prepare(s, start, end, kalman_rows):
+    """OmB context (guards + constant maps) for the shared OmB/sens day sweep, or None to skip."""
+    from calibration.cloud.calibration import INSTRUMENT_CAL_DEFAULT
     key, itype = _key(s), s["type"]
     # Regression guard: never let a partial-window daily run replace a non-empty historic
     # OmB output for a station whose cache hasn't been built yet (see helper docstring).
     if _cache_coverage_regression(key, OUT / key, "_omb_cache.npz", f"{key}_omb.csv"):
         return None
-    method = SENS_OMB_METHOD.get(itype, "rayleigh")
-    kmap = _kalman_map(kalman_rows, method)
+    kmap = _kalman_map(kalman_rows, SENS_OMB_METHOD.get(itype, "rayleigh"))
     if not kmap:
         return None  # no calibrated C_L -> skip (don't fabricate 'ours' from the default constant)
-    default = INSTRUMENT_CAL_DEFAULT.get(itype, 1.0)
-    op_map = _op_map(s, start, end)          # date -> operational C_L (cheap, L1-independent)
-    sdir = OUT / key
-    from calibration.incremental import omb_cache_update, omb_cache_aggregate
-    # Process DAY BY DAY -- the same mechanism as the Rayleigh/cloud passes -- so OmB consumes the
-    # shared per-day read and never loads a whole month at once. Each day is reduced to its OmB cache
-    # columns (de-duped by CAMS timestamp), so the day-loop stitches to exactly the same cache as the
-    # old month-loop. CAMS resolves per day to that day's monthly file (0.4 deg, then the 1 deg
-    # fallback); both must carry aerosol backscatter (aerbackscatgnd*).
-    any_update = False
-    for d in _days(start, end):
-        ds8 = d.strftime("%Y%m%d")
-        cams = None
-        for _folder in (CAMS, CAMS_FALLBACK):
-            if _folder is None:
-                continue
-            _c = find_cams_file(_folder, ds8)
-            if _c is not None and _has_backscatter(_c):
-                cams = _c
-                break
-        if cams is None:
-            continue  # no CAMS-with-backscatter for this day's month -> skip it
-        idd = shared(ds8) if shared is not None else None
-        data = (idd.slice_to_date(d).to_omb_dict() if idd is not None
-                else _load_l1_window(s, d, d))
-        if data is None:
-            continue
-        c_ours = _const_per_profile(data["time"], kmap, default)
-        c_op = _const_per_profile(data["time"], op_map, default)
-        rcs = data["rcs"].astype("float64")
-        res = compute_omb(
-            time=data["time"], range_agl=data["range"],
-            beta_sources={"op": rcs / c_op[:, None], "ours": rcs / c_ours[:, None]},
-            station_lat=data["lat"], station_lon=data["lon"], station_alt=data["alt"],
-            wavelength=data["wl"], cams_file=str(cams), instrument=itype,
-            cloud_base_height=data["cbh"], abs_cs_lookup_table=str(WV_LUT),
-        )
-        del data, rcs
-        omb_cache_update(sdir, res)
-        any_update = True
-    if not any_update:
+    return dict(kmap=kmap, default=INSTRUMENT_CAL_DEFAULT.get(itype, 1.0),
+                op_map=_op_map(s, start, end),   # date -> operational C_L (cheap, L1-independent)
+                sdir=OUT / key, any_update=False)
+
+
+def _omb_day(ctx, s, d, data, cams):
+    """One day's OmB reduction into the incremental cache (no-op without CAMS backscatter).
+
+    Each day is reduced to its OmB cache columns (de-duped by CAMS timestamp), so the day sweep
+    stitches to exactly the same cache as the old month-loop.
+    """
+    from calibration.omb.omb import compute_omb
+    from calibration.incremental import omb_cache_update
+    if cams is None:
+        return  # no CAMS-with-backscatter for this day's month -> skip it
+    c_ours = _const_per_profile(data["time"], ctx["kmap"], ctx["default"])
+    c_op = _const_per_profile(data["time"], ctx["op_map"], ctx["default"])
+    rcs = data["rcs"].astype("float64")
+    res = compute_omb(
+        time=data["time"], range_agl=data["range"],
+        beta_sources={"op": rcs / c_op[:, None], "ours": rcs / c_ours[:, None]},
+        station_lat=data["lat"], station_lon=data["lon"], station_alt=data["alt"],
+        wavelength=data["wl"], cams_file=str(cams), instrument=s["type"],
+        cloud_base_height=data["cbh"], abs_cs_lookup_table=str(WV_LUT),
+    )
+    del rcs
+    omb_cache_update(ctx["sdir"], res)
+    ctx["any_update"] = True
+
+
+def _omb_finish(ctx, s):
+    """Aggregate the OmB cache and render the per-period products. Returns the 'all' row."""
+    from calibration.omb.figures import plot_omb_station
+    from calibration.incremental import omb_cache_aggregate
+    if not ctx["any_update"]:
         return None
+    key, itype, sdir = _key(s), s["type"], ctx["sdir"]
     res_all = omb_cache_aggregate(sdir)               # full-period snapshot off the (updated) cache
     if res_all is None:
         return None
@@ -876,47 +946,43 @@ def _do_omb(s, start, end, kalman_rows, shared=None):
         span_min=span_min, span_max=span_max)
 
 
-def _do_sens(s, start, end, kalman_rows, shared=None):
-    """Per-day noise -> detection thresholds over the window. Writes <key>_sens.png
-    and a one-row <key>_sens.csv (headline ICAO detection altitude)."""
+def _sens_prepare(s, kalman_rows):
+    """Sensitivity context for the shared OmB/sens day sweep, or None to skip."""
     from calibration.cloud.calibration import INSTRUMENT_CAL_DEFAULT
-    from calibration.sensitivity.network import (
-        sensitivity_over_period, combine_sens_results, plot_sensitivity_station)
     key, itype = _key(s), s["type"]
     # Regression guard: never let a partial-window daily run replace a non-empty historic
     # sensitivity output for a station whose cache hasn't been built yet (see helper docstring).
     if _cache_coverage_regression(key, OUT / key, "_sens_cache.npz", f"{key}_sens.csv"):
         return None
-    method = SENS_OMB_METHOD.get(itype, "rayleigh")
-    kmap = _kalman_map(kalman_rows, method)
+    kmap = _kalman_map(kalman_rows, SENS_OMB_METHOD.get(itype, "rayleigh"))
     if not kmap:
         return None  # no calibrated C_L -> skip (sensitivity scale depends on it)
-    default = INSTRUMENT_CAL_DEFAULT.get(itype, 1.0)
-    # Process DAY BY DAY -- the same mechanism as the Rayleigh/cloud passes -- so sensitivity consumes
-    # the shared per-day read and never loads a whole month at once. sensitivity_over_period bins by
-    # day internally, so per-day parts stitch to exactly the same per-date cache as the old month-loop.
-    parts = []
-    for d in _days(start, end):
-        ds8 = d.strftime("%Y%m%d")
-        idd = shared(ds8) if shared is not None else None
-        data = (idd.slice_to_date(d).to_omb_dict() if idd is not None
-                else _load_l1_window(s, d, d))
-        if data is not None:
-            c = _const_per_profile(data["time"], kmap, default).astype("float32")
-            beta = (data["rcs"] / c[:, None]) * np.float32(1e6)  # Mm^-1 sr^-1
-            parts.append(sensitivity_over_period(
-                time=data["time"], beta=beta, range_agl=data["range"], cbh=data["cbh"],
-                lat=data["lat"], lon=data["lon"], wavelength=data["wl"]))
-            del data, beta
-    from calibration.incremental import sens_cache_update, sens_cache_aggregate
-    sdir = OUT / key
-    for _p in parts:
+    return dict(kmap=kmap, default=INSTRUMENT_CAL_DEFAULT.get(itype, 1.0),
+                sdir=OUT / key, parts=[])
+
+
+def _sens_day(ctx, data):
+    """One day's noise/detection part (sensitivity_over_period bins by day internally)."""
+    from calibration.sensitivity.network import sensitivity_over_period
+    c = _const_per_profile(data["time"], ctx["kmap"], ctx["default"]).astype("float32")
+    beta = (data["rcs"] / c[:, None]) * np.float32(1e6)  # Mm^-1 sr^-1
+    ctx["parts"].append(sensitivity_over_period(
+        time=data["time"], beta=beta, range_agl=data["range"], cbh=data["cbh"],
+        lat=data["lat"], lon=data["lon"], wavelength=data["wl"]))
+    del beta
+
+
+def _sens_finish(ctx, s):
+    """Fold the day parts into the sens cache, aggregate and render. Returns the 'all' row."""
+    from calibration.sensitivity.network import plot_sensitivity_station
+    from calibration.incremental import sens_cache_update, sens_cache_aggregate, sens_cache_path
+    key, itype, sdir = _key(s), s["type"], ctx["sdir"]
+    for _p in ctx["parts"]:
         if _p is not None and getattr(_p, "dates", None) is not None and _p.dates.size:
             sens_cache_update(sdir, _p)
     res_all = sens_cache_aggregate(sdir)
     if res_all is None:
         return None
-    from calibration.incremental import sens_cache_path
     _cd = np.load(sens_cache_path(sdir), allow_pickle=False)["dates"].astype("datetime64[D]")
     span_min, span_max = str(_cd.min()).replace("-", ""), str(_cd.max()).replace("-", "")
     site = s.get("site", key)
@@ -940,6 +1006,40 @@ def _do_sens(s, start, end, kalman_rows, shared=None):
         plot_fn=lambda rw, png, title: plot_sensitivity_station(rw, itype, png, title=title),
         row_fn=_sens_row, title_fn=lambda p: f"{site} ({s['wmo']}) — Sensitivity [{p.label}]",
         span_min=span_min, span_max=span_max)
+
+
+def _do_omb_sens(s, start, end, kalman_rows, shared, do_omb, do_sens):
+    """OmB + sensitivity in ONE shared day sweep off the (chunked) read.
+
+    Both products consume the same per-day coarse dict (``slice_to_date(d).to_omb_dict()``), so
+    interleaving them halves the L1 sweeps of the old back-to-back ``_do_omb`` / ``_do_sens``
+    pair and shares the day slice; with the chunk reader the whole sweep costs one batched read
+    per chunk. Per-day cache updates and the final aggregation are verbatim the old ones, so the
+    caches and emitted products are identical to the two-pass path.
+    """
+    octx = _omb_prepare(s, start, end, kalman_rows) if do_omb else None
+    sctx = _sens_prepare(s, kalman_rows) if do_sens else None
+    if octx is None and sctx is None:
+        return
+    for d in _days(start, end):
+        ds8 = d.strftime("%Y%m%d")
+        cams = _omb_cams_for_day(ds8) if octx is not None else None
+        if sctx is None and octx is not None and cams is None:
+            continue  # OmB-only sweep: keep the old behaviour of not even reading CAMS-less days
+        idd = shared(ds8) if shared is not None else None
+        data = (idd.slice_to_date(d).to_omb_dict() if idd is not None
+                else _load_l1_window(s, d, d))
+        if data is None:
+            continue
+        if octx is not None:
+            _omb_day(octx, s, d, data, cams)
+        if sctx is not None:
+            _sens_day(sctx, data)
+        del data
+    if octx is not None:
+        _omb_finish(octx, s)
+    if sctx is not None:
+        _sens_finish(sctx, s)
 
 
 # --- Cloudnet target classification (optional add-on) -----------------------
@@ -1040,43 +1140,49 @@ def _process_stream(payload):
 
     rows = []
     n_ok = 0
-    # One shared night [D-1, D] read per day feeds every pass that needs the L1: Rayleigh
-    # (.native), cloud (.slice_to_date) and OmB/sensitivity (.slice_to_date().to_omb_dict()).
-    shared = _make_shared_reader(s)
-    # Cloudnet classification FIRST (when requested): it writes the per-day curtain NetCDFs that the
-    # Rayleigh screen (flag -11) then reads for the night, and rides on the same shared read.
-    if do_classify:
-        try:
-            _do_classification(s, start, end, shared, force)
-        except Exception as exc:  # noqa: BLE001 - classification must not lose the calibration
-            print(f"{key}: classification failed: {type(exc).__name__}: {exc}", flush=True)
-    # --no-cal reuses the EXISTING calibration + Kalman (for a sens/omb-only pass);
-    # otherwise (re)compute the per-night calibration, Kalman best estimate and HK.
-    if not no_cal:
-        if "rayleigh" in methods and s["type"] in RAYLEIGH_TYPES:
-            rows += _do_rayleigh(s, start, end, shared, do_classify)
-        if "cloud" in methods and s["type"] in CLOUD_TYPES:
-            rows += _do_cloud(s, start, end, shared)
-        if rows:
-            # keep prior rows outside the processed window (and other methods) so daily/partial
-            # runs accumulate history instead of overwriting with just the processed dates
-            rows += _preserve_existing_rows(sdir / f"{key}_cal.csv", methods, start, end)
-            rows.sort(key=lambda r: (r["method"], r["date"]))
-            _write_csv_atomic(sdir / f"{key}_cal.csv", CSV_FIELDS, rows)
-            _write_csv_atomic(sdir / f"{key}_kalman.csv",
-                              ["method", "date", "kalman", "kalman_std"], _kalman_rows(rows))
-            _write_monitoring()   # monitoring panel: daily HK means + decoded status/availability
-            n_ok = sum(1 for r in rows if _is_success(r["flag"]))
+    # Chunk-outer read-once: ONE batched multi-day read per chunk (ALC_CHUNK_DAYS) feeds every
+    # pass that needs the L1 -- Rayleigh (.native night view), cloud (.slice_to_date) and, in
+    # the sweep below, OmB/sensitivity (.slice_to_date().to_omb_dict()). The passes run PER
+    # CHUNK so the buffer is shared by classify -> Rayleigh -> cloud before it is dropped;
+    # a 1-day window (the daily run) is a single chunk = today's [D-1, D] pair read once.
+    reader = _make_chunk_reader(s, start, end)
+    do_ray = (not no_cal) and "rayleigh" in methods and s["type"] in RAYLEIGH_TYPES
+    do_cld = (not no_cal) and "cloud" in methods and s["type"] in CLOUD_TYPES
+    for cs, ce in _chunks(start, end, CHUNK_DAYS):
+        # Cloudnet classification FIRST (when requested): it writes the per-day curtain NetCDFs
+        # that the Rayleigh screen (flag -11) then reads for the night (D-1's curtain comes from
+        # this chunk or the already-written previous one), riding on the same chunk read.
+        if do_classify:
+            try:
+                _do_classification(s, cs, ce, reader, force)
+            except Exception as exc:  # noqa: BLE001 - classification must not lose the calibration
+                print(f"{key}: classification failed: {type(exc).__name__}: {exc}", flush=True)
+        # --no-cal reuses the EXISTING calibration + Kalman (for a sens/omb-only pass);
+        # otherwise (re)compute the per-night calibration over this chunk.
+        if do_ray:
+            rows += _do_rayleigh(s, cs, ce, reader, do_classify)
+        if do_cld:
+            rows += _do_cloud(s, cs, ce, reader)
+    if rows:
+        # keep prior rows outside the processed window (and other methods) so daily/partial
+        # runs accumulate history instead of overwriting with just the processed dates
+        rows += _preserve_existing_rows(sdir / f"{key}_cal.csv", methods, start, end)
+        rows.sort(key=lambda r: (r["method"], r["date"]))
+        _write_csv_atomic(sdir / f"{key}_cal.csv", CSV_FIELDS, rows)
+        _write_csv_atomic(sdir / f"{key}_kalman.csv",
+                          ["method", "date", "kalman", "kalman_std"], _kalman_rows(rows))
+        _write_monitoring()   # monitoring panel: daily HK means + decoded status/availability
+        n_ok = sum(1 for r in rows if _is_success(r["flag"]))
 
-    # OmB / sensitivity add-ons consume the Kalman C_L: the fresh one if we just
-    # calibrated, else the existing <key>_kalman.csv (the --no-cal reuse path).
+    # OmB / sensitivity add-ons consume the Kalman C_L: the fresh one if we just calibrated,
+    # else the existing <key>_kalman.csv (the --no-cal reuse path). One interleaved day sweep
+    # (fresh chunk reader: the Kalman needs the WHOLE window's rows, so this second sweep is
+    # unavoidable until the caches are C-agnostic -- see doc/reports/11_batch_readonce_design.md).
     if do_sens or do_omb:
         kalman_rows = _kalman_rows(rows) if rows else _read_kalman_csv(sdir / f"{key}_kalman.csv")
         try:
-            if do_omb:
-                _do_omb(s, start, end, kalman_rows, shared)
-            if do_sens:
-                _do_sens(s, start, end, kalman_rows, shared)
+            _do_omb_sens(s, start, end, kalman_rows, _make_chunk_reader(s, start, end),
+                         do_omb=do_omb, do_sens=do_sens)
         except Exception as exc:  # noqa: BLE001 - an add-on failure must not lose the calibration
             print(f"{key}: sens/omb failed: {type(exc).__name__}: {exc}", flush=True)
 

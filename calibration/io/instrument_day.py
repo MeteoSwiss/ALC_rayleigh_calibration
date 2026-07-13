@@ -111,36 +111,24 @@ class InstrumentDayData:
     def altitude(self) -> float:
         return self.native.altitude
 
-    def slice_to_date(self, date: dt.date) -> "InstrumentDayData":
-        """A view whose ``native`` profiles are restricted to one UTC date.
+    def _subset_native(self, idx: NDArray) -> CeilometerData:
+        """The ``native`` profiles at row indices ``idx`` (per-profile fields sliced, rest kept).
 
-        Day-scoped consumers (cloud, monitoring) take this slice of the night ``[D-1, D]``
-        union read, so the files are opened once for the whole night yet each service sees
-        only its day. Only ``native`` is sliced; the working grid / CAMS cell / WV transmission
-        are dropped (rebuild if a sliced consumer needs them -- cloud does not).
-
-        Memoised per (instance, date): the cloud, OmB, sensitivity and classification passes each
-        call ``slice_to_date(d)`` on the same shared read, so they share ONE slice + re-coarsen of
-        the day instead of repeating it once per pass.
+        Shared by :meth:`slice_to_date` (one UTC day) and :meth:`slice_night` (the ``[D-1, D]``
+        night union). Fancy indexing copies the rows, so consumers can never mutate the parent
+        read through a slice -- a night served off a multi-day chunk is as isolated as the
+        fresh per-night read it replaces.
         """
-        cache = self.__dict__.get("_slice_cache")
-        if cache is None:
-            cache = self.__dict__["_slice_cache"] = {}
-        cached = cache.get(date)
-        if cached is not None:
-            return cached
         n = self.native
-        t_days = np.asarray(n.time, dtype="float64")  # UTC days since 1970-01-01
-        day0 = int((np.datetime64(date) - np.datetime64("1970-01-01")).astype("timedelta64[D]").astype(int))
-        idx = np.nonzero(np.floor(t_days).astype("int64") == day0)[0]
+        n_time = np.asarray(n.time).size
 
         def _sl(a):
             if a is None:
                 return None
             arr = np.asarray(a)
-            return arr[idx] if arr.ndim >= 1 and arr.shape[0] == t_days.size else a
+            return arr[idx] if arr.ndim >= 1 and arr.shape[0] == n_time else a
 
-        sliced = dataclasses.replace(
+        return dataclasses.replace(
             n,
             time=_sl(n.time),
             time_datetime=[n.time_datetime[i] for i in idx],
@@ -157,6 +145,28 @@ class InstrumentDayData:
             laser_energy=_sl(n.laser_energy),
             depol=_sl(n.depol),
         )
+
+    def slice_to_date(self, date: dt.date) -> "InstrumentDayData":
+        """A view whose ``native`` profiles are restricted to one UTC date.
+
+        Day-scoped consumers (cloud, monitoring) take this slice of the night ``[D-1, D]``
+        union read, so the files are opened once for the whole night yet each service sees
+        only its day. Only ``native`` is sliced; the working grid / CAMS cell / WV transmission
+        are dropped (rebuild if a sliced consumer needs them -- cloud does not).
+
+        Memoised per (instance, date): the cloud, OmB, sensitivity and classification passes each
+        call ``slice_to_date(d)`` on the same shared read, so they share ONE slice + re-coarsen of
+        the day instead of repeating it once per pass. Night views made by :meth:`slice_night`
+        share the parent's memo, so with a chunked reader each day is still coarsened only once.
+        """
+        cache = self.__dict__.setdefault("_slice_cache", {})
+        cached = cache.get(date)
+        if cached is not None:
+            return cached
+        t_days = np.asarray(self.native.time, dtype="float64")  # UTC days since 1970-01-01
+        day0 = int((np.datetime64(date) - np.datetime64("1970-01-01")).astype("timedelta64[D]").astype(int))
+        idx = np.nonzero(np.floor(t_days).astype("int64") == day0)[0]
+        sliced = self._subset_native(idx)
         # Re-coarsen the single day (not a slice of the coarse night) so day-scoped consumers
         # get a clean 30 s/10 m grid with no D-1/D boundary block.
         working = average_ceilometer_data(
@@ -168,6 +178,31 @@ class InstrumentDayData:
             wv_transmission=None,
         )
         cache[date] = result
+        return result
+
+    def slice_night(self, date: dt.date) -> "InstrumentDayData":
+        """A view equivalent to the per-night ``[D-1, D]`` union read ending on *date*.
+
+        The chunk reader (``scripts/run_network_calibration._make_chunk_reader``) loads a whole
+        multi-day window ONCE and serves each night as this view, so every pass receives exactly
+        what ``load_instrument_day([D-1, D])`` returns today: both full UTC days on the native
+        grid, ``working`` aliased to native (the per-night read uses ``build_working=False``),
+        CAMS/WV fields dropped. The day-slice memo (``_slice_cache``) is SHARED with the parent,
+        so ``night.slice_to_date(D)`` coarsens each day once per chunk, not once per pass.
+        Not memoised itself: the subset copies two days, and callers consume it immediately.
+        """
+        t_days = np.asarray(self.native.time, dtype="float64")
+        day0 = int((np.datetime64(date) - np.datetime64("1970-01-01")).astype("timedelta64[D]").astype(int))
+        fl = np.floor(t_days).astype("int64")
+        idx = np.nonzero((fl == day0 - 1) | (fl == day0))[0]
+        sliced = self._subset_native(idx)
+        result = dataclasses.replace(
+            self, native=sliced, working=sliced,
+            cams_time_num=None, cams_z_asl=None, cams_temperature=None, cams_nw=None,
+            wv_transmission=None,
+        )
+        # Share the day-slice memo with the parent chunk (see docstring).
+        result.__dict__["_slice_cache"] = self.__dict__.setdefault("_slice_cache", {})
         return result
 
     def to_omb_dict(self) -> dict:
