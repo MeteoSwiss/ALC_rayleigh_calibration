@@ -6,11 +6,11 @@ The Python package `calibration` provides Rayleigh (molecular) **and** liquid-cl
 
 - **Multi-instrument support**: CHM15k, CHM8k, CL51, CL61, Mini-MPL, and more
 - **Water-vapour correction** (mandatory for 910 nm): spectral two-way WV absorption from CAMS monthly means + HITRAN cross-section LUT; nights without matching CAMS are excluded (flag −4), never silently skipped
-- **Six molecular-window detection methods** (selectable via `molecular_method` in options.json):
-  - `main` = E-PROF v1.1 — original E-PROFILE method
-  - `improved` = E-PROF v1.2 — aerosol-robust grid search (production default)
-  - `optimal` = E-PROF v2 — temporal aerosol rejection + layer flagging
-  - `calipso`, `earlinet`, `bellini` — alternative reference methods
+- **Several molecular-window detection methods** (selectable via `molecular_method` in options.json):
+  - `eprof_v2` (`optimal`) — temporal aerosol rejection + layer flagging (**production default**, C8 tuning)
+  - `eprof_v1.2` (`improved`) — aerosol-robust grid search (legacy production default)
+  - `eprof_v1.1` (`main`) — original E-PROFILE method
+  - `eprof_v2p`, `earlinet`, `bellini` — R&D / alternative reference methods
 - **Liquid-cloud calibration** (`cloud/`): Python port of MATLAB O'Connor method, bit-for-bit validated; reads E-PROFILE L2 or Cloudnet CL61 raw; mandatory WV correction
 - **Kalman smoothing bridge**: shells out to `run_kalman_from_matlab.py` to produce a smoothed daily lidar constant
 - **Three input data levels**: L1 (`rcs_0`), L2 daily, L2 monthly (see *Input data level*)
@@ -27,11 +27,11 @@ The Python package `calibration` provides Rayleigh (molecular) **and** liquid-cl
 This project is managed with [uv](https://docs.astral.sh/uv/) (PEP 621 / hatchling). From the repo root:
 
 ```bash
-uv pip install -e ".[plotting]"     # editable install incl. optional plot deps
+uv pip install -e .                 # editable install (matplotlib included as a core dep)
 # or set up a fully managed environment:  uv sync
 ```
 
-Plain pip works too if you prefer: `pip install -e ".[plotting]"`.
+Plain pip works too if you prefer: `pip install -e .`.
 
 **Required:** Python ≥ 3.9, NumPy, SciPy, netCDF4, pandas  
 **Optional:** matplotlib (plots), scipy.ndimage (smoothing)
@@ -55,15 +55,16 @@ calibrate_rayleigh("20240115", info, options)
 
 | Field | Default | Description |
 |---|---|---|
-| `molecular_method` | `"improved"` | Molecular-window detection method (see Methods section) |
+| `molecular_method` | `"eprof_v2"` | Molecular-window detection method (see Methods section; production default since the 2026-06 C8 retune) |
 | `apply_wv_correction` | `1` | **Must stay 1** — WV correction for 910 nm |
 | `molecular_source` | `"standard"` | Atmospheric profile source (`"standard"` or `"cams"`) |
 | `cams_folder` | `"D:/CAMS/"` | Path to CAMS monthly NetCDF files |
 | `abs_cs_lookup_table` | (path) | HITRAN WV cross-section LUT |
 | `data_level` | `"L1"` | Input data level (`L1`, `L2_daily`, `L2_monthly`) |
 | `folder_root` | — | Root of input data archive |
-| `hour_min` / `hour_max` | 20 / 4 | Nighttime window (UTC) |
-| `z_low_cloud` | 4000 | Max cloud height for clear-night selection (m) |
+| `use_sza_night` / `sza_night_threshold` | 1 / 100 | Darkness-adaptive night window: keep profiles with solar zenith angle > threshold (default ON) |
+| `hour_min` / `hour_max` | 20 / 4 | Fixed solar-clock night window — fallback when `use_sza_night=0` or station coordinates are missing |
+| `z_low_cloud` | 6000 | Max cloud height for clear-night selection (m) |
 | `LRaer` | 52 | Aerosol lidar ratio assumed in molecular window (sr) |
 | `threshold_quality` | 15 | Max rel. error (%) to accept a calibration |
 
@@ -85,22 +86,22 @@ For L2 levels: `rcs = attenuated_backscatter_0 × calibration_constant_0 × 1e-6
 | Key | Label | Description |
 |---|---|---|
 | `main` | E-PROF v1.1 | Original E-PROFILE grid-search method |
-| `improved` | E-PROF v1.2 | Aerosol-robust grid search; production default |
-| `optimal` | E-PROF v2 | Temporal aerosol rejection + per-layer flagging; highest precision, lower yield |
-| `calipso` | CALIPSO-type | Fixed high-altitude molecular window |
+| `improved` | E-PROF v1.2 | Aerosol-robust grid search; legacy production default (pre-2026-06) |
+| `optimal` | E-PROF v2 | Temporal aerosol rejection + per-layer flagging; **production default** (C8 tuning) |
+| `eprof_v2p` | E-PROF v2 (purity) | v2 variant with purity-oriented gates (R&D) |
 | `earlinet` | EARLINET/SCC-type | SCC-style window search |
 | `bellini` | Bellini/ALICENET | ALICENET gradient-based window |
 | `eprof_v10` | E-PROF v1.0 | Pre-a4e7140 baseline (sign-error in Rayleigh slope); for historical comparison only — **not selectable in production** |
 
 `METHODS_DISPLAY` in `validation/compare_molecular_methods.py` is the ordered tuple used for display/aggregation (includes `eprof_v10`). `METHODS` in `calibration/rayleigh/molecular_methods.py` lists only the live-selectable methods.
 
-**Long-run results (14 sites, full archive):** `optimal` is most precise (robust CV 10–14 %); `improved` best balances precision and yield; `main` has the highest yield (57 %) but noisiest nights; `calipso` highest yield (79 %) but weakest signal-selectivity. See the reports in `doc/reports/` (figures under `C:\DATA\Projects\202606_E-PROFILE_calibration\figs_paper_validation\molecular_methods_longrun\`).
+**Long-run results (14 sites, full archive):** `optimal` is most precise (robust CV 10–14 %); `improved` best balances precision and yield; `main` has the highest yield (57 %) but noisiest nights. (The `calipso` normalise-to-highest-layer strategy was removed: it suits a down-looking satellite with a pure-Rayleigh stratosphere below, not a ground-up ALC.) See the reports in `doc/reports/` (figures under `C:\DATA\Projects\202606_E-PROFILE_calibration\figs_paper_validation\molecular_methods_longrun\`).
 
 ## Algorithm overview
 
 1. **Data loading**: L1 `rcs_0`, or L2 reconstructed, or RAW instrument signal
 2. **Fog exclusion**: profiles with `vertical_visibility` set → excluded (ceilometer fog flag)
-3. **Nighttime selection**: 20:00–04:00 UTC (configurable)
+3. **Nighttime selection**: darkness-adaptive SZA window (default; SZA > 100°), or the fixed 20:00–04:00 UTC clock window
 4. **Clear-night filtering**: remove profiles with low clouds or precipitation
 5. **Water-vapour correction** (910 nm only): compute two-way T²_wv(r) from CAMS monthly q/T/lnsp + HITRAN LUT (`water_vapor_correction/water_vapor.py`); divide RCS; skip night if no CAMS (flag −4)
 6. **Atmospheric model**: US Standard Atmosphere 1976 (or CAMS for molecular density)
@@ -125,6 +126,10 @@ For L2 levels: `rcs = attenuated_backscatter_0 × calibration_constant_0 × 1e-6
 | −6 | Uncertainty exceeds calibration value |
 | −7 | Negative Rayleigh fit slope |
 | −8 | Rayleigh fit intercept exceeds slope |
+| −9 | Another candidate window has much lower signal (aerosol layer suspected) |
+| −10 | Closest CAMS grid point too far (station outside the CAMS domain) |
+| −20 … −26 | Cloud rejection reasons (dominant filter): window transmission, laser energy, peak not sharp above/below, aerosol below cloud, cloud base out of range, inconsistent neighbours |
+| −99 | Exception during calibration (code issue, not a physical rejection) |
 
 ## Repository layout
 
@@ -220,7 +225,7 @@ E-PROFILE aerosol-processing recommendation, applied to the OmB diagnostic (`cal
 
 ### 2026 — uv packaging + package rename
 
-- Switched packaging from Poetry to **uv** / PEP 621 (`pyproject.toml` `[project]` + hatchling build backend); removed `setup.py`. Install with `uv pip install -e ".[plotting]"`.
+- Switched packaging from Poetry to **uv** / PEP 621 (`pyproject.toml` `[project]` + hatchling build backend); removed `setup.py`. Install with `uv pip install -e .` (matplotlib is a core dependency since 2026-07).
 - Renamed the import package `rayleigh_calibration` → **`calibration`** (it does both Rayleigh and cloud calibration). Method subpackages are now `rayleigh/` and `cloud/` (the latter was `cloud_calibration/`; its module is `cloud/calibration.py`). The distribution and CLI command are now `eprofile-calibration`. Public imports become `from calibration import …`.
 
 ### 2026 — repository reorganization
@@ -233,7 +238,7 @@ E-PROFILE aerosol-processing recommendation, applied to the OmB diagnostic (`cal
 ### 2026 
 
 - **WV correction** added (`water_vapor.py`): spectral two-way T²_wv from CAMS + HITRAN LUT; mandatory for 910 nm (flag −4 on missing CAMS, no fallback). Effect: Payerne CL61 Feb-28 C_L +20 %.
-- **Six molecular methods** (`molecular_methods.py`): `main`/`improved`/`optimal`/`calipso`/`earlinet`/`bellini`; selectable via `molecular_method` in options.json.
+- **Molecular methods** (`molecular_methods.py`): `eprof_v1.1`/`eprof_v1.2`/`eprof_v0.25`/`eprof_v2` (default)/`eprof_v2p`/`earlinet`/`bellini` (legacy aliases main/improved/matlab/optimal accepted); selectable via `molecular_method` in options.json.
 - **E-PROF versioning**: `main`→v1.1, `improved`→v1.2, `optimal`→v2; historical baseline `eprof_v10` (pre-sign-error) tracked in `METHODS_DISPLAY` for paper comparison.
 - **Cloud calibration port** (`cloud/calibration.py`): bit-for-bit vs MATLAB O'Connor; reads E-PROFILE L2 and Cloudnet CL61 RAW; full WV correction included.
 - **Fog exclusion**: `vertical_visibility` threaded through all readers; flagged profiles excluded from Rayleigh + cloud calibration.
