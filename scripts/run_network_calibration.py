@@ -120,6 +120,19 @@ ITYPE = {
 RAYLEIGH_TYPES = {"CL61", "CHM15k", "Mini-MPL"}
 CLOUD_TYPES = {"CL31", "CL51", "CL61"}
 
+
+def _gate_methods(itype, methods, no_cal=False):
+    """The single gate deciding which calibration methods run for an instrument type.
+
+    Rayleigh (molecular) is valid ONLY for RAYLEIGH_TYPES (Mini-MPL / CHM15k / CL61);
+    cloud (liquid-cloud) ONLY for CLOUD_TYPES (CL31 / CL51 / CL61). This guarantees the
+    weak 910 nm CL31/CL51 are never Rayleigh-calibrated, and CHM15k / Mini-MPL never
+    cloud-calibrated, regardless of what --methods asks for. Returns (do_rayleigh, do_cloud).
+    Locked by tests/test_method_gating.py."""
+    do_ray = (not no_cal) and "rayleigh" in methods and itype in RAYLEIGH_TYPES
+    do_cld = (not no_cal) and "cloud" in methods and itype in CLOUD_TYPES
+    return do_ray, do_cld
+
 # Operational L2 archive (for the OmB operational-constant overlay) and the
 # authoritative Kalman method per instrument type for the OmB/sensitivity C_L
 # (Rayleigh where the molecular return is usable; cloud for the weak 910 nm
@@ -1146,8 +1159,7 @@ def _process_stream(payload):
     # CHUNK so the buffer is shared by classify -> Rayleigh -> cloud before it is dropped;
     # a 1-day window (the daily run) is a single chunk = today's [D-1, D] pair read once.
     reader = _make_chunk_reader(s, start, end)
-    do_ray = (not no_cal) and "rayleigh" in methods and s["type"] in RAYLEIGH_TYPES
-    do_cld = (not no_cal) and "cloud" in methods and s["type"] in CLOUD_TYPES
+    do_ray, do_cld = _gate_methods(s["type"], methods, no_cal)
     for cs, ce in _chunks(start, end, CHUNK_DAYS):
         # Cloudnet classification FIRST (when requested): it writes the per-day curtain NetCDFs
         # that the Rayleigh screen (flag -11) then reads for the night (D-1's curtain comes from
