@@ -77,7 +77,8 @@ CHANNELS = [
     dict(ident="C", itype="CL61",   calib="cloud",    label="CL61 (C)",   color="#2ca02c"),
     # The CL61 carries a Rayleigh calibration as well as the cloud one; it is a separate retrieval
     # of the same constant, and the only CL61 channel a molecular-gate change can move.
-    dict(ident="C", itype="CL61",   calib="rayleigh", label="CL61 (C, Rayleigh)", color="#17becf"),
+    dict(ident="C", itype="CL61",   calib="rayleigh", label="CL61 (C, Rayleigh)", color="#17becf",
+         chan="Cr"),
 ]
 IREF = 0                                    # CHM15k is the 1064 nm reference everywhere
 
@@ -457,7 +458,8 @@ def main():
     t0, t1 = common_window(npz)
     print(f"common window: {t0} .. {t1}", flush=True)
 
-    calib = CAL.main()                                   # (re)build the v2 Kalman series
+    cal_all = CAL.main()                                 # {'v2.0': {...}, 'v2.2': {...}}
+    calib, calib22 = cal_all['v2.0'], cal_all['v2.2']
     l2c = l2_applied_constants(npz, t0, t1)
 
     workers = min(len(COMBOS), max(1, (os.cpu_count() or 8) - 2), 6)
@@ -482,8 +484,8 @@ def main():
                   cams=os.environ.get("ALC_VAL_CAMS_04", "")),
         alt_agl=alt_agl,
         channels=[dict(label=c["label"], itype=c["itype"], ident=c["ident"], color=c["color"],
-                       calib=c["calib"]) for c in CHANNELS],
-        iref=IREF, months=months, combos=combos, calib=calib, l2_applied=l2c,
+                       calib=c["calib"], chan=c.get("chan", c["ident"])) for c in CHANNELS],
+        iref=IREF, months=months, combos=combos, calib=calib, calib22=calib22, l2_applied=l2c,
         hist_edges=[round(float(x), 3) for x in HIST_EDGES],
     )
     (OUT / "data.json").write_text(json.dumps(payload), encoding="utf-8")

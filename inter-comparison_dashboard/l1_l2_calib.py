@@ -257,7 +257,7 @@ def main():
     if any_v22:
         (OUT_V22 / "points.json").write_text(json.dumps(out22), encoding="utf-8")
         print(f"-> {OUT_V22}")
-    return out
+    return {"v2.0": out, "v2.2": out22 if any_v22 else {}}
 
 
 if __name__ == "__main__":

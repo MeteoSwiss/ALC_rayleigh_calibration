@@ -197,9 +197,11 @@ function l1l2Traces() {
 /* ---------- calibration coefficient time series (station-page style) ---------- */
 const METHOD_COLOR = { 'Rayleigh':'#1f77b4', 'Liquid clouds':'#2ca02c' };
 
-function calibFigure(ident) {
-  const c = D.calib[ident];
+function calibFigure(ident, chan) {
+  chan = chan || ident;
+  const c = D.calib[chan];
   if (!c) return null;
+  const c22 = (D.calib22 || {})[chan];
   const traces = [];
   const op = D.l2_applied[ident];
   if (op) traces.push({ x:op.date, y:op.value, mode:'lines', name:'Applied in L2',
@@ -214,6 +216,17 @@ function calibFigure(ident) {
     traces.push({ x:k.date, y:k.value, mode:'lines', name:'v2.0 Kalman estimate',
       line:{color:'#d62728', width:2},
       hovertemplate:'%{x|%Y-%m-%d}<br>Kalman = %{y:.3e}<extra></extra>' });
+  }
+  /* v2.2 alongside, only where it differs -- the cloud-calibrated channels are the SAME object
+     under both variants, so drawing them twice would just be a duplicate line. */
+  if (c22 && c22.kalman && c22.key === c.key && c22.created !== c.created) {
+    const k2 = c22.kalman;
+    if (k2.date.length) traces.push({ x:k2.date, y:k2.value, mode:'lines',
+      name:'v2.2 Kalman estimate', line:{color:'#2f9e44', width:2},
+      hovertemplate:'%{x|%Y-%m-%d}<br>v2.2 Kalman = %{y:.3e}<extra></extra>' });
+    traces.push({ x:c22.points.map(p => p.date), y:c22.points.map(p => p.value), mode:'markers',
+      name:'v2.2 — Rayleigh', marker:{ size:5, color:'#2f9e44', opacity:0.55, symbol:'triangle-up' },
+      hovertemplate:'%{x|%Y-%m-%d}<br>v2.2 C_L = %{y:.3e}<extra></extra>' });
   }
   const byM = {};
   c.points.forEach(p => (byM[p.method] = byM[p.method] || []).push(p));
@@ -285,8 +298,8 @@ function draw() {
   Plotly.react('d_l1l2', l1l2Traces(), ll, PCFG);
   statsTable();
   CH.forEach(c => {
-    const f = calibFigure(c.ident);
-    if (f) Plotly.react('cal_' + c.ident, f.traces, f.lay, PCFG);
+    const f = calibFigure(c.ident, c.chan || c.ident);
+    if (f) Plotly.react('cal_' + (c.chan || c.ident), f.traces, f.lay, PCFG);
   });
 }
 
@@ -339,7 +352,7 @@ def html(data):
     m = data["meta"]
     ch = data["channels"]
     cal_divs = "\n".join(
-        f'<div class="card" style="margin-bottom:12px"><div id="cal_{c["ident"]}"></div></div>'
+        f'<div class="card" style="margin-bottom:12px"><div id="cal_{c.get("chan", c["ident"])}"></div></div>'
         for c in ch)
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
