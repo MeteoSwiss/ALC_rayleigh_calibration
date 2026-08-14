@@ -15,6 +15,7 @@ Run:  python rayleigh_availability/analyze_baselines.py
 from __future__ import annotations
 import csv
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -31,6 +32,16 @@ SENS = DATA / "sens"
 MANIFEST = json.loads((REPO / "rayleigh_availability" / "scope_availability.json").read_text())
 METHODS = ("eprof_v1.1", "eprof_v2")
 FIG = REPO / "rayleigh_availability" / "figs"
+# The candidate is overlaid on the Phase-0 figure: the claim is that v2's loss is NOISE-driven, so
+# the fix has to be shown against the same axis -- one that only worked on quiet instruments would
+# not be a fix. Absent (Phase 0 run before any candidate) -> the overlay is simply skipped.
+CAND = DATA / "candidates"
+CAND_CFG = os.environ.get("RA_CAND", "N2.5")
+
+
+def load_cand(cfg, label):
+    p = CAND / f"cand_{cfg}_{label}.json"
+    return json.loads(p.read_text()) if p.exists() else None
 
 
 def load(method, label):
@@ -146,12 +157,22 @@ def main():
         m2 = 100.0 * n2 / a2["n_clear"]
         gain[key] = a1["availability_pct"] - a2["availability_pct"]     # what v2 gives up vs v1.1
         noi[key] = noise[key]
+        # v2.2 for comparison: the whole point of the figure is that v2's loss is noise-driven, so
+        # the candidate has to be shown on the SAME axis -- a fix that only worked on quiet
+        # instruments would be no fix at all.
+        cn = load_cand(CAND_CFG, i["label"])
+        an = IND.availability(cn) if cn else None
+        nn = (100.0 * sum(1 for v in cn.values() if v[0] == -2.0) / an["n_clear"]
+              if cn and an["n_clear"] else np.nan)
         rows.append((noise[key], m2, a2["availability_pct"], a1["availability_pct"],
-                     i["site"][:18], i["split"]))
+                     i["site"][:18], i["split"],
+                     an["availability_pct"] if an else np.nan, nn))
     rows.sort()
-    print(f"  {'site':20s} {'split':8s} {'noise':>7s} {'v2 -2%':>7s} {'v2 av%':>7s} {'v1.1 av%':>9s}")
-    for nz, m2, av2, av1, site, split in rows:
-        print(f"  {site:20s} {split:8s} {nz:7.3f} {m2:7.1f} {av2:7.1f} {av1:9.1f}")
+    print(f"  {'site':20s} {'split':8s} {'noise':>7s} {'v2 -2%':>7s} {'v2 av%':>7s} {'v1.1 av%':>9s}"
+          f" {'v2.2 av%':>9s} {'v2.2 -2%':>9s}")
+    for nz, m2, av2, av1, site, split, avn, mn in rows:
+        print(f"  {site:20s} {split:8s} {nz:7.3f} {m2:7.1f} {av2:7.1f} {av1:9.1f} "
+              f"{avn:9.1f} {mn:9.1f}")
     # gain[key] = v1.1 - v2 availability, so -gain = v2's ADVANTAGE over v1.1. The hypothesis
     # predicts that advantage shrinks (and reverses) as the instrument gets noisier => rho < 0.
     reg = IND.noise_regression({k: -v for k, v in gain.items()}, noi)
@@ -185,8 +206,15 @@ def _figure(rows):
     m2 = np.array([r[1] for r in rows])
     av2 = np.array([r[2] for r in rows])
     av1 = np.array([r[3] for r in rows])
-    fig, ax = plt.subplots(1, 2, figsize=(13, 4.6))
-    ax[0].semilogx(nz, m2, "o", color="#c92a2a")
+    avn = np.array([r[6] for r in rows])
+    mn = np.array([r[7] for r in rows])
+    fig, ax = plt.subplots(1, 2, figsize=(13.5, 4.8))
+    ax[0].semilogx(nz, m2, "o", color="#c92a2a", label="v2 (C8)")
+    if np.any(np.isfinite(mn)):
+        ax[0].semilogx(nz, mn, "^", color="#2f9e44", label=f"v2.2 ({CAND_CFG})")
+        for a, b, c in zip(nz, m2, mn):                       # the drop, per stream
+            if np.isfinite(c):
+                ax[0].plot([a, a], [b, c], "-", color="#aaa", lw=0.7, zorder=0)
     for r in rows:
         if r[1] > 40 or r[0] > 0.08:
             ax[0].annotate(r[4], (r[0], r[1]), fontsize=7, xytext=(3, 3),
@@ -194,9 +222,15 @@ def _figure(rows):
     ax[0].set_xlabel(r"measured night noise $\sigma_{night}$(3 km)  [Mm$^{-1}$sr$^{-1}$]")
     ax[0].set_ylabel("flag -2 rate  [% of clear nights]")
     ax[0].set_title("Rejections track instrument noise, not atmosphere")
+    ax[0].legend(fontsize=8)
     ax[0].grid(alpha=0.3, which="both")
     ax[1].semilogx(nz, av2, "o", label="v2 (C8)", color="#1f77b4")
     ax[1].semilogx(nz, av1, "s", label="v1.1", color="#888", alpha=0.7)
+    if np.any(np.isfinite(avn)):
+        ax[1].semilogx(nz, avn, "^", label=f"v2.2 ({CAND_CFG})", color="#2f9e44")
+        for a, b, c in zip(nz, av2, avn):
+            if np.isfinite(c):
+                ax[1].plot([a, a], [b, c], "-", color="#aaa", lw=0.7, zorder=0)
     ax[1].set_xlabel(r"measured night noise $\sigma_{night}$(3 km)  [Mm$^{-1}$sr$^{-1}$]")
     ax[1].set_ylabel("availability  [% of clear nights]")
     ax[1].set_title("Availability vs noise, both methods")

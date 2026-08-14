@@ -1,6 +1,6 @@
 # CHM15k Rayleigh calibration — availability study
 
-*Branch `rayleigh-availability`, generated 2026-08-14 17:04. Candidate: **`eprof_v2.2` / N2.5**. Every number below is recomputed from the run outputs by `rayleigh_availability/make_report.py`.*
+*Branch `rayleigh-availability`, generated 2026-08-14 17:06. Candidate: **`eprof_v2.2` / N2.5**. Every number below is recomputed from the run outputs by `rayleigh_availability/make_report.py`.*
 
 ## 1. The gates were measuring instrument age, not atmosphere
 
@@ -12,6 +12,8 @@ v2 rejects CHM15k nights with flag -2 ("no molecular window passed the validity 
 |---|---|
 | Network, 141 CHM15k streams: flag -2 rate vs measured night noise | Spearman **+0.75** |
 | Corpus, per-stream v2-minus-v1.1 availability vs noise | Spearman **-0.87** |
+
+The figure also carries the candidate, because that is the test the fix has to pass: a gate change that only worked on quiet instruments would be no fix at all. **v2.2 is flat across the whole noise range** (right panel, green) where v2 falls from 84 % to 3 % of clear nights, and the flag -2 collapse is largest exactly on the worst streams (left panel: Vasarosnameny 92 -> 14 %, Gottfrieding 90 -> 10 %, Payerne 77 -> 5 %). The availability deficit is no longer a function of instrument condition.
 
 v2's advantage over v1.1 reverses sign with instrument condition: **+13.2 pts** on the 9 quiet instruments (sigma < 0.06) versus **-16.3 pts** on the 7 noisy ones (sigma >= 0.10). v2 is genuinely better on healthy hardware and progressively worse as the laser ages.
 

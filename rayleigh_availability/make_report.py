@@ -125,6 +125,13 @@ def main():
     A("| Network, 141 CHM15k streams: flag -2 rate vs measured night noise | Spearman **+0.75** |")
     A("| Corpus, per-stream v2-minus-v1.1 availability vs noise | Spearman **-0.87** |")
     A("")
+    A("The figure also carries the candidate, because that is the test the fix has to pass: a gate "
+      "change that only worked on quiet instruments would be no fix at all. **v2.2 is flat across "
+      "the whole noise range** (right panel, green) where v2 falls from 84 % to 3 % of clear "
+      "nights, and the flag -2 collapse is largest exactly on the worst streams (left panel: "
+      "Vasarosnameny 92 -> 14 %, Gottfrieding 90 -> 10 %, Payerne 77 -> 5 %). The availability "
+      "deficit is no longer a function of instrument condition.")
+    A("")
     gain = {}
     for i in have:
         k = f"{i['wmo']}_{i['ident']}"
