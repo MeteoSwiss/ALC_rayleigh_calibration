@@ -1,6 +1,6 @@
 # CHM15k Rayleigh calibration — availability study
 
-*Branch `rayleigh-availability`, generated 2026-08-14 16:36. Candidate: **`eprof_v2.2` / N2.5**. Every number below is recomputed from the run outputs by `rayleigh_availability/make_report.py`.*
+*Branch `rayleigh-availability`, generated 2026-08-14 16:59. Candidate: **`eprof_v2.2` / N2.5**. Every number below is recomputed from the run outputs by `rayleigh_availability/make_report.py`.*
 
 ## 1. The gates were measuring instrument age, not atmosphere
 
@@ -133,13 +133,23 @@ The plan's Phase 3 assumed steady elevated aerosol layers were forcing the fit h
 
 *(measured by `rayleigh_availability/cl61_crossmask.py`, which also repeats the test with the co-located CL61 as the screening instrument.)*
 
-| Payerne nights | contaminated fraction of the night, 2-4 km |
-|---|---|
-| recovered by v2.2 | **0.0 %** (p90 2 %) |
-| kept by v2 | 0.0 % |
-| still rejected under v2.2 | 3.0 % (p90 10 %) |
+| nights | own classifier, 2-4 km | co-located CL61, 2-4 km |
+|---|---|---|
+| Payerne, kept by v2 | 0.0 % | 0.0 % |
+| Payerne, recovered by v2.2 | **0.0 %** | **0.2 %** |
+| Payerne, still rejected | 0.1 % | 9.6 % |
+| Lindenberg, kept by v2 | 0.0 % | 0.0 % |
+| Lindenberg, recovered by v2.2 | **0.0 %** | **2.8 %** |
+| Lindenberg, still rejected | 0.0 % | 7.9 % |
 
-The classifier is working — it flags the nights that stay rejected — but on the recovered nights there is nothing in the relevant band for it to mask. That is consistent with §5: the aerosol on those nights is a **distributed extinction profile**, not a discrete layer a threshold-based classifier calls "aerosol". A single-channel CHM15k classifier could in principle be blind to a layer that still biases a fit, so the same test was repeated with the co-located CL61 (which has depolarisation) as the screening instrument.
+The classifier is working — it flags the nights that stay rejected — but on the recovered nights there is nothing in the relevant band for it to mask. The obvious objection is that a single-channel CHM15k classifier could be BLIND to a layer that still biases a fit, so the test was repeated with the co-located CL61, which has depolarisation, as the screening instrument. It is indeed more sensitive — it finds 8-10 % on the nights that STAY rejected, where the CHM15k's own classifier finds ~0 % — but on the RECOVERED nights it finds 0.2 % and 2.8 %. The CHM15k classifier is not blind; there is no classifiable layer there. That is exactly what §5 predicts: distributed extinction, not a layer.
+
+Run over the classified streams, the mask changes little and moves nothing it should not:
+
+| gates | valid nights without -> with mask | lost | gained | kept nights moved >1 % | flag -11 |
+|---|---|---|---|---|---|
+| operational gates | 1378 -> 1262 | 117 | 1 | 1 / 1261 | 0 |
+| noise-aware gates | 1850 -> 1756 | 98 | 4 | 0 / 1096 | 0 |
 
 The mask is implemented and tested, and is a genuine improvement to the pre-fit cleaning in general (it is unioned with the temporal MAD screen, which by construction cannot see anything that persists all night). It is simply not the lever for this problem.
 

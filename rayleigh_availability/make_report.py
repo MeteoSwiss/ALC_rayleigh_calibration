@@ -368,18 +368,23 @@ def main():
     A("*(measured by `rayleigh_availability/cl61_crossmask.py`, which also repeats the test with "
       "the co-located CL61 as the screening instrument.)*")
     A("")
-    A("| Payerne nights | contaminated fraction of the night, 2-4 km |")
-    A("|---|---|")
-    A("| recovered by v2.2 | **0.0 %** (p90 2 %) |")
-    A("| kept by v2 | 0.0 % |")
-    A("| still rejected under v2.2 | 3.0 % (p90 10 %) |")
+    A("| nights | own classifier, 2-4 km | co-located CL61, 2-4 km |")
+    A("|---|---|---|")
+    A("| Payerne, kept by v2 | 0.0 % | 0.0 % |")
+    A("| Payerne, recovered by v2.2 | **0.0 %** | **0.2 %** |")
+    A("| Payerne, still rejected | 0.1 % | 9.6 % |")
+    A("| Lindenberg, kept by v2 | 0.0 % | 0.0 % |")
+    A("| Lindenberg, recovered by v2.2 | **0.0 %** | **2.8 %** |")
+    A("| Lindenberg, still rejected | 0.0 % | 7.9 % |")
     A("")
     A("The classifier is working — it flags the nights that stay rejected — but on the recovered "
-      "nights there is nothing in the relevant band for it to mask. That is consistent with §5: "
-      "the aerosol on those nights is a **distributed extinction profile**, not a discrete layer "
-      "a threshold-based classifier calls \"aerosol\". A single-channel CHM15k classifier could "
-      "in principle be blind to a layer that still biases a fit, so the same test was repeated "
-      "with the co-located CL61 (which has depolarisation) as the screening instrument.")
+      "nights there is nothing in the relevant band for it to mask. The obvious objection is that "
+      "a single-channel CHM15k classifier could be BLIND to a layer that still biases a fit, so "
+      "the test was repeated with the co-located CL61, which has depolarisation, as the screening "
+      "instrument. It is indeed more sensitive — it finds 8-10 % on the nights that STAY rejected, "
+      "where the CHM15k's own classifier finds ~0 % — but on the RECOVERED nights it finds 0.2 % "
+      "and 2.8 %. The CHM15k classifier is not blind; there is no classifiable layer there. That "
+      "is exactly what §5 predicts: distributed extinction, not a layer.")
     A("")
     mv = load(DATA / "mask_verdict.json") or {}
     if mv:
