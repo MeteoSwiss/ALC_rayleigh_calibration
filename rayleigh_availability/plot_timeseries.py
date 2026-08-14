@@ -100,7 +100,13 @@ def panel(ax, ref, new, title, grad=None):
                     lw=1.6, label="v2 Kalman", zorder=5)
     ax.set_title(title, fontsize=10)
     ax.grid(alpha=0.3)
-    ax.set_yscale("log")
+    # Linear y: a log axis compresses exactly the differences these panels exist to show.
+    # The range is set from the RETAINED nights so a few low outliers cannot squash the series.
+    if kept:
+        v = np.array(sorted(kept.values()), float)
+        lo, hi = np.percentile(v, [2, 98])
+        pad = 0.6 * (hi - lo) if hi > lo else 0.3 * hi
+        ax.set_ylim(max(0.0, lo - pad), hi + pad)
     if grad is not None and np.isfinite(grad):
         ax.text(0.015, 0.05, f"dC$_L$/dz = {grad:+.1f} %/km", transform=ax.transAxes,
                 fontsize=8, color="#444",

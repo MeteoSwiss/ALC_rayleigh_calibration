@@ -37,8 +37,11 @@ sys.path.insert(0, str(REPO))
 
 from calibration import calibrate_rayleigh, CalibrationOptions, InstrumentInfo, DataLevel  # noqa: E402
 from calibration.config import InstrumentType  # noqa: E402
+from calibration.io.classification import (  # noqa: E402
+    classification_files_for_night, read_classification_curtain)
 
 MANIFEST = json.loads((REPO / "rayleigh_availability" / "scope_availability.json").read_text())
+CLASSIF = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/rayleigh_availability/classification")
 OUT = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/rayleigh_availability/candidates")
 OUT.mkdir(parents=True, exist_ok=True)
 L1_ROOT = Path("D:/E-PROFILE_L1_2026")
@@ -59,12 +62,22 @@ CONFIGS = {
     "N2.5_rawref": dict(max_chi2red=2.5, ref_chi2max=-1.0),
 }
 
+# Phase 3: the same gates PLUS the target-classification pre-fit cell mask (contaminated cells,
+# aerosol included, removed before the window search). Only the streams in run_classification.SUBSET
+# have a classification, so these configs are only meaningful there. "Mv2" applies the mask to the
+# CURRENT operational gates -- the mask's effect on its own, with no noise-relative gate involved.
+MASK_CONFIGS = {
+    "Mv2":   ("eprof_v2",   {}),
+    "M2.5":  ("eprof_v2.2", dict(max_chi2red=2.5)),
+}
+CONFIGS.update({k: v[1] for k, v in MASK_CONFIGS.items()})
 
-def base_options(params):
+
+def base_options(cfg, params):
     o = CalibrationOptions.from_json(REPO / "options.json")
     o.folder_root = L1_ROOT
     o.data_level = DataLevel.L1
-    o.molecular_method = "eprof_v2.2"
+    o.molecular_method = MASK_CONFIGS[cfg][0] if cfg in MASK_CONFIGS else "eprof_v2.2"
     o.molecular_params = dict(params)
     o.plot_main = False
     o.plot_all = False
@@ -103,15 +116,28 @@ def run_one(args):
         if not [d for d in dates_of(inst) if d not in rec]:
             return (cfg, inst["label"], len(rec),
                     sum(1 for v in rec.values() if v[0] in (1.0, 0.5)), True)
-    o = base_options(CONFIGS[cfg])
+    o = base_options(cfg, CONFIGS[cfg])
     info = InstrumentInfo(site_name=inst["label"], wmo_id=inst["wmo"], identifier=inst["ident"],
                           instrument_type=InstrumentType(inst["type"]),
                           latitude=inst["lat"], longitude=inst["lon"], altitude=inst["alt"])
+    masked = cfg in MASK_CONFIGS
+    if masked and not (CLASSIF / inst["label"]).is_dir():
+        return cfg, inst["label"], 0, 0, True          # not in the classified subset -> nothing to do
     for ds in dates_of(inst):
         if ds in rec:
             continue
         try:
-            r = calibrate_rayleigh(ds, info, o)
+            cls = None
+            if masked:
+                # BOTH days or nothing: a night covered by d alone would be masked over its morning
+                # half only, and the record would look complete while the evening went unscreened.
+                files = classification_files_for_night(CLASSIF, inst["label"], inst["wmo"], ds)
+                if len(files) < 2:
+                    continue
+                cls = read_classification_curtain(files)
+                if cls is None:
+                    continue                            # no classification -> not a comparable night
+            r = calibrate_rayleigh(ds, info, o, classification=cls)
         except Exception as exc:
             rec[ds] = [-99, None, None, None, None, f"EXC {type(exc).__name__}: {exc}"[:120]]
             continue
@@ -126,11 +152,14 @@ def run_one(args):
 
 def main():
     only_cfg = [a for a in sys.argv[1:] if a in CONFIGS]
+    pats = [a.upper() for a in sys.argv[1:] if a not in CONFIGS and not a.startswith("--")]
     cfgs = only_cfg or list(CONFIGS)
-    jobs = [(c, i) for c in cfgs for i in MANIFEST]
+    insts = [i for i in MANIFEST
+             if not pats or any(p in i["label"].upper() for p in pats)]
+    jobs = [(c, i) for c in cfgs for i in insts]
     workers = int(os.environ.get("RA_WORKERS", str(max(1, (os.cpu_count() or 8) - 2))))
     print(f"candidates: {len(jobs)} (config x stream) jobs over {workers} workers; "
-          f"configs {cfgs}", flush=True)
+          f"configs {cfgs}; {len(insts)} streams", flush=True)
     done = 0
     with ProcessPoolExecutor(max_workers=workers) as ex:
         futs = {ex.submit(run_one, j): j for j in jobs}

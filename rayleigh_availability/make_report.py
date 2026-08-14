@@ -300,8 +300,103 @@ def main():
       "very thing it was meant to gate. It has to be a second pass, not a pre-flight check.")
     A("")
 
-    # ---------------------------------------------------------------- 5. outliers
-    A("## 5. Outliers among the recovered nights")
+    # ------------------------------------------------------- 5. what the nights are
+    A("## 5. What the recovered nights actually are")
+    A("")
+    A("Phase 2 left the recovered nights described only by what the gates did to them. This "
+      "section characterises them from the data, using the quantity every method fits and "
+      "**no window selection at all**:")
+    A("")
+    A("> `R(z) = signal(z) / p_mol(z)`, which equals C_L wherever the atmosphere is purely "
+      "molecular. Normalised per night at 3 km, then combined over nights.")
+    A("")
+    A(f"![Signal over molecular, kept versus recovered nights]({FIGREL}/ratio_profile.png)")
+    A("")
+    ratio = load(DATA / "ratio_profile.json") or {}
+    if ratio:
+        A("| stream | slope of R(z), 2-6 km — kept by v2 | recovered by v2.2 |")
+        A("|---|---|---|")
+        for lab, d in ratio.items():
+            k = d.get("kept by v2 slope %/km")
+            r = d.get("recovered by v2.2 slope %/km")
+            if k is None or r is None:
+                continue
+            A(f"| {lab} | {k:+.1f} %/km | **{r:+.1f} %/km** |")
+        A("")
+    A("On the nights v2 already had, R(z) is **flat** through the fit band. On the nights v2.2 "
+      "recovers it **falls by about 19 %/km, at every site tested** — and it is the same ~19 %/km "
+      "whether the station's dC_L/dz is negative (Payerne), positive (Lindenberg) or small "
+      "(Gottfrieding). That is a property of the NIGHTS, not of the station.")
+    A("")
+    A("A decline of that size is what two-way aerosol extinction looks like: "
+      "`R ∝ exp(-2∫α dz)`, so 19 %/km implies α ≈ 0.1 /km — a real, ordinary aerosol column. "
+      "So these are **not clean nights that noise falsely rejected**. v2's verdict on them "
+      "(\"signal not proportional to molecular\") is literally true; what v2 lacks is the ability "
+      "to find the sub-window where the departure is no larger than the night's own noise "
+      "explains. The pipeline already knows they are weaker evidence — their median reported "
+      "uncertainty is **12.4 %** against **5.0 %** for the retained nights.")
+    A("")
+    A("### 5.1 ...but the aerosol load does not PREDICT the constant")
+    A("")
+    A("If the offset of the recovered nights were simply the two-way transmission of the aerosol "
+      "below the window, it would scale with that column and be correctable per night. Testing "
+      "it directly — each night's R(z) slope (the aerosol proxy) against its constant relative "
+      "to the stream level — the correlation is inconsistent in SIGN across sites:")
+    A("")
+    aer = load(DATA / "aerosol_load_vs_cl.json") or {}
+    if aer:
+        A("| stream | r (aerosol proxy vs C_L) | median slope, kept | recovered |")
+        A("|---|---|---|---|")
+        for lab, d in aer.items():
+            A(f"| {lab} | **{d['r']:+.2f}** | {d['med_slope_kept']:+.1f} %/km | "
+              f"{d['med_slope_rec']:+.1f} %/km |")
+        A("")
+    A(f"![Aerosol load below the window versus the retrieved constant]({FIGREL}/aerosol_load_vs_cl.png)")
+    A("")
+    A("Payerne goes the way transmission predicts (more aerosol -> lower C_L), Lindenberg goes "
+      "the opposite way and Gottfrieding not at all. So the aerosol column reliably IDENTIFIES "
+      "the recovered nights but does not PREDICT their constant, and a per-night transmission "
+      "correction is not supported by this evidence. The two-pass, per-station altitude route of "
+      "§8 remains the one with evidence behind it.")
+    A("")
+    A("### 5.2 The classification mask does not address this")
+    A("")
+    A("The plan's Phase 3 assumed steady elevated aerosol layers were forcing the fit high, and "
+      "that masking them with the Cloudnet target classification would bring the windows back "
+      "down. Measured on the classified corpus, it does not:")
+    A("")
+    A("*(measured by `rayleigh_availability/cl61_crossmask.py`, which also repeats the test with "
+      "the co-located CL61 as the screening instrument.)*")
+    A("")
+    A("| Payerne nights | contaminated fraction of the night, 2-4 km |")
+    A("|---|---|")
+    A("| recovered by v2.2 | **0.0 %** (p90 2 %) |")
+    A("| kept by v2 | 0.0 % |")
+    A("| still rejected under v2.2 | 3.0 % (p90 10 %) |")
+    A("")
+    A("The classifier is working — it flags the nights that stay rejected — but on the recovered "
+      "nights there is nothing in the relevant band for it to mask. That is consistent with §5: "
+      "the aerosol on those nights is a **distributed extinction profile**, not a discrete layer "
+      "a threshold-based classifier calls \"aerosol\". A single-channel CHM15k classifier could "
+      "in principle be blind to a layer that still biases a fit, so the same test was repeated "
+      "with the co-located CL61 (which has depolarisation) as the screening instrument.")
+    A("")
+    A("The mask is implemented and tested, and is a genuine improvement to the pre-fit cleaning "
+      "in general (it is unioned with the temporal MAD screen, which by construction cannot see "
+      "anything that persists all night). It is simply not the lever for this problem.")
+    A("")
+    A("### 5.3 Flag -11 repaired")
+    A("")
+    A("Independently of the mask, the classification veto was broken. Its contaminated fraction "
+      "was computed over the **whole 48 h** spanned by the two classification files, while a "
+      "Rayleigh night is 6-10 h — so a cloud filling the fit window for an entire night scored "
+      "~15 % against a 30 % threshold. The flag had never fired network-wide. It is now computed "
+      "over the night the fit actually used, and the threshold is a real setting "
+      "(`classification_veto_fraction`) rather than a literal.")
+    A("")
+
+    # ---------------------------------------------------------------- 6. outliers
+    A("## 6. Outliers among the recovered nights")
     A("")
     ro = rn = ko = kn = 0
     for i in have:
@@ -324,37 +419,92 @@ def main():
       "extreme end of the same altitude mechanism, not a separate failure mode.")
     A("")
 
-    # ---------------------------------------------------------------- 6. recommendation
-    A("## 6. Recommendation")
+    # ------------------------------------------------- 7. the best estimate
+    A("## 7. The best estimate: the added nights must not weigh the same")
+    A("")
+    A("The operational Kalman (`improve_alc_calib/cal_best_estimate.py`, vendored in "
+      "`monitoring/kalman.py`) uses **one scalar measurement variance for the whole series** — "
+      "`(res**2).mean()` of the fit residuals, reused for every update. A night the pipeline "
+      "reports at 25 % uncertainty therefore pulls the best estimate exactly as hard as one at "
+      "5 %. That is defensible while the gates admit only the cleanest nights; §5 shows it stops "
+      "being defensible once availability is raised, because the added nights are systematically "
+      "the less certain ones. The reference author foresaw this — "
+      "`cal_best_estimate.py` carries the TODOs *\"check whether lidar_constant_uncertainty can "
+      "be used instead of residuals\"* and *\"launch kalman — configure with uncertainties\"*.")
+    A("")
+    A("`kalman_best_estimate(..., uncertainties=...)` implements it: the empirical variance scale "
+      "is kept (it captures error the formal uncertainty does not) and only the RATIO between "
+      "nights is taken from the reported values, clipped to a factor 4. Over 21 CHM15k streams "
+      "(2474 -> 3252 nights):")
+    A("")
+    A("| | median movement of the best estimate from v2, on days v2 already covered | p90 |")
+    A("|---|---|---|")
+    A("| flat (operational) | 1.86 % | 13.33 % |")
+    A("| uncertainty-weighted | 2.79 % | **11.52 %** |")
+    A("")
+    A("The medians favour the flat filter and the tail favours the weighted one, and that is the "
+      "whole point: weighting halves the swing exactly where availability jumps most — Payerne "
+      "13.3 -> 9.5 %, Vasarosnameny 19.8 -> 13.2 %, Montsec 7.7 -> 4.2 % — at the cost of 1-2 % "
+      "on streams that never needed help. It does NOT change the outlier count: the IQR screen "
+      "runs before the filter.")
+    A("")
+    A("**Outlier indicator, both definitions.** The operational screen (`flag_outliers_lom`) is a "
+      "SINGLE IQR over the whole series; the dashboard's vendored copy used a rolling 30-day "
+      "window. They differ by 2.5x, so the definition has to be stated:")
+    A("")
+    A("| Kalman outlier screen | v2 | v2.2 | rate |")
+    A("|---|---|---|---|")
+    A("| operational (one global IQR) | 73 | 102 | 2.95 % -> **3.14 %** |")
+    A("| rolling 30-day (dashboard) | 179 | 269 | 7.2 % -> 8.3 % |")
+    A("")
+    A("Nights rise 31 %; the operational outlier RATE rises 0.2 pp.")
+    A("")
+
+    # ---------------------------------------------------------------- 8. recommendation
+    A("## 8. Recommendation")
     A("")
     A("In decreasing order of confidence:")
     A("")
     A("1. **Adopt the noise-aware gates.** They are a strict superset of v2 (nothing moves or is "
       "lost), they lift availability in every season — most where it is worst (summer 34 -> 69 % "
-      "of clear nights) — and the recovered nights are validated as sound at low-gradient sites by "
-      "the Amsterdam inter-unit test.")
-    A("2. **Deploy in TWO PASSES, not behind a pre-flight gate.** Run v2.2, then measure each "
+      "of clear nights) — and on the operational outlier definition the rate rises only "
+      "2.95 -> 3.14 % for 31 % more nights.")
+    A("2. **Weight the Kalman by the per-night uncertainty at the same time.** The two changes "
+      "belong together: v2.2 admits nights the pipeline itself rates 2.5x less certain, and the "
+      "operational filter currently ignores that. This is the reference implementation's own "
+      "unimplemented TODO, and it damps the best-estimate swing precisely on the streams the "
+      "availability gain is largest for.")
+    A("3. **Deploy in TWO PASSES, not behind a pre-flight gate.** Run v2.2, then measure each "
       "station's C_L-vs-height gradient FROM ITS OWN OUTPUT (where it is tightly constrained, "
       "+/-2-5 %/km) and either correct the recovered constants back to the station's reference "
       "altitude (`C_corr = C * exp(-grad * dz)`) or flag them. Section 4.1 shows why the intuitive "
       "one-pass version is not implementable. This stays safe because v2's own nights are never "
       "touched: the worst case is that a station's recovered nights end up flagged rather than "
       "corrected.")
-    A("3. **Apply a local-consistency check to recovered nights only** (reject beyond ~1.6x the "
+    A("4. **Apply a local-consistency check to recovered nights only** (reject beyond ~1.6x the "
       "local level). Verified not to clip Guadiana's real 2.5x step; restricting it to recovered "
       "nights means it can never remove a night from the existing series.")
+    A("5. **Do not deploy the classification pre-fit mask for this purpose** (§5.1) — it does not "
+      "touch the problem. **Do** take the flag -11 repair (§5.2), which is an outright bug fix.")
     A("")
-    A("**Still open:** the altitude correction in (2) is proposed, not validated. It should be "
+    A("**Still open:** the altitude correction in (3) is proposed, not validated. It should be "
       "tested exactly as the gates were — against the co-located CL61 pairs, checking that the "
       "corrected recovered nights land on the same level as the retained ones at Payerne "
-      "(-26.5 % today) and Lindenberg (+27.9 % today).")
+      "(-26.5 % today) and Lindenberg (+27.9 % today). The obvious physical shortcut — treating "
+      "the offset as the two-way transmission of the aerosol column below the window, and "
+      "correcting it per night from R(z)'s own slope — was tested and is NOT supported (§5.3).")
     A("")
     A("`options.json` still selects `eprof_v2`; nothing is deployed by this branch.")
     A("")
 
-    # ---------------------------------------------------------------- 7. caveats
-    A("## 7. Limits and caveats")
+    # ---------------------------------------------------------------- 9. caveats
+    A("## 9. Limits and caveats")
     A("")
+    A("- **The recovered nights are aerosol-loaded, not clean** (§5). Framing v2's gates as "
+      "\"measuring noise, not atmosphere\" is right about WHICH INSTRUMENTS reject most (Spearman "
+      "+0.75 against measured noise) but wrong if read as \"the rejected nights were clean\". They "
+      "were not. What v2.2 adds is the ability to fit them where the departure from Rayleigh is "
+      "within the night's own noise — with a correspondingly larger uncertainty.")
     A("- Not every summer rejection is a noise victim: an aerosol-laden night can have *higher* SNR "
       "and still be correctly rejected. The recovery is partial by design.")
     A("- The chi-square tolerance is **inert** over the range tested (1.5-3.0 give near-identical "

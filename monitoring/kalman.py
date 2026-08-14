@@ -50,7 +50,8 @@ def kalman_update(meas, x_a, var_meas, var_a):
 
 # --- Best-estimate wrapper (normalized) -------------------------------------
 
-def kalman_best_estimate(times, values, *, return_rejected=False):
+def kalman_best_estimate(times, values, *, uncertainties=None, outlier_mode="rolling",
+                         return_rejected=False):
     """Daily Kalman best estimate of a noisy (times, values) calibration series.
 
     Mirrors run_lindenberg_cl61_cal.kalman_best_estimate: daily-median aggregation,
@@ -65,15 +66,32 @@ def kalman_best_estimate(times, values, *, return_rejected=False):
     rolling-IQR screen rejected. That count is the "did this change let outliers in?" indicator --
     a gate change that raises availability while raising this number is buying nights with noise.
     Off by default so the existing three-value callers are unaffected.
+
+    ``uncertainties`` (same length as ``values``) makes the measurement noise RELATIVE instead of
+    one scalar for the whole series. Operationally every night carries the same weight, so a night
+    the pipeline itself reports at 25 % uncertainty pulls the best estimate exactly as hard as one
+    at 5 %. That is tolerable while the gates admit only the cleanest nights; it stops being
+    tolerable as soon as availability is raised, because the added nights are systematically the
+    less certain ones. The empirical scale (day-to-day scatter) is kept -- it captures error the
+    formal uncertainty does not -- and only the RATIO between nights is taken from the reported
+    values, clipped to a factor 4 either way so one absurd uncertainty cannot dominate.
+
+    ``outlier_mode`` selects the IQR screen: "global" is the operational one (a single interquartile
+    range over the whole series), "rolling" (default, unchanged) a local window.
     """
     empty = (np.array([], dtype="datetime64[ns]"), np.array([]), np.array([]))
     if return_rejected:
         empty = empty + ([],)
     values = np.asarray(values, dtype=float)
     times = list(times)
+    unc = np.asarray(uncertainties, dtype=float) if uncertainties is not None else None
+    if unc is not None and unc.size != values.size:
+        unc = None
     good = np.isfinite(values)
     values = values[good]
     times = [t for t, g in zip(times, good) if g]
+    if unc is not None:
+        unc = unc[good]
     if values.size < 5:
         return empty
 
@@ -86,34 +104,50 @@ def kalman_best_estimate(times, values, *, return_rejected=False):
     order = np.argsort([_as_dt(t) for t in times])
     times = [_as_dt(times[i]) for i in order]
     norm = norm[order]
+    if unc is not None:
+        unc = unc[order]
 
     # --- daily-median aggregation -----------------------------------------
     day_keys = [t.date() for t in times]
     uniq_days = sorted(set(day_keys))
     daily_t = [datetime(d.year, d.month, d.day) for d in uniq_days]
     daily_v = np.array([np.median(norm[[k == d for k in day_keys]]) for d in uniq_days])
+    daily_u = (np.array([np.median(unc[[k == d for k in day_keys]]) for d in uniq_days])
+               if unc is not None else None)
     n_days = daily_v.size
     if n_days < 5:
         return empty
 
-    # --- rolling-IQR outlier flag -----------------------------------------
-    win = 30 if n_days > 100 else 10
-    half = win // 2
+    # --- IQR outlier flag --------------------------------------------------
+    # "global" reproduces the operational screen (improve_alc_calib
+    # run_cal_best_estimate_evaluation_nrt.flag_outliers_lom): ONE interquartile range over the whole
+    # series, cutoff 1.5*IQR. "rolling" is this dashboard's local variant, which tolerates a real
+    # level change (an optical-module swap, a seasonal cycle) instead of flagging a whole era; the
+    # operational code handles those separately, via the optical_module_id.
     keep = np.ones(n_days, dtype=bool)
-    for k in range(n_days):
-        lo, hi = max(0, k - half), min(n_days, k + half + 1)
-        w = daily_v[lo:hi]
-        med = np.median(w)
-        q25, q75 = np.percentile(w, [25, 75])
-        iqr = q75 - q25
-        if daily_v[k] < med - 1.5 * iqr or daily_v[k] > med + 1.5 * iqr:
-            keep[k] = False
+    if str(outlier_mode) == "global":
+        q25, q75 = np.nanpercentile(daily_v, [25, 75])
+        cut = 1.5 * (q75 - q25)
+        keep = ~((daily_v < q25 - cut) | (daily_v > q75 + cut))
+    else:
+        win = 30 if n_days > 100 else 10
+        half = win // 2
+        for k in range(n_days):
+            lo, hi = max(0, k - half), min(n_days, k + half + 1)
+            w = daily_v[lo:hi]
+            med = np.median(w)
+            q25, q75 = np.percentile(w, [25, 75])
+            iqr = q75 - q25
+            if daily_v[k] < med - 1.5 * iqr or daily_v[k] > med + 1.5 * iqr:
+                keep[k] = False
     rejected = [t.date() for t, k in zip(daily_t, keep) if not k]
     clean_t = [t for t, k in zip(daily_t, keep) if k]
     clean_v = daily_v[keep]
+    clean_u = daily_u[keep] if daily_u is not None else None
     if clean_v.size < 5:
         rejected = []                       # safety valve fired: no rejection was applied
         clean_t, clean_v = daily_t, daily_v
+        clean_u = daily_u
 
     # --- predict model + measurement-noise variance -----------------------
     predict_func, _, _ = constant(clean_t, clean_v)
@@ -124,6 +158,17 @@ def kalman_best_estimate(times, values, *, return_rejected=False):
     var_meas = float(np.mean((clean_v - roll) ** 2))
     if not np.isfinite(var_meas) or var_meas <= 0:
         var_meas = float(np.var(clean_v)) or 1.0
+
+    # Per-night measurement variance: the empirical scale times the night's own uncertainty
+    # relative to the series median. Weight-neutral by construction (the median night is
+    # unchanged), so this re-weights without also re-tuning the filter.
+    var_by_day = None
+    if clean_u is not None and np.any(np.isfinite(clean_u) & (clean_u > 0)):
+        u = np.where(np.isfinite(clean_u) & (clean_u > 0), clean_u, np.nan)
+        u_med = float(np.nanmedian(u))
+        if np.isfinite(u_med) and u_med > 0:
+            w = np.clip(np.nan_to_num(u / u_med, nan=1.0) ** 2, 0.25, 16.0)
+            var_by_day = {t.date(): var_meas * float(wi) for t, wi in zip(clean_t, w)}
 
     # --- contiguous daily grid + Kalman loop ------------------------------
     grid = [clean_t[0] + timedelta(days=k)
@@ -137,7 +182,8 @@ def kalman_best_estimate(times, values, *, return_rejected=False):
         y = obs.get(t_cur.date(), np.nan)
         x_a, var_a = kalman_predict(t_cur, t_prev, x_est, var_est, predict_func)
         if np.isfinite(y):
-            x_est, var_est = kalman_update(float(y), x_a, var_meas, var_a)
+            vm = var_by_day.get(t_cur.date(), var_meas) if var_by_day else var_meas
+            x_est, var_est = kalman_update(float(y), x_a, vm, var_a)
             t_prev = t_cur
             if not np.isfinite(x_est):
                 x_est, var_est = x_a, var_a

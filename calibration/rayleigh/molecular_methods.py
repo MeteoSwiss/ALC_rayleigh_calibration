@@ -820,13 +820,17 @@ def select_molecular_window(
     grid: Optional[WindowGrid] = None,
     signal_stack: Optional[NDArray[np.float64]] = None,
     sigma_signal: Optional[NDArray[np.float64]] = None,
+    extra_cell_mask: Optional[NDArray[np.bool_]] = None,
     **params,
 ) -> MethodWindow:
     """Detect the molecular window with the chosen ``method``.
 
     Pass a precomputed ``grid`` to evaluate several methods on one profile cheaply.
     Pass ``signal_stack`` (n_profiles × n_range) to enable the "optimal" method's
-    temporal-variability aerosol rejection. Extra keyword args override DEFAULT_PARAMS.
+    temporal-variability aerosol rejection. ``extra_cell_mask`` (same shape) is an EXTERNAL
+    contaminated-cell mask -- e.g. a target classification -- unioned with that screen, which sees
+    only cells that stand out from their own altitude over the night and is therefore blind to a
+    layer that persists through it. Extra keyword args override DEFAULT_PARAMS.
     """
     method = resolve_method(method)
     if method not in _SELECTORS:
@@ -845,6 +849,8 @@ def select_molecular_window(
             nmad=merged.get("flag_nmad", 4.0),
             min_excess=merged.get("flag_min_excess", 0.25),
         )
+        if extra_cell_mask is not None and np.shape(extra_cell_mask) == np.shape(flag):
+            flag = flag | np.asarray(extra_cell_mask, bool)
         masked = np.where(flag, np.nan, np.asarray(signal_stack, float))
         with np.errstate(invalid="ignore"):
             clean_signal = np.nanmean(masked, axis=0)

@@ -118,6 +118,7 @@ def find_optimal_molecular_window(
     signal_stack: Optional[NDArray[np.float64]] = None,
     method_params: Optional[dict] = None,
     sigma_signal: Optional[NDArray[np.float64]] = None,
+    extra_cell_mask: Optional[NDArray[np.bool_]] = None,
 ) -> RayleighFitResult:
     """
     Find the optimal molecular scattering window using grid search.
@@ -223,7 +224,7 @@ def find_optimal_molecular_window(
             method, signal, p_mol, range_alc, half_length_options_m,
             range_start_m=range_start_m, range_end_m=range_end_m,
             increment_bins=increment_bins, signal_stack=signal_stack,
-            sigma_signal=sigma_signal,
+            sigma_signal=sigma_signal, extra_cell_mask=extra_cell_mask,
             **(method_params or {}),
         )
         # "gated" = the method rejects on rel_error itself (its DEFAULT_PARAMS carry a

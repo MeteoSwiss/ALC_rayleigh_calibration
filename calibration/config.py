@@ -207,6 +207,12 @@ class CalibrationOptions:
     # getattr with a hard-coded 2.0 and existed in neither the dataclass nor options.json.
     aerosol_qc_enabled: bool = True
     aerosol_scattering_threshold: float = 2.0
+    # Target-classification screening, active only when a classification curtain is passed to
+    # calibrate_rayleigh (no classification -> both are no-ops). The mask excludes contaminated
+    # CELLS before the window search; the threshold is the fraction of the SELECTED window's height
+    # classified cloud/ice over the night above which the night is rejected with flag -11.
+    use_classification_mask: bool = True
+    classification_veto_fraction: float = 0.30
 
     # Plotting flags. plot_main -> the single compact Rayleigh diagnostics dashboard only.
     # plot_all -> additionally emit the simple per-step RCS plots (time-series + annotated).
@@ -310,6 +316,8 @@ class CalibrationOptions:
             molecular_params=dict(data.get("molecular_params", {}) or {}),
             aerosol_qc_enabled=bool(data.get("aerosol_qc_enabled", 1)),
             aerosol_scattering_threshold=float(data.get("aerosol_scattering_threshold", 2.0)),
+            use_classification_mask=bool(data.get("use_classification_mask", 1)),
+            classification_veto_fraction=float(data.get("classification_veto_fraction", 0.30)),
             plot_main=bool(data.get("plot_main", 0)),
             plot_all=bool(data.get("plot_all", 0)),
             z_low_cloud=float(data.get("z_low_cloud", 4000)),
