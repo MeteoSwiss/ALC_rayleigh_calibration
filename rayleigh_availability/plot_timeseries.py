@@ -78,7 +78,7 @@ def dt(d):
     return datetime.strptime(d, "%Y%m%d")
 
 
-def panel(ax, ref, new, title, grad=None):
+def panel(ax, ref, new, title, grad=None, is_baseline=False):
     """One configuration for one station."""
     kept = {d: new[d][1] for d in new
             if IND.is_valid(new[d][0]) and d in ref and IND.is_valid(ref[d][0]) and new[d][1]}
@@ -98,6 +98,21 @@ def panel(ax, ref, new, title, grad=None):
         if len(kt):
             ax.plot(kt.astype("datetime64[s]").astype(datetime), ks, "-", color="#d62728",
                     lw=1.6, label="v2 Kalman", zorder=5)
+    # ...and the candidate's own best estimate on top of it. Two versions, because the choice
+    # matters: the operational filter gives every night the same weight, so the recovered nights
+    # (median uncertainty 12.4 % against 5.0 %) pull it as hard as the retained ones; the dashed
+    # line weights each night by its own reported uncertainty instead.
+    if not is_baseline:
+        nd = sorted(d for d in new if IND.is_valid(new[d][0]) and new[d][1])
+        if len(nd) >= 5:
+            nv = [new[d][1] for d in nd]
+            nu = [new[d][2] if new[d][2] else np.nan for d in nd]
+            for unc, style, lab in ((None, "-", "v2.2 Kalman"),
+                                    (nu, "--", "v2.2 Kalman, unc-weighted")):
+                kt, ks, _ = kalman_best_estimate([dt(d) for d in nd], nv, uncertainties=unc)
+                if len(kt):
+                    ax.plot(kt.astype("datetime64[s]").astype(datetime), ks, style,
+                            color="#2f9e44", lw=1.6, label=lab, zorder=6)
     ax.set_title(title, fontsize=10)
     ax.grid(alpha=0.3)
     # Linear y: a log axis compresses exactly the differences these panels exist to show.
@@ -133,7 +148,7 @@ def main():
         axes = np.atleast_1d(axes)
 
         # first panel = the v2 baseline alone (what operations produces today)
-        panel(axes[0], ref, ref, f"v2 (C8) — baseline")
+        panel(axes[0], ref, ref, "v2 (C8) — baseline", is_baseline=True)
         for k, cfg in enumerate(cfgs, start=1):
             new = load(CAND / f"cand_{cfg}_{inst['label']}.json")
             if not new:

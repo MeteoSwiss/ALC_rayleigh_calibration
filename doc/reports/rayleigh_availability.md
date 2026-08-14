@@ -1,6 +1,6 @@
 # CHM15k Rayleigh calibration — availability study
 
-*Branch `rayleigh-availability`, generated 2026-08-14 17:06. Candidate: **`eprof_v2.2` / N2.5**. Every number below is recomputed from the run outputs by `rayleigh_availability/make_report.py`.*
+*Branch `rayleigh-availability`, generated 2026-08-14 17:07. Candidate: **`eprof_v2.2` / N2.5**. Every number below is recomputed from the run outputs by `rayleigh_availability/make_report.py`.*
 
 ## 1. The gates were measuring instrument age, not atmosphere
 
