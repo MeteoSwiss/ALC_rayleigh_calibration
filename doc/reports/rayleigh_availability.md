@@ -1,12 +1,12 @@
 # CHM15k Rayleigh calibration — availability study
 
-*Branch `rayleigh-availability`, generated 2026-08-14 16:59. Candidate: **`eprof_v2.2` / N2.5**. Every number below is recomputed from the run outputs by `rayleigh_availability/make_report.py`.*
+*Branch `rayleigh-availability`, generated 2026-08-14 17:02. Candidate: **`eprof_v2.2` / N2.5**. Every number below is recomputed from the run outputs by `rayleigh_availability/make_report.py`.*
 
 ## 1. The gates were measuring instrument age, not atmosphere
 
 v2 rejects CHM15k nights with flag -2 ("no molecular window passed the validity gates") in proportion to how NOISY the instrument is. Four of v2's gates — `residual_pct`, `min_r2`, `ratio_std`, `temporal_cv` — are functions of SNR compared against FIXED thresholds (v1.1 has no such gates at all), so an ageing laser fails them on perfectly clean nights.
 
-![Rejection rate and availability versus measured night noise](../../rayleigh_availability/figs/phase0_noise_vs_availability.png)
+![Rejection rate and availability versus measured night noise](figs_rayleigh_availability/phase0_noise_vs_availability.png)
 
 | evidence | statistic |
 |---|---|
@@ -52,11 +52,11 @@ Split by the station's C_L-vs-window-height gradient (section 4 explains why thi
 | low-gradient (<= 8 %/km) | 12 | 49.2 -> **86.2 %** | 9.5 -> 11.2 % | 6.12 -> 6.46 |
 | high-gradient (> 8 %/km) | 9 | 79.6 -> **87.8 %** | 9.2 -> 9.2 % | 10.53 -> 9.33 |
 
-![Calibration time series, Gottfrieding](../../rayleigh_availability/figs/timeseries_GOTTFRIEDING.png)
+![Calibration time series, Gottfrieding](figs_rayleigh_availability/timeseries_GOTTFRIEDING.png)
 
 Gottfrieding is the case that matters most: v2 produced **19 nights in 18 months**, so the operational Kalman was effectively interpolating a constant across month-long gaps. v2.2 adds ~115 nights, the recovered points sit ON the existing Kalman line, and sigma_SD *improves* by 40 %.
 
-![Calibration time series, Amsterdam](../../rayleigh_availability/figs/timeseries_AMSTERDAM.png)
+![Calibration time series, Amsterdam](figs_rayleigh_availability/timeseries_AMSTERDAM.png)
 
 Amsterdam (already densely sampled, near-zero gradient): the recovered nights are indistinguishable from the retained ones.
 
@@ -64,7 +64,7 @@ Amsterdam (already densely sampled, near-zero gradient): the recovered nights ar
 
 Internal guards cannot see a *coherent* bias: sigma_SD, continuity and the Kalman-outlier count are all difference statistics, so a set of nights that is uniformly 25 % low but internally consistent passes all of them. Only a co-located independent instrument can detect it — which is why this section, not section 3, is the decisive one.
 
-![Amsterdam inter-unit consistency](../../rayleigh_availability/figs/phase2_amsterdam_interunit.png)
+![Amsterdam inter-unit consistency](figs_rayleigh_availability/phase2_amsterdam_interunit.png)
 
 **Amsterdam quad** (four co-located CHM15k — same night, same atmosphere, no wavelength or water-vapour correction involved): the pair-ratio scatter on recovered nights is **1.13x** that of the nights v2 already had (three pairs better, three worse), with no systematic offset. At a near-zero-gradient site the recovery is sound.
 
@@ -75,7 +75,7 @@ Internal guards cannot see a *coherent* bias: sigma_SD, continuity and the Kalma
 | Payerne | **-14.3 %/km** | -20.6 % | **-26.5 %** |
 | Lindenberg | **+7.8 %/km** | +14.9 % | **+27.9 %** |
 
-![Calibration time series, Payerne](../../rayleigh_availability/figs/timeseries_PAYERNE.png)
+![Calibration time series, Payerne](figs_rayleigh_availability/timeseries_PAYERNE.png)
 
 Payerne shows the failure directly: v2.2 fills an 8-month hole in which the Kalman had been holding a flat constant, but the recovered points sit visibly below the retained ones. **A true lidar constant cannot depend on the fit altitude**, so a non-zero gradient is an unmodelled profile defect (background subtraction, overlap residual, or aerosol the molecular model does not capture) — and on nights v2 rejects, the only eligible windows are higher up, so any recovery inherits gradient x height-shift.
 
@@ -101,7 +101,7 @@ Phase 2 left the recovered nights described only by what the gates did to them. 
 
 > `R(z) = signal(z) / p_mol(z)`, which equals C_L wherever the atmosphere is purely molecular. Normalised per night at 3 km, then combined over nights.
 
-![Signal over molecular, kept versus recovered nights](../../rayleigh_availability/figs/ratio_profile.png)
+![Signal over molecular, kept versus recovered nights](figs_rayleigh_availability/ratio_profile.png)
 
 | stream | slope of R(z), 2-6 km — kept by v2 | recovered by v2.2 |
 |---|---|---|
@@ -123,7 +123,7 @@ If the offset of the recovered nights were simply the two-way transmission of th
 | LINDENBERG_CHM15k_0 | **-0.26** | -3.8 %/km | -29.9 %/km |
 | GOTTFRIEDING_CHM15k_0 | **-0.01** | +2.0 %/km | -13.9 %/km |
 
-![Aerosol load below the window versus the retrieved constant](../../rayleigh_availability/figs/aerosol_load_vs_cl.png)
+![Aerosol load below the window versus the retrieved constant](figs_rayleigh_availability/aerosol_load_vs_cl.png)
 
 Payerne goes the way transmission predicts (more aerosol -> lower C_L), Lindenberg goes the opposite way and Gottfrieding not at all. So the aerosol column reliably IDENTIFIES the recovered nights but does not PREDICT their constant, and a per-night transmission correction is not supported by this evidence. The two-pass, per-station altitude route of §8 remains the one with evidence behind it.
 
@@ -166,7 +166,7 @@ Measured against the **local** level (median of valid nights within +/-30 days),
 | kept by v2 | 19 / 2090 | **0.9 %** |
 | recovered by v2.2 | 60 / 1152 | **5.2 %** |
 
-![Calibration time series, Guadiana](../../rayleigh_availability/figs/timeseries_GUADIANA.png)
+![Calibration time series, Guadiana](figs_rayleigh_availability/timeseries_GUADIANA.png)
 
 The recovered nights carry a materially higher local-outlier rate. The tail is **one-sided (low)**, its windows sit high, and it concentrates in the noisiest stations — i.e. it is the extreme end of the same altitude mechanism, not a separate failure mode.
 

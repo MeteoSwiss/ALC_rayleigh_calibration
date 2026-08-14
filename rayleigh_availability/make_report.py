@@ -9,6 +9,7 @@ Out:  doc/reports/rayleigh_availability.md
 """
 from __future__ import annotations
 import csv
+import shutil
 import json
 import sys
 from datetime import datetime
@@ -27,7 +28,11 @@ BASE, CAND, SENS = DATA / "baselines", DATA / "candidates", DATA / "sens"
 ARCHIVE = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/old/fullcal_l1_2026")
 MANIFEST = json.loads((REPO / "rayleigh_availability" / "scope_availability.json").read_text())
 OUT = REPO / "doc" / "reports" / "rayleigh_availability.md"
-FIGREL = "../../rayleigh_availability/figs"
+# Figures are COPIED next to the report (the convention every other doc/reports file follows).
+# A "../../" path resolves fine on disk but markdown viewers refuse to load images from outside the
+# document's own directory, so the report rendered without any figures at all.
+FIGSRC = REPO / "rayleigh_availability" / "figs"
+FIGREL = "figs_rayleigh_availability"
 REF = "eprof_v2"
 GRAD_MAX = 8.0
 WIN, LO, HI = 30, 0.6, 1.67
@@ -537,6 +542,10 @@ def main():
     A("")
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
+    figdir = OUT.parent / FIGREL
+    figdir.mkdir(parents=True, exist_ok=True)
+    for src in sorted(FIGSRC.glob("*.png")):
+        shutil.copy2(src, figdir / src.name)
     OUT.write_text("\n".join(L), encoding="utf-8")
     print(f"-> {OUT}  ({len(L)} lines)")
 
