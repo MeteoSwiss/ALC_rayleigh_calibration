@@ -145,11 +145,12 @@ def main():
             ax.xaxis.set_major_formatter(mdates.DateFormatter("%b\n%Y"))
             ax.legend(fontsize=7.5, loc="upper left")
         axes[0].set_ylabel(r"$C_L$")
-        fig.suptitle(f"{inst['site']} ({inst['wmo']}_{inst['ident']}) — "
-                     f"Rayleigh calibration constant per configuration "
-                     f"[{inst['split']}, noise "
-                     f"{'high' if inst.get('v2_minus2_pct_clear', 0) > 50 else 'moderate'}]",
-                     fontsize=12, fontweight="bold")
+        # Keep the title inside the axes width: with two panels the long form was clipped at both
+        # ends, hiding the station name itself.
+        fig.suptitle(f"{inst['site'][:22]} ({inst['ident']}) — Rayleigh $C_L$ per configuration "
+                     f"[{inst['split']}, "
+                     f"{'noisy' if inst.get('v2_minus2_pct_clear', 0) > 50 else 'moderate'}]",
+                     fontsize=11, fontweight="bold")
         fig.tight_layout(rect=(0, 0, 1, 0.94))
         out = FIG / f"timeseries_{inst['site'].split('_')[0][:14]}.png"
         FIG.mkdir(parents=True, exist_ok=True)
