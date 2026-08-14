@@ -49,7 +49,7 @@ from .rayleigh_fit import (
     validate_calibration,
     RayleighFitResult,
 )
-from ..io.output import write_calibration_result
+from ..io.output import write_calibration_result, version_code
 from ..io.cams import ensure_cams_file
 from ..plotting import (
     plot_rcs_timeseries,
@@ -1305,6 +1305,9 @@ def calibrate_rayleigh(
         time_end=time_end,
         wavelength_nm=info.instrument_type.wavelength_nm,
         housekeeping=housekeeping,
+        # tag the row with the molecular method that actually produced it, so a series spanning an
+        # algorithm upgrade stays interpretable
+        version=version_code(getattr(options, "molecular_method", "eprof_v2")),
     )
 
     logger.info(f"Results written to {output_path}")

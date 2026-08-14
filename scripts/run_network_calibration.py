@@ -88,7 +88,8 @@ from calibration.io.classification import (  # noqa: E402
 from calibration.io.data_loader import build_file_paths  # noqa: E402
 from calibration.io.instrument_day import load_instrument_day  # noqa: E402
 from calibration.flags import cloud_flag, flag_label, dominant_cloud_reject_flag  # noqa: E402
-from calibration.io.output import write_calibration_result, strip_calibration_method  # noqa: E402
+from calibration.io.output import (  # noqa: E402
+    VERSION_CODES, write_calibration_result, strip_calibration_method)  # noqa: E402
 from calibration.plotting import plot_cloud_diagnostics_compact  # noqa: E402
 from monitoring.kalman import kalman_best_estimate  # noqa: E402  (self-contained leaf)
 from monitoring import periods as periods_mod  # noqa: E402  (period set: auto years + active/frozen)
@@ -411,6 +412,7 @@ def _do_cloud(s, start, end, shared=None):
                     time_end=_epoch_days(d) + 1.0,
                     wavelength_nm=info.instrument_type.wavelength_nm,
                     housekeeping=_HK_NAN, method=1,
+                    version=VERSION_CODES["cloud_oconnor"],
                 )
             # Diagnostic image for successes AND informative rejections (a cloud was present but a
             # filter rejected it: flags -20..-26). Genuine clear sky (-1) / no data (0) get none --
