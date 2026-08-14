@@ -197,6 +197,17 @@ class CalibrationOptions:
     screen_profile_outliers: bool = True
     profile_outlier_nmad: float = 4.0
 
+    # Per-method gate overrides for the pluggable molecular selectors (eprof_v2 and later).
+    # These methods ignore min_window_start_m / min_window_r2 / max_window_rel_error above -- those
+    # are read only by the in-line eprof_v1.2 path -- so this dict is the ONLY way to tune their
+    # gates from configuration. Empty = each method's registered DEFAULT_PARAMS.
+    molecular_params: dict = field(default_factory=dict)
+    # Flag -9 ("another layer with lower signal"): reject when the chosen window's slope exceeds
+    # the 10th percentile of clean-window slopes by more than this factor. Was previously read via
+    # getattr with a hard-coded 2.0 and existed in neither the dataclass nor options.json.
+    aerosol_qc_enabled: bool = True
+    aerosol_scattering_threshold: float = 2.0
+
     # Plotting flags. plot_main -> the single compact Rayleigh diagnostics dashboard only.
     # plot_all -> additionally emit the simple per-step RCS plots (time-series + annotated).
     plot_main: bool = False
@@ -296,6 +307,9 @@ class CalibrationOptions:
             l1_grid_range_m=float(data.get("l1_grid_range_m", 30.0)),
             screen_profile_outliers=bool(data.get("screen_profile_outliers", 1)),
             profile_outlier_nmad=float(data.get("profile_outlier_nmad", 4.0)),
+            molecular_params=dict(data.get("molecular_params", {}) or {}),
+            aerosol_qc_enabled=bool(data.get("aerosol_qc_enabled", 1)),
+            aerosol_scattering_threshold=float(data.get("aerosol_scattering_threshold", 2.0)),
             plot_main=bool(data.get("plot_main", 0)),
             plot_all=bool(data.get("plot_all", 0)),
             z_low_cloud=float(data.get("z_low_cloud", 4000)),

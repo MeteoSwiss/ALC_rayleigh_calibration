@@ -59,7 +59,8 @@ from scipy.stats import linregress
 
 
 # Live selectable methods, keyed by E-PROF calibration version.
-METHODS = ("eprof_v1.1", "eprof_v1.2", "eprof_v0.25", "earlinet", "eprof_v2", "eprof_v2p", "bellini")
+METHODS = ("eprof_v1.1", "eprof_v1.2", "eprof_v0.25", "earlinet", "eprof_v2", "eprof_v2p",
+           "eprof_v2.2", "bellini")
 
 # Human-readable display labels (figures, reports, tables).
 METHOD_LABELS: Dict[str, str] = {
@@ -114,6 +115,26 @@ DEFAULT_PARAMS: Dict[str, Dict[str, Any]] = {
                       max_rel_error=15.0, w_ratio=1.0, w_resid=0.5, w_snr=0.1,
                       w_npts=0.1, w_tvar=0.2, w_rel=2.0,
                       flag_nmad=4.0, flag_min_excess=0.25, objective="purity"),
+    # NOISE-AWARE variant. Same architecture and same aerosol defences as eprof_v2; the three
+    # gates that are really SNR proxies with fixed thresholds (residual_pct, min_r2, ratio_std)
+    # are replaced by their noise-relative forms, and the scattering reference is de-biased.
+    #
+    # Motivation (2026-08 availability study): across 141 CHM15k streams the flag -2 rate tracks
+    # the MEASURED night noise with Spearman +0.75 (cleanest quintile 10 % of clear nights
+    # rejected, noisiest 38 %), i.e. the gates were largely measuring instrument age. The failure
+    # is worst in summer (30-47 % of clear nights vs 8-13 % in winter) -- a regime the C8 tuning
+    # corpus (Feb-May 2026) never contained.
+    #
+    # max_chi2red = 2.5: a window is kept when its departure from the Rayleigh shape is within
+    # ~2.5x what its own photon noise explains. Held ABOVE 1 because the sigma propagation assumes
+    # white noise, while real ceilometers carry some correlated component.
+    "eprof_v2.2": dict(min_window_start_m=1500.0, min_r2=0.40, max_residual_pct=16.0,
+                       max_scattering_ratio=1.15, max_ratio_std=0.40, max_temporal_cv=0.8,
+                       max_rel_error=15.0, w_ratio=0.25, w_resid=0.20, w_snr=0.10,
+                       w_npts=0.10, w_tvar=0.35, w_rel=0.20,
+                       flag_nmad=4.0, flag_min_excess=0.25,
+                       use_noise=True, max_chi2red=2.5, ref_chi2max=3.0, ref_pct=10.0,
+                       max_ratio_std_excess=0.40, max_temporal_cv_excess=0.8),
     "bellini":  dict(min_window_start_m=3000.0, max_window_end_m=7000.0, min_width_m=600.0,
                      max_width_m=3000.0, max_rel_error=15.0, max_ecl=0.40, border_m=200.0),
 }
@@ -142,6 +163,17 @@ class WindowGrid:
     temporal_cv: NDArray[np.float64]     # temporal CV of the window-mean signal/molecular
                                          # ratio across the night (aerosol proxy: molecular
                                          # is steady, aerosol fluctuates). NaN if no stack.
+    # --- noise-aware statistics (all NaN unless sigma_signal is supplied) --------------------
+    # residual_pct, ratio_std and r2 are all functions of SNR with FIXED thresholds, so an ageing
+    # instrument fails them on perfectly clean nights. These three express the SAME quantities
+    # relative to the night's own MEASURED photon noise, which is what makes the gates adapt to
+    # the instrument instead of assuming a healthy one.
+    chi2red: NDArray[np.float64]         # forced-0 residual / expected noise, per dof.
+                                         # ~1 = the window departs from a pure Rayleigh shape
+                                         # only as much as its own noise explains.
+    ratio_std_excess: NDArray[np.float64]    # in-window ratio scatter beyond the noise floor
+    temporal_cv_excess: NDArray[np.float64]  # temporal CV beyond its per-profile noise floor
+    scattering_ratio_dbz: NDArray[np.float64]  # scattering ratio vs a noise-de-biased reference
     signal: Optional[NDArray[np.float64]] = None   # the collapsed signal (for re-fits, e.g. bellini)
     p_mol: Optional[NDArray[np.float64]] = None    # the molecular power profile
     range_alc: Optional[NDArray[np.float64]] = None  # range (m)
@@ -188,8 +220,16 @@ def compute_window_grid(
     range_end_m: float = 6000.0,
     increment_bins: int = 8,
     signal_stack: Optional[NDArray[np.float64]] = None,
+    sigma_signal: Optional[NDArray[np.float64]] = None,
+    ref_chi2max: float = 3.0,
+    ref_pct: float = 10.0,
 ) -> WindowGrid:
     """Compute every candidate window's fit and quality statistics (method-agnostic).
+
+    ``sigma_signal`` (n_range) is the measured 1-sigma photon noise of ``signal``, from
+    calibration.rayleigh.calibration (temporal first differences on the native profiles, before
+    binning). When given, the noise-relative statistics chi2red / ratio_std_excess /
+    temporal_cv_excess are filled in; without it they stay NaN and nothing changes.
 
     If ``signal_stack`` (n_profiles × n_range, the per-profile range-normalized signal)
     is given, also compute each window's temporal variability (CV over the night of the
@@ -219,6 +259,15 @@ def compute_window_grid(
     residual_pct = np.full(shape, np.nan)
     n_pts = np.zeros(shape)
     temporal_cv = np.full(shape, np.nan)
+    chi2red = np.full(shape, np.nan)
+    ratio_std_excess = np.full(shape, np.nan)
+    temporal_cv_excess = np.full(shape, np.nan)
+
+    sig_n = None
+    if sigma_signal is not None:
+        sig_n = np.asarray(sigma_signal, float)
+        if sig_n.size != np.asarray(signal, float).size:
+            sig_n = None                       # shape mismatch -> behave exactly as before
 
     # Per-(time, range) ratio for the temporal-variability metric (optimal method).
     ratio_tz = None
@@ -261,6 +310,17 @@ def compute_window_grid(
                 r2_0[i, j] = 1.0 - sse / sst if sst > 0 else np.nan
                 denom = np.mean(np.abs(a0 * x))
                 residual_pct[i, j] = (rmse0[i, j] / denom * 100.0) if denom > 0 else np.nan
+                # Reduced chi-square of the SAME forced-0 residual, against the measured noise:
+                # sum(res^2 / sigma^2) / dof. Unlike residual_pct (which normalises by the signal
+                # and so scales as 1/SNR), this is ~1 for any window whose departure from the
+                # Rayleigh shape is explained by photon noise alone -- at ANY signal level. Real
+                # aerosol curvature is a systematic departure and still gives chi2red >> 1.
+                if sig_n is not None:
+                    sw = sig_n[s:e][ok]
+                    good = np.isfinite(sw) & (sw > 0)
+                    if good.sum() >= 3 and x.size > 1:
+                        chi2red[i, j] = float(np.sum((res[good] / sw[good]) ** 2)
+                                              / max(good.sum() - 1, 1))
             # Ratio statistics (signal / molecular)
             with np.errstate(divide="ignore", invalid="ignore"):
                 ratios = y / x
@@ -269,6 +329,16 @@ def compute_window_grid(
                 med = float(np.median(ratios))
                 ratio_med[i, j] = med
                 ratio_std[i, j] = float(np.std(ratios) / abs(med)) if med != 0 else np.inf
+                # Scatter of signal/p_mol beyond what noise alone produces. The noise floor of
+                # that ratio is sigma/(p_mol*|med|); subtracting it in quadrature leaves the
+                # ATMOSPHERIC scatter, which is what the gate was always meant to measure.
+                if sig_n is not None and med != 0:
+                    sw = sig_n[s:e][ok]
+                    with np.errstate(divide="ignore", invalid="ignore"):
+                        floor = np.sqrt(np.nanmean((sw / (x * abs(med))) ** 2))
+                    if np.isfinite(floor):
+                        ratio_std_excess[i, j] = float(
+                            np.sqrt(max(ratio_std[i, j] ** 2 - floor ** 2, 0.0)))
             # Temporal variability of the window-mean ratio across the night (aerosol proxy)
             if ratio_tz is not None:
                 with np.errstate(invalid="ignore"):
@@ -278,6 +348,18 @@ def compute_window_grid(
                     mt = float(np.mean(r_t))
                     if mt != 0:
                         temporal_cv[i, j] = float(np.std(r_t) / abs(mt))
+                        # Noise floor of that CV. sigma_signal is the noise of the NIGHT MEAN, so
+                        # one profile is sqrt(n_prof) noisier; averaging the window's n_bins gates
+                        # then divides by sqrt(n_bins). Whatever CV remains above this floor is
+                        # atmospheric variability -- the aerosol signature the gate targets.
+                        if sig_n is not None:
+                            sw = sig_n[s:e][ok]
+                            with np.errstate(divide="ignore", invalid="ignore"):
+                                per_gate = np.sqrt(np.nanmean((sw / (x * abs(mt))) ** 2))
+                            floor_t = per_gate * np.sqrt(max(r_t.size, 1)) / np.sqrt(max(x.size, 1))
+                            if np.isfinite(floor_t):
+                                temporal_cv_excess[i, j] = float(
+                                    np.sqrt(max(temporal_cv[i, j] ** 2 - floor_t ** 2, 0.0)))
 
     # Free-fit slope-vs-median consistency (aerosol curvature) — production rel_error.
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -285,6 +367,16 @@ def compute_window_grid(
 
     # Scattering ratio: ratio_med normalized by the cleanest (smallest) molecular-only
     # estimate. Reference taken over well-behaved windows so noise can't set a bogus min.
+    #
+    # NOTE the structural noise bias this carries: c_min is a MINIMUM over ~136 candidate windows,
+    # and the minimum of N noisy estimates is biased LOW by an amount that GROWS with the noise.
+    # A noisier night therefore gets a smaller denominator and so a larger scattering_ratio for
+    # every window -- which is why the 1.15 gate rejects aged instruments on clean nights. The
+    # r2 >= 0.5 qualifier only partly protects (and its fallback below, over ALL positive windows,
+    # is worse). When a noise estimate is available we instead take a low PERCENTILE over windows
+    # that are individually consistent with their own noise: a rank statistic is far less
+    # noise-sensitive than a minimum, and the chi2 qualification excludes noise-driven low
+    # outliers directly. The 1.15 threshold itself is NOT relaxed -- only the statistic is unbiased.
     clean = np.isfinite(ratio_med) & (ratio_med > 0) & (slope > 0) & (r2 >= 0.5)
     if np.any(clean):
         c_min = float(np.min(ratio_med[clean]))
@@ -292,6 +384,18 @@ def compute_window_grid(
         pos = ratio_med[np.isfinite(ratio_med) & (ratio_med > 0)]
         c_min = float(np.min(pos)) if pos.size else np.nan
     scattering_ratio = ratio_med / c_min if (c_min and np.isfinite(c_min)) else np.full(shape, np.nan)
+
+    # De-biased variant, used only by the noise-aware tier. Same numerator, but the reference is a
+    # low PERCENTILE over windows individually consistent with their own noise instead of the
+    # minimum over all of them -- see the note above on the min-of-N bias.
+    scattering_ratio_dbz = np.full(shape, np.nan)
+    if sig_n is not None and np.any(np.isfinite(chi2red)):
+        qual = (np.isfinite(ratio_med) & (ratio_med > 0) & (slope > 0)
+                & np.isfinite(chi2red) & (chi2red <= float(ref_chi2max)))
+        if qual.sum() >= 5:
+            c_ref = float(np.percentile(ratio_med[qual], float(ref_pct)))
+            if np.isfinite(c_ref) and c_ref > 0:
+                scattering_ratio_dbz = ratio_med / c_ref
 
     start_m = (center_bins[:, None] - half_bins[None, :]).astype(float) * dz
     return WindowGrid(
@@ -303,6 +407,9 @@ def compute_window_grid(
         ratio_med=ratio_med, ratio_std=ratio_std, residual_pct=residual_pct,
         rel_error=rel_error, scattering_ratio=scattering_ratio, n_pts=n_pts,
         temporal_cv=temporal_cv,
+        chi2red=chi2red, ratio_std_excess=ratio_std_excess,
+        temporal_cv_excess=temporal_cv_excess,
+        scattering_ratio_dbz=scattering_ratio_dbz,
         signal=np.asarray(signal, float), p_mol=np.asarray(p_mol, float),
         range_alc=np.asarray(range_alc, float),
     )
@@ -461,7 +568,9 @@ def _select_optimal(g: WindowGrid, min_window_start_m=2000.0, min_r2=0.5,
                     max_residual_pct=12.0, max_scattering_ratio=1.1, max_ratio_std=0.30,
                     max_temporal_cv=0.5, max_rel_error=15.0, use_bg=False, w_ratio=0.25,
                     w_resid=0.20, w_snr=0.10, w_npts=0.10, w_tvar=0.35, w_rel=0.20,
-                    objective="score", **_) -> MethodWindow:
+                    objective="score", use_noise=False, max_chi2red=2.5, fallback_objective="score",
+                    max_ratio_std_excess=0.30, max_temporal_cv_excess=0.5,
+                    w_chi2=0.0, **_) -> MethodWindow:
     """Best-of: physical gates + TEMPORAL-variability aerosol rejection + composite score.
 
     Molecular scattering is steady in time; aerosol advects and fluctuates. Windows whose
@@ -471,20 +580,58 @@ def _select_optimal(g: WindowGrid, min_window_start_m=2000.0, min_r2=0.5,
     back to the single-profile composite).
     """
     have_tvar = bool(np.any(np.isfinite(g.temporal_cv)))
-    elig = (
+    # Noise-aware mode (eprof_v2.2): only when a measured noise profile actually reached the grid.
+    noisy_ok = bool(use_noise) and bool(np.any(np.isfinite(g.chi2red)))
+
+    base = (
         np.isfinite(g.r2)
         & (g.start_m >= min_window_start_m)
         & (g.slope > 0)
         & (np.abs(g.intercept) < g.slope)
-        & (g.r2 >= min_r2)
-        & (np.isfinite(g.residual_pct) & (g.residual_pct <= max_residual_pct))
-        & (np.isfinite(g.scattering_ratio) & (g.scattering_ratio <= max_scattering_ratio))
-        & (g.ratio_std <= max_ratio_std)
         & (np.isfinite(g.rel_error) & (g.rel_error <= max_rel_error))
     )
-    if have_tvar:
-        # Reject temporally variable (aerosol) windows; keep NaN-CV windows (can't judge).
-        elig = elig & (~np.isfinite(g.temporal_cv) | (g.temporal_cv <= max_temporal_cv))
+
+    def _tvar(mask, excess):
+        """Apply the temporal-variability gate (NaN-CV windows are kept: can't judge)."""
+        if not have_tvar:
+            return mask
+        if excess and np.any(np.isfinite(g.temporal_cv_excess)):
+            return mask & (~np.isfinite(g.temporal_cv_excess)
+                           | (g.temporal_cv_excess <= max_temporal_cv_excess))
+        return mask & (~np.isfinite(g.temporal_cv) | (g.temporal_cv <= max_temporal_cv))
+
+    # Tier 1 -- the STRICT v2 gates, unchanged and using the un-de-biased scattering ratio.
+    strict = (base & (g.r2 >= min_r2)
+              & (np.isfinite(g.residual_pct) & (g.residual_pct <= max_residual_pct))
+              & (g.ratio_std <= max_ratio_std)
+              & (np.isfinite(g.scattering_ratio) & (g.scattering_ratio <= max_scattering_ratio)))
+    strict = _tvar(strict, excess=False)
+
+    elig = strict
+    fallback = False
+    if noisy_ok and not np.any(strict):
+        # Tier 2 -- only reached when v2 would have rejected the night outright ("no eligible
+        # window", flag -2). The three SNR-driven gates (residual_pct, min_r2, ratio_std) are
+        # replaced by their noise-relative forms: they tighten as an instrument ages even on
+        # perfectly clean nights, whereas chi2red asks the physically meaningful question --
+        # "does this window depart from a Rayleigh shape by MORE than its own noise explains?".
+        # The aerosol defence is unchanged in kind: a real layer is a systematic departure, so it
+        # still fails chi2red, and the scattering-ratio threshold stays at max_scattering_ratio
+        # (only its reference is de-biased).
+        #
+        # Making tier 2 a FALLBACK rather than a replacement is deliberate: v2.2 is then a strict
+        # superset of v2 -- every night v2 calibrates is calibrated identically, with the same
+        # window and the same constant -- so the change can only ADD nights, never move existing
+        # ones. That is what keeps the continuity indicator at zero by construction.
+        sr = np.where(np.isfinite(g.scattering_ratio_dbz), g.scattering_ratio_dbz,
+                      g.scattering_ratio)
+        relaxed = (base
+                   & (np.isfinite(g.chi2red) & (g.chi2red <= max_chi2red))
+                   & (~np.isfinite(g.ratio_std_excess)
+                      | (g.ratio_std_excess <= max_ratio_std_excess))
+                   & (np.isfinite(sr) & (sr <= max_scattering_ratio)))
+        elig = _tvar(relaxed, excess=True)
+        fallback = True
     if use_bg and g.signal is not None and g.p_mol is not None and g.range_alc is not None:
         # Bellini-style vertical residual-autocorrelation gate (complements the temporal CV:
         # catches a smooth, STEADY aerosol layer the linear fit didn't flag). Applied only to
@@ -507,6 +654,28 @@ def _select_optimal(g: WindowGrid, min_window_start_m=2000.0, min_r2=0.5,
                 elig[i, j] = False
     if not np.any(elig):
         return _fail(g, "optimal", elig, "no eligible window")
+
+    if fallback and fallback_objective == "lowest":
+        # Keep the recovered window as LOW as the data allows (EARLINET's rule) instead of letting
+        # the composite score pick the best-looking one anywhere in 2-6 km. Rationale: the
+        # retrieved C_L is not independent of where the window sits -- across this network the
+        # median |dC_L/dz| is ~7 %/km -- so a recovery that drifts 1.5-2 km above where the station
+        # normally fits returns a constant on a different altitude scale from the nights already in
+        # the series. Fitting as low as the gates permit keeps the recovered nights comparable with
+        # the retained ones; it does NOT relax any gate.
+        # start_m varies with BOTH center and half-length, so the lowest window is the eligible
+        # CELL with the smallest start -- not the lowest center. Among cells that start within one
+        # range gate of that minimum, prefer the one most consistent with its own noise.
+        sm = np.where(elig, g.start_m, np.inf)
+        s_min = float(np.min(sm))
+        near = elig & (g.start_m <= s_min + 1.0)          # ties only, not a whole centre step
+        cand = np.where(near, g.chi2red, np.inf)
+        if not np.any(np.isfinite(cand)):
+            cand = np.where(near, -g.r2, np.inf)          # no chi2 -> best fit among the lowest
+        i, j = (int(x) for x in np.unravel_index(int(np.argmin(cand)), cand.shape))
+        return _pack(g, i, j, "optimal", elig,
+                     "noise-aware fallback (lowest eligible window)")
+
     n_norm = g.n_pts / (np.nanmax(g.n_pts) if np.nanmax(g.n_pts) > 0 else 1.0)
     tvar_pen = np.where(np.isfinite(g.temporal_cv), g.temporal_cv, 0.0) if have_tvar else 0.0
     rel_pen = np.where(np.isfinite(g.rel_error), g.rel_error, 0.0) / 100.0
@@ -634,6 +803,7 @@ _SELECTORS = {
     "earlinet": _select_earlinet,
     "eprof_v2": _select_optimal,
     "eprof_v2p": _select_optimal,
+    "eprof_v2.2": _select_optimal,
     "bellini": _select_bellini,
 }
 
@@ -649,6 +819,7 @@ def select_molecular_window(
     increment_bins: int = 8,
     grid: Optional[WindowGrid] = None,
     signal_stack: Optional[NDArray[np.float64]] = None,
+    sigma_signal: Optional[NDArray[np.float64]] = None,
     **params,
 ) -> MethodWindow:
     """Detect the molecular window with the chosen ``method``.
@@ -667,7 +838,7 @@ def select_molecular_window(
     # cells (e.g. aerosol only at the start of the night, a cloud only at the end), then fits the
     # molecular window on the time-cleaned mean profile -> it uses the clean part of an
     # otherwise-contaminated night. The other methods use the full night mean.
-    if (method in ("eprof_v2", "eprof_v2p") and signal_stack is not None
+    if (method in ("eprof_v2", "eprof_v2p", "eprof_v2.2") and signal_stack is not None
             and np.ndim(signal_stack) == 2 and np.shape(signal_stack)[0] >= 5):
         flag = flag_contaminated_cells(
             signal_stack, p_mol, range_alc,
@@ -681,6 +852,9 @@ def select_molecular_window(
             clean_signal, p_mol, range_alc, half_length_options_m,
             range_start_m=range_start_m, range_end_m=range_end_m,
             increment_bins=increment_bins, signal_stack=masked,
+            sigma_signal=sigma_signal,
+            ref_chi2max=merged.get("ref_chi2max", 3.0),
+            ref_pct=merged.get("ref_pct", 10.0),
         )
         mw = _select_optimal(g, **merged)
         mw.cell_flag = flag
@@ -692,5 +866,8 @@ def select_molecular_window(
             signal, p_mol, range_alc, half_length_options_m,
             range_start_m=range_start_m, range_end_m=range_end_m,
             increment_bins=increment_bins, signal_stack=signal_stack,
+            sigma_signal=sigma_signal,
+            ref_chi2max=merged.get("ref_chi2max", 3.0),
+            ref_pct=merged.get("ref_pct", 10.0),
         )
     return _SELECTORS[method](grid, **merged)

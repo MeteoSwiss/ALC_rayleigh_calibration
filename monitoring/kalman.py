@@ -50,7 +50,7 @@ def kalman_update(meas, x_a, var_meas, var_a):
 
 # --- Best-estimate wrapper (normalized) -------------------------------------
 
-def kalman_best_estimate(times, values):
+def kalman_best_estimate(times, values, *, return_rejected=False):
     """Daily Kalman best estimate of a noisy (times, values) calibration series.
 
     Mirrors run_lindenberg_cl61_cal.kalman_best_estimate: daily-median aggregation,
@@ -60,8 +60,15 @@ def kalman_best_estimate(times, values):
 
     Returns (grid_dates: datetime64[ns], state, std) in the ORIGINAL C_L units, or three
     empty arrays if there are too few points.
+
+    With return_rejected=True a FOURTH element is appended: the list of dates (datetime.date) the
+    rolling-IQR screen rejected. That count is the "did this change let outliers in?" indicator --
+    a gate change that raises availability while raising this number is buying nights with noise.
+    Off by default so the existing three-value callers are unaffected.
     """
     empty = (np.array([], dtype="datetime64[ns]"), np.array([]), np.array([]))
+    if return_rejected:
+        empty = empty + ([],)
     values = np.asarray(values, dtype=float)
     times = list(times)
     good = np.isfinite(values)
@@ -101,9 +108,11 @@ def kalman_best_estimate(times, values):
         iqr = q75 - q25
         if daily_v[k] < med - 1.5 * iqr or daily_v[k] > med + 1.5 * iqr:
             keep[k] = False
+    rejected = [t.date() for t, k in zip(daily_t, keep) if not k]
     clean_t = [t for t, k in zip(daily_t, keep) if k]
     clean_v = daily_v[keep]
     if clean_v.size < 5:
+        rejected = []                       # safety valve fired: no rejection was applied
         clean_t, clean_v = daily_t, daily_v
 
     # --- predict model + measurement-noise variance -----------------------
@@ -139,7 +148,8 @@ def kalman_best_estimate(times, values):
 
     # De-normalize back to original C_L units.
     grid_np = np.array([np.datetime64(t) for t in grid])
-    return grid_np, np.array(state) * scale, np.sqrt(np.array(variance)) * scale
+    out = (grid_np, np.array(state) * scale, np.sqrt(np.array(variance)) * scale)
+    return out + (rejected,) if return_rejected else out
 
 
 def _as_dt(t) -> datetime:

@@ -126,6 +126,86 @@ class _PerturbationResult:
     ext_tot: Optional[NDArray[np.float64]] = None
 
 
+def _native_noise(data):
+    """Per-range-gate photon noise sigma of the NATIVE range-normalised signal, or None.
+
+    Uses the temporal first-difference estimator (calibration.sensitivity.noise): differencing
+    consecutive profiles cancels the (slowly varying) atmosphere and leaves the instrument noise,
+    /sqrt(2) for the differencing. Pairs are only formed across contiguous profiles, so the gaps
+    left by the cloud screen do not leak structure into the estimate.
+
+    Returned on the SIGNAL scale (rcs / r^2), the same quantity the molecular window fit consumes,
+    so a chi-square built from it needs no calibration constant -- which matters because the
+    constant is precisely what the fit is solving for.
+
+    Returns dict(sigma, n_pairs, dt_s, range_alc) or None when it cannot be measured.
+    """
+    try:
+        from calibration.sensitivity.noise import first_difference_sigma
+        rng = np.asarray(data.range_alc, float)
+        rcs = np.asarray(data.rcs, float)
+        if rcs.ndim != 2 or rcs.shape[0] < 5 or rng.size != rcs.shape[1]:
+            return None
+        with np.errstate(divide="ignore", invalid="ignore"):
+            sig = rcs / (rng[None, :] ** 2)
+        t_s = np.asarray(data.hours_since_start, float) * 3600.0
+        if t_s.size != sig.shape[0]:
+            return None
+        dt = float(np.median(np.diff(np.sort(t_s))))
+        if not np.isfinite(dt) or dt <= 0:
+            return None
+        sigma, n_pairs = first_difference_sigma(sig, t_s, dt)
+        if sigma is None or not np.any(np.isfinite(sigma)):
+            return None
+        return dict(sigma=np.asarray(sigma, float), n_pairs=np.asarray(n_pairs),
+                    dt_s=dt, range_alc=rng)
+    except Exception:                      # never let a diagnostic break a calibration
+        logger.debug("native noise estimate unavailable", exc_info=True)
+        return None
+
+
+def _sigma_on_fit_grid(sigma_native, range_fit, n_profiles, options):
+    """Propagate the native per-gate sigma onto the binned fit grid and the night-mean profile.
+
+    Two reductions, both white-noise (sqrt(N)) assumptions:
+      * range binning  : each fit gate averages the native gates that fall inside it
+      * time collapse  : the night mean averages n_profiles (a median costs ~1.25x more noise)
+    The white-noise assumption is exactly what Phase 2 must verify against a sigma re-measured on
+    the binned stack; correlated components (afterpulse, background drift) would break it.
+
+    Returns the 1-sigma uncertainty of `signal` (rcs/r^2, night mean) per fit gate, or None.
+    """
+    if not sigma_native:
+        return None
+    try:
+        rf = np.asarray(range_fit, float)
+        rn = np.asarray(sigma_native["range_alc"], float)
+        sn = np.asarray(sigma_native["sigma"], float)
+        if rf.size == 0 or rn.size == 0:
+            return None
+        # native gates per fit gate (edges midway between fit-grid centres)
+        edges = np.empty(rf.size + 1)
+        edges[1:-1] = 0.5 * (rf[1:] + rf[:-1])
+        d0 = rf[1] - rf[0] if rf.size > 1 else 1.0
+        edges[0], edges[-1] = rf[0] - 0.5 * d0, rf[-1] + 0.5 * d0
+        idx = np.searchsorted(edges, rn) - 1
+        out = np.full(rf.size, np.nan)
+        for k in range(rf.size):
+            s = sn[(idx == k) & np.isfinite(sn)]
+            if s.size:
+                out[k] = np.sqrt(np.mean(s ** 2) / s.size)      # RMS then /sqrt(n_gates)
+        if not np.any(np.isfinite(out)):
+            return None
+        n = max(int(n_profiles), 1)
+        out = out / np.sqrt(n)
+        if getattr(options, "time_aggregation", "mean") == "median":
+            out = out * 1.2533                                  # median-of-normal penalty
+        return out
+    except Exception:
+        logger.debug("sigma propagation to the fit grid failed", exc_info=True)
+        return None
+
+
 def _compute_cl_for_perturbation(
     rcs_mean: NDArray[np.float64],
     range_alc: NDArray[np.float64],
@@ -417,6 +497,12 @@ def calibrate_rayleigh(
         avg_time_s = getattr(options, "l1_grid_time_s", 300.0)
         avg_range_m = getattr(options, "l1_grid_range_m", 30.0)
         logger.info("L1 native grid -> binning to the L2 grid (%.0f s x %.0f m)", avg_time_s, avg_range_m)
+    # Per-gate photon noise, measured on the NATIVE cloud-screened profiles (i.e. here, before the
+    # binning below destroys it by sqrt(N)). Consecutive-profile differencing cancels the
+    # atmosphere and leaves the instrument noise, so this is a per-night SNR measurement, not a
+    # model -- which is what lets the gates adapt to an ageing laser instead of assuming a healthy
+    # one. Cheap (~0.1 s) and gap-safe (pairs are only formed across contiguous profiles).
+    sigma_native = _native_noise(data)
     data = average_ceilometer_data(data, average_time_s=avg_time_s, average_range_m=avg_range_m)
     if avg_time_s or avg_range_m:
         logger.info("Averaged Rayleigh input to %s profiles x %s range bins",
@@ -604,11 +690,18 @@ def calibrate_rayleigh(
 
     # Optional capture hook (used by the method-comparison harness): expose the prepared
     # fit inputs so every method can be evaluated on the identical profile.
+    # Photon noise of the collapsed night profile, on the binned fit grid: the native per-gate
+    # sigma (measured before binning) reduced by the averaging actually performed. Exposed for the
+    # noise-aware gates and for the offline sweep harness, which must be able to reproduce them
+    # from fit_inputs alone.
+    sigma_signal = _sigma_on_fit_grid(sigma_native, data.range_alc, rcs_use.shape[0], options)
+
     if fit_inputs_out is not None:
         fit_inputs_out.update(
             signal=signal, p_mol=mol_props.p_mol, range_alc=data.range_alc,
             altitude=data.altitude, signal_stack=signal_stack,
             hours=np.asarray(data.hours_since_start)[keep_idx],
+            sigma_signal=sigma_signal, sigma_native=sigma_native, n_profiles=rcs_use.shape[0],
         )
 
     fit_result = find_optimal_molecular_window(
@@ -624,6 +717,8 @@ def calibrate_rayleigh(
         max_rel_error=options.max_window_rel_error,
         method=getattr(options, "molecular_method", "eprof_v2"),
         signal_stack=signal_stack,
+        method_params=getattr(options, "molecular_params", None) or None,
+        sigma_signal=sigma_signal,
     )
 
     # Update altitude values

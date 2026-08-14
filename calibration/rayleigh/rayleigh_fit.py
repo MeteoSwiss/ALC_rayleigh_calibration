@@ -69,7 +69,7 @@ class CalibrationConstantResult:
     molecular_end_idx: int
 
 
-def _result_from_method_window(mw) -> RayleighFitResult:
+def _result_from_method_window(mw, *, gated: bool = False) -> RayleighFitResult:
     """Map a molecular_methods.MethodWindow onto a RayleighFitResult (+ diagnostics)."""
     g = mw.grid
     diagnostics = None
@@ -88,7 +88,13 @@ def _result_from_method_window(mw) -> RayleighFitResult:
             range_start_m=np.nan, range_end_m=np.nan, altitude_start=0, altitude_end=0,
             relative_error=np.inf, search_diagnostics=diagnostics,
         )
-    rel = mw.rel_error if np.isfinite(mw.rel_error) else 0.0
+    # A non-finite rel_error means the proportionality of signal to molecular scattering could not
+    # be evaluated at all. Mapping that to 0.0 makes it PASS the downstream `relative_error >
+    # threshold_quality` QC (calibration.py) -- i.e. an unevaluable window is silently treated as a
+    # perfect one. For the gated methods (v2 and later, which reject on this metric) it is mapped to
+    # inf so the night is rejected instead; v1.x keeps the historical 0.0 so its baseline is
+    # untouched.
+    rel = mw.rel_error if np.isfinite(mw.rel_error) else (np.inf if gated else 0.0)
     return RayleighFitResult(
         slope=mw.slope, intercept=mw.intercept, r_squared=mw.r2, std_error=mw.std_err,
         p_value=mw.p_value, center_range_m=mw.center_m, half_length_m=mw.half_m,
@@ -110,6 +116,8 @@ def find_optimal_molecular_window(
     max_rel_error: float = 50.0,
     method: str = "eprof_v2",
     signal_stack: Optional[NDArray[np.float64]] = None,
+    method_params: Optional[dict] = None,
+    sigma_signal: Optional[NDArray[np.float64]] = None,
 ) -> RayleighFitResult:
     """
     Find the optimal molecular scattering window using grid search.
@@ -183,7 +191,8 @@ def find_optimal_molecular_window(
         implementation below), or one of "eprof_v1.1"/"eprof_v0.25"/"earlinet"/"bellini".
     """
     import warnings
-    from .molecular_methods import resolve_method, select_molecular_window, METHODS
+    from .molecular_methods import (resolve_method, select_molecular_window, METHODS,
+                                    DEFAULT_PARAMS)
     method = resolve_method(method)
     # Graceful fallback: an unrecognized molecular_method (e.g. a typo, or an options.json edited
     # against newer code while an older calibration module is still imported) warns and falls back
@@ -196,12 +205,32 @@ def find_optimal_molecular_window(
     # E-PROF v1.2 ("improved") keeps the in-line implementation below (the production path,
     # unchanged); every other version is dispatched to the pluggable selectors.
     if method != "eprof_v1.2":
+        # method_params overrides DEFAULT_PARAMS[method] gate-by-gate. Without it the selector runs
+        # purely on its registered defaults, and the legacy min_window_start_m / min_r2 /
+        # max_rel_error arguments above (which come from options.json) are silently IGNORED for
+        # every method except v1.2 -- a long-standing config trap, kept for behavioural
+        # compatibility but now warned about.
+        _legacy = dict(min_window_start_m=min_window_start_m, min_r2=min_r2,
+                       max_rel_error=max_rel_error)
+        _defaults = dict(min_window_start_m=2000.0, min_r2=0.5, max_rel_error=50.0)
+        if any(_legacy[k] != _defaults[k] for k in _legacy):
+            warnings.warn(
+                f"options.json min_window_start_m/min_window_r2/max_window_rel_error are ignored "
+                f"by molecular_method={method!r} (only 'eprof_v1.2' reads them); the method's "
+                f"registered defaults apply. Pass method_params=... to override its gates.",
+                UserWarning, stacklevel=2)
         mw = select_molecular_window(
             method, signal, p_mol, range_alc, half_length_options_m,
             range_start_m=range_start_m, range_end_m=range_end_m,
             increment_bins=increment_bins, signal_stack=signal_stack,
+            sigma_signal=sigma_signal,
+            **(method_params or {}),
         )
-        return _result_from_method_window(mw)
+        # "gated" = the method rejects on rel_error itself (its DEFAULT_PARAMS carry a
+        # max_rel_error): v2 and later, earlinet, bellini. v1.0/v1.1/v0.25 have no such gate and
+        # keep the historical NaN -> 0.0 mapping so their baselines are unchanged.
+        gated = "max_rel_error" in DEFAULT_PARAMS.get(method, {})
+        return _result_from_method_window(mw, gated=gated)
 
     dz = np.abs(range_alc[1] - range_alc[0]) if len(range_alc) > 1 else 1.0
 

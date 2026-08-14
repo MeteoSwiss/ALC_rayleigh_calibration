@@ -37,7 +37,13 @@ OUT = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/figs_paper_validation/
 OUT.mkdir(parents=True, exist_ok=True)
 HALF = tuple(range(250, 2000, 240))
 QC = 15.0
-METHODS = {"v2": "eprof_v2", "v1.1": "eprof_v1.1"}   # v2 uses the optimized C8 defaults
+# {tag: (method, param overrides)} -- the param dict lets a candidate GATE configuration be
+# evaluated network-wide, not just a registered method (mirrors run_v2_sweep.CONFIGS). Extra
+# configurations can be injected without editing this file via the RC_CONFIGS env var, e.g.
+#   RC_CONFIGS='{"v2.2":["eprof_v2",{"use_noise":true,"max_chi2red":2.5}]}'
+METHODS = {"v2": ("eprof_v2", {}), "v1.1": ("eprof_v1.1", {})}   # v2 = the optimized C8 defaults
+if os.environ.get("RC_CONFIGS"):
+    METHODS.update({k: (v[0], v[1]) for k, v in json.loads(os.environ["RC_CONFIGS"]).items()})
 
 ROOTS = {"L1": (Path("D:/E-PROFILE_L1_2026"), DataLevel.L1),
          "L2": (Path("D:/E-PROFILE_L2_2026"), DataLevel.L2_DAILY)}
@@ -64,11 +70,14 @@ def date_strs(first, last):
         d += timedelta(days=step)
 
 
-def eval_night(signal, p_mol, rng, stack):
+def eval_night(signal, p_mol, rng, stack, sigma=None):
     out = {}
-    for tag, method in METHODS.items():
+    for tag, (method, params) in METHODS.items():
         try:
-            w = select_molecular_window(method, signal, p_mol, rng, HALF, signal_stack=stack)
+            p = dict(params)
+            if sigma is not None and p.get("use_noise"):
+                p["sigma_signal"] = sigma
+            w = select_molecular_window(method, signal, p_mol, rng, HALF, signal_stack=stack, **p)
             ok = bool(w.ok and np.isfinite(w.rel_error) and w.rel_error <= QC
                       and np.isfinite(w.cl) and w.cl > 0)
             out[tag] = [ok, float(w.cl), float(w.rel_error)]
@@ -95,7 +104,8 @@ def run_one(args):
         if not fin:
             continue
         try:
-            per_night[ds] = eval_night(fin["signal"], fin["p_mol"], fin["range_alc"], fin["signal_stack"])
+            per_night[ds] = eval_night(fin["signal"], fin["p_mol"], fin["range_alc"],
+                                       fin["signal_stack"], sigma=fin.get("sigma_signal"))
         except Exception:
             continue
     (OUT / f"net_{level}_{inst['label']}.json").write_text(json.dumps(per_night), encoding="utf-8")
