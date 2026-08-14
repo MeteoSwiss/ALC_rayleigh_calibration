@@ -78,14 +78,14 @@ table.stats tbody tr:hover { background:#f6f9fc; }
 
 JS = r"""
 const CH = D.channels, ALT = D.alt_agl, IREF = D.iref, M = D.meta, MONTHS = D.months;
-const state = { wv:true, wl:'molecular', logx:false, filter:true, r0:0, r1:MONTHS.length - 1 };
+const state = { cal:'v2.0', wv:true, wl:'molecular', logx:false, filter:true, r0:0, r1:MONTHS.length - 1 };
 const PCFG = { displaylogo:false, responsive:true };
 const BASE = { template:'plotly_white', margin:{l:64,r:16,t:34,b:46}, font:{size:12}, height:470,
                hovermode:'closest', legend:{orientation:'h', y:-0.16, x:0.5, xanchor:'center',
                yanchor:'top', font:{size:11}, traceorder:'normal'} };
 const ZTOP = 4000;   /* default view; the data runs to 6 km, zoom out to see it */
 
-const key = () => 'wv' + (state.wv ? 1 : 0) + '_' + state.wl;
+const key = () => state.cal + '_wv' + (state.wv ? 1 : 0) + '_' + state.wl;
 const cur = () => D.combos[key()]['r' + state.r0 + '_' + state.r1];
 const rgba = (hex, a) => {
   const n = parseInt(hex.slice(1), 16);
@@ -311,6 +311,13 @@ function onRange(which, v) {
 
 function bind() {
   document.getElementById('wv').addEventListener('change', e => { state.wv = e.target.checked; draw(); });
+  /* Calibration variant: v2.2 changes the RAYLEIGH retrieval only, so on this page it moves the
+     CHM15k and the CL61-Rayleigh channels and leaves the cloud-calibrated ones identical. */
+  document.querySelectorAll('#calseg button').forEach(b => b.addEventListener('click', () => {
+    state.cal = b.dataset.cal;
+    document.querySelectorAll('#calseg button').forEach(x => x.classList.toggle('on', x === b));
+    draw();
+  }));
   document.getElementById('logx').addEventListener('change', e => { state.logx = e.target.checked; draw(); });
   document.getElementById('nfilt').addEventListener('change', e => { state.filter = e.target.checked; draw(); });
   document.getElementById('r0').addEventListener('change', e => onRange('r0', +e.target.value));
@@ -377,6 +384,13 @@ def html(data):
     wild CHM15k outliers (20–21 Jun, 3.4–4.1e12) that the published NetCDF drops.</div>
 
   <div class="card controls">
+    <div class="ctl-group">
+      <span class="ctl-label">Calibration</span>
+      <span class="seg" id="calseg">
+        <button data-cal="v2.0" class="on">v2.0 (operational)</button>
+        <button data-cal="v2.2">v2.2 (noise-aware gates)</button>
+      </span>
+    </div>
     <div class="ctl-group">
       <span class="ctl-label">Corrections</span>
       <label class="chk"><input type="checkbox" id="wv" checked> Water vapour</label>

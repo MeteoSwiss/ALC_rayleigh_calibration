@@ -75,15 +75,23 @@ CHANNELS = [
     dict(ident="A", itype="CHM15k", calib="rayleigh", label="CHM15k (A)", color="#1f77b4"),
     dict(ident="B", itype="CL31",   calib="cloud",    label="CL31 (B)",   color="#ff7f0e"),
     dict(ident="C", itype="CL61",   calib="cloud",    label="CL61 (C)",   color="#2ca02c"),
+    # The CL61 carries a Rayleigh calibration as well as the cloud one; it is a separate retrieval
+    # of the same constant, and the only CL61 channel a molecular-gate change can move.
+    dict(ident="C", itype="CL61",   calib="rayleigh", label="CL61 (C, Rayleigh)", color="#17becf"),
 ]
 IREF = 0                                    # CHM15k is the 1064 nm reference everywhere
 
 WL_MODES = ["none", "angstrom", "molecular"]
-COMBOS = [(wv, wl) for wv in (False, True) for wl in WL_MODES]
+# Calibration variant is a third dimension: it changes the CONSTANT the L1 panel divides by, so it
+# cannot be applied after the hourly medians are taken (median(beta/c) != median(beta)/median(c)).
+# The L2 panel is independent of it and is recomputed identically for each variant -- wasteful, but
+# it keeps one combo key for the whole payload and the pool absorbs it.
+CALIB_VARIANTS = {"v2.0": CAL.OUT, "v2.2": CAL.OUT_V22}
+COMBOS = [(cal, wv, wl) for cal in CALIB_VARIANTS for wv in (False, True) for wl in WL_MODES]
 
 
-def combo_key(wv, wl):
-    return f"wv{int(wv)}_{wl}"
+def combo_key(cal, wv, wl):
+    return f"{cal}_wv{int(wv)}_{wl}"
 
 
 def range_key(i, j):
@@ -111,20 +119,20 @@ def apply_corrections(beta, d, itype, wv, wl):
     return beta
 
 
-def process_channel(d, ch, source, wv, wl):
+def process_channel(d, ch, source, wv, wl, cal="v2.0"):
     """One channel, one source, one correction combo -> the dict grid_and_stats() consumes."""
     beta = d["beta"].copy()
     med_corr = 1.0
     if source == "L1":
         saved = IC.CALIB
         try:
-            IC.CALIB = CALIB_V2
-            cal = IC.load_calib_series(key_of(dict(wmo=WMO, ident=ch["ident"], calib=ch["calib"])), "L1")
+            IC.CALIB = CALIB_VARIANTS[cal]
+            ser = IC.load_calib_series(key_of(dict(wmo=WMO, ident=ch["ident"], calib=ch["calib"])), "L1")
         finally:
             IC.CALIB = saved
-        if cal is None:
-            raise RuntimeError(f"no v2 calibration series for {ch['label']}")
-        ck = IC.interp_calib(cal[0], cal[1], d["time"])
+        if ser is None:
+            raise RuntimeError(f"no {cal} calibration series for {ch['label']}")
+        ck = IC.interp_calib(ser[0], ser[1], d["time"])
         beta = beta / ck[:, None] * 1e6
         med_corr = float(np.nanmedian(1e6 / ck))
     beta = apply_corrections(beta, d, ch["itype"], wv, wl)
@@ -173,10 +181,11 @@ def _grid(items):
     return union, [(g["scrU"], g["l1"]["alt"]) for g in gridded]
 
 
-def build_panel(cache, source, wv, wl):
+def build_panel(cache, source, wv, wl, cal="v2.0"):
     """One source + one correction combo, regridded onto the shared display grid.
     Returns (time_sync, beta[nch] on the display grid, alt_asl)."""
-    items = [process_channel(cache[(source, ch["ident"])], ch, source, wv, wl) for ch in CHANNELS]
+    items = [process_channel(cache[(source, ch["ident"])], ch, source, wv, wl, cal)
+             for ch in CHANNELS]
     tsync, streams = _grid(items)
     alt = np.arange(0.0, ZTOP_PLOT + DZ, DZ) + STA[2]          # ASL display grid
     return tsync, [IC.regrid(b, a, alt) for b, a in streams], alt
@@ -316,11 +325,11 @@ def _stats_for(B, sel, band, z_agl):
 
 
 def _run(spec):
-    wv, wl = spec
+    cal, wv, wl = spec
     out = {}
     panels = {}
     for source in ("L1", "L2"):
-        panels[source] = build_panel(_CACHE, source, wv, wl)
+        panels[source] = build_panel(_CACHE, source, wv, wl, cal)
     # --- pair the two panels on the hours they share ------------------------------------------
     tL1, tL2 = panels["L1"][0], panels["L2"][0]
     common_t = np.intersect1d(tL1, tL2)
@@ -346,13 +355,14 @@ def _run(spec):
             sel = np.isin(hm, months[i:j + 1])
             out[range_key(i, j)] = _stats_for(B, sel, band, z_agl)
     out["months"] = months
-    return combo_key(wv, wl), out
+    return combo_key(cal, wv, wl), out
 
 
 # --------------------------------------------------------------------------- cache
 CACHE_NPZ = OUT / "_streams.npz"
 _SCALAR = ("station_alt", "lat", "lon", "wavelength", "itype", "wmo", "ident")
-_STREAMS = [(s, ch["ident"]) for s in ("L1", "L2") for ch in CHANNELS]
+_STREAMS = [(s, i) for s in ("L1", "L2")
+            for i in dict.fromkeys(ch["ident"] for ch in CHANNELS)]
 
 
 def build_stream_cache(path=CACHE_NPZ):
