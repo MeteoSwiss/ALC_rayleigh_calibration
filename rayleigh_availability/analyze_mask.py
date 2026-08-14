@@ -113,6 +113,7 @@ def main():
     insts = [i for i in MANIFEST if i["label"] in SUBSET]
     have = [i for i in insts if (DATA / "classification" / i["label"]).is_dir()]
     print(f"classified streams: {len(have)}/{len(insts)}\n")
+    dump = {}
 
     for ref_cfg, new_cfg, what in PAIRS:
         rows = summarise_pair(ref_cfg, new_cfg, have)
@@ -167,7 +168,16 @@ def main():
                 state = "MISSING" if v is None else ("REJECTED" if not IND.is_valid(v[0])
                                                      else f"ADMITTED C_L={v[1]:.3g}")
                 print(f"  canary {lab} {date}: {state}  [{why}]")
+        dump[f"{ref_cfg}->{new_cfg}"] = dict(
+            what=what, streams=len(rows), nights=sum(r["n"] for r in rows),
+            valid_ref=tot_a, valid_new=tot_b, lost=lost, gained=gained,
+            moved_kept=moved, n_kept=n_kept,
+            med_dc_kept=float(np.median(dcs)) if dcs else None,
+            flag11=n11, from_flag={str(int(k)): v for k, v in conv.items()},
+            grad_before=float(np.median(np.abs(ga[ok]))) if ok.any() else None,
+            grad_after=float(np.median(np.abs(gb[ok]))) if ok.any() else None)
         print()
+    (DATA / "mask_verdict.json").write_text(json.dumps(dump, indent=1))
 
 
 if __name__ == "__main__":

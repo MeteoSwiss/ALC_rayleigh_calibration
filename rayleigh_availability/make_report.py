@@ -381,6 +381,18 @@ def main():
       "in principle be blind to a layer that still biases a fit, so the same test was repeated "
       "with the co-located CL61 (which has depolarisation) as the screening instrument.")
     A("")
+    mv = load(DATA / "mask_verdict.json") or {}
+    if mv:
+        A("Run over the classified streams, the mask changes little and moves nothing it should "
+          "not:")
+        A("")
+        A("| gates | valid nights without -> with mask | lost | gained | kept nights moved >1 % | "
+          "flag -11 |")
+        A("|---|---|---|---|---|---|")
+        for k, d in mv.items():
+            A(f"| {d['what']} | {d['valid_ref']} -> {d['valid_new']} | {d['lost']} | "
+              f"{d['gained']} | {d['moved_kept']} / {d['n_kept']} | {d['flag11']} |")
+        A("")
     A("The mask is implemented and tested, and is a genuine improvement to the pre-fit cleaning "
       "in general (it is unioned with the temporal MAD screen, which by construction cannot see "
       "anything that persists all night). It is simply not the lever for this problem.")
