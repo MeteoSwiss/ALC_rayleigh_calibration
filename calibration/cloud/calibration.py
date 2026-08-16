@@ -209,15 +209,22 @@ def set_defaults(config: CloudCalConfig) -> CloudCalConfig:
     match the MATLAB ``defaults`` struct one-for-one), so here we only need to fill the
     instrument-dependent wavelength and FWHM, matching the MATLAB ``switch``.
     """
+    # Le couple (lambda0, FWHM) qui pilote la correction vapeur d'eau vient d'UNE seule table,
+    # `water_vapor.LASER_SPECTRUM` (mesures Qmini de Payerne, 2026-06-02) -- il etait duplique
+    # ici en dur. Cela compte : la position de raie du CL61 est en cours d'arbitrage (spec
+    # constructeur 910,55 vs mesure 910,74 ; l'absorption effective differe d'un facteur ~3
+    # entre les deux), et le jour ou elle changera il ne doit y avoir qu'un seul endroit a
+    # editer. NB : deux autres longueurs d'onde CL61 coexistent volontairement dans le code et
+    # ne doivent PAS etre alignees sur celle-ci : 910,0 nm pour le calcul moleculaire
+    # (`InstrumentType.wavelength_nm` ; effet 0,33 % sur C_L, insensible) et 910,55 nm pour la
+    # generation des tables eta de diffusion multiple (`validation/multiple_scattering_eta.py`,
+    # insensible aussi).
+    from ..water_vapor_correction.water_vapor import LASER_SPECTRUM
+
     inst = config.instrument.upper()
-    if inst == "CL31":
-        wl, fwhm = 909.7, 6.0
-    elif inst == "CL51":
-        wl, fwhm = 910.0, 3.4
-    elif inst == "CL61":
-        wl, fwhm = 910.74, 1.0
-    elif inst == "CHM15K":
-        wl, fwhm = 1064.47, 0.5
+    _canon = {k.upper(): k for k in LASER_SPECTRUM}
+    if inst in _canon:
+        wl, fwhm = LASER_SPECTRUM[_canon[inst]]
     elif inst in ("MINI-MPL", "MINIMPL", "MINI_MPL", "MPL"):
         # Mini-MPL is a 532 nm system (M. Hervo): far outside the 910 nm water-vapor
         # band, so it must NEVER get the WV correction. Giving it the correct wavelength
