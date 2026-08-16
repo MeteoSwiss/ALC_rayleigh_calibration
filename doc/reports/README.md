@@ -23,7 +23,7 @@ in the consolidated reports, whose provenance lines list exactly which notes eac
 
 ## Campaign reports — altitude independence & dark noise (2026-08)
 
-*Five linked studies (2026-08-14/16) triggered by the eprof_v2.2 availability work: "is the
+*Six linked studies (2026-08-14/16) triggered by the eprof_v2.2 availability work: "is the
 calibration constant altitude-independent, and why do cloud and Rayleigh disagree on the CL61?"
 Every headline figure in these reports passed an independent adversarial re-derivation; refuted
 claims are labelled as such inside each report.*
@@ -35,6 +35,8 @@ claims are labelled as such inside each report.*
 | [Dark campaign, saturation, AERONET, radiosondes](dark_aeronet_sonde_audit.md) | The covered-telescope campaign: CHM15k carries a constant −17 % pedestal (no proven drift); CL61 carries a range-growing baseline explaining 66 % of its within-night gradient; CL61 cloud-CBH saturation ruled out; WV exonerated within-night (sonde swap); AERONET closes the "AOD ×36" question — same column, different scale height, S = 52 sr validated; CAMS-1° PWV −26 % at Payerne (grid-point orography). |
 | [CL61 cloud-vs-Rayleigh origin](cl61_cloud_vs_rayleigh_origin.md) | The disagreement closes: dark (−10 %) + in-window aerosol (+3 %) + λ_mol (−0.3 %) inside the cloud method's own floor (S_c ± 4.3 %). η tables PROVEN correct (no static table can produce the CBH residual). New instrument findings: Payerne CL61 diode thermal regulation lost 2026-06-11; the FOV ± convention supports 0.56 mrad half-angle. |
 | [Phase-4 network validation (CSCS run, 433 streams)](phase4_network_validation.md) | v2.2 validated for deployment: availability CHM15k 86.6 %, corpus gain ×1.49, superset 99.5 %, recovered-night offset +0.37 % (time-paired). CL61 CBH residual NOT cured by native PVC + 0.4° CAMS (+9.05 ± 1.49 %/km, 11/11 streams). Payerne dark correction +24 % / +24 nights/yr confirmed on an independent run; ~3 % of CHM15k streams (5) carry a strong dark; the far-field proxy does NOT generalise (null result). |
+| [Dark from clear-sky nights — method & network scan (FR)](dark_clearsky_method.md) | Per-gate slope+intercept across nights (CAMS molecular + aerosol regressors) separates electronics from molecular EXCEPT for the molecular-shaped component (proven invisible by injection). Usable score: θ on the Payerne hood template, affine-calibrated per stream; validated at Payerne (A θ≈1, C θ_corr=0.96). Messina confirmed (θ≈+5), Montsec's FE gradient is NOT window-range dark; blind below 2 km. |
+| [dC/dCBH heterogeneity across units (cloud calibration, FR)](cbh_slope_heterogeneity.md) | Per-unit CBH slopes are REAL (CL31 τ ≈ 2.5–3.2 %/km, split-half r = 0.56): CL31 network flatness is a cancellation between genuinely positive and negative units, CL51 is shifted (+4.5) AND heterogeneous, CL61 is homogeneous at +8.3 (type effect). No measurable L1 factor explains the intra-type spread (FOV/divergence untestable; firmware confounded with country); flat-slope units are NOT better calibrated (raw \|slope\|–scatter link is mechanical). Recommendation: no network dC/dCBH correction, no η retuning (static-table ceiling +8.5 < 9.05 %/km); fix the CL61 at the source (additive range-growing baseline) and expose the per-flux slope as a QC diagnostic. |
 
 ## Conventions and current defaults (as of 2026-07-10)
 
