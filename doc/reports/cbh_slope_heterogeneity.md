@@ -24,7 +24,7 @@ deux chiffres ont été *corrigés à la baisse* sans changer les conclusions (v
 | 1 | **Aucun facteur mesurable identifié.** Les candidats optiques (FOV, divergence) sont intestables depuis L1 ; les signaux firmware/altitude/bloc-WMO du CL31 sont confondus entre eux et avec le pays ; des erreurs η réalistes plafonnent à 1–3 %/km, un ordre de grandeur sous l'étalement observé. |
 | 2 | **Compensation.** [vérifié] τ = 2,5–3,2 %/km, 41 % des unités hors bruit d'échantillonnage, reproductibilité split-half r = 0,56 : la moyenne réseau +0,9 %/km est la somme d'unités réellement positives et réellement négatives. |
 | 3 | **Non.** Le lien brut \|pente\|↔dispersion du CL31 (ρ = +0,22) est un artefact mécanique ; sur l'axe équitable (t-value) il n'y a **aucun** lien, et rien sur CL51/CL61. |
-| 4 | **Ne pas corriger dC/dCBH au niveau réseau ; ne pas retoucher η ; traiter le CL61 à la source (baseline additive).** Recommandation unique au §5.4. |
+| 4 | **Ne pas corriger dC/dCBH au niveau réseau ; ne pas retoucher η.** ⚠ La piste « CL61 = baseline additive » est RÉFUTÉE pour la pente nuage par la fermeture quantitative (−0,01 %/km induit vs +9 observé — voir la correction au §5.4) ; le mécanisme reste ouvert, piste principale : spectrale (λ₀ WV). |
 
 ---
 
@@ -361,15 +361,27 @@ identique sur toutes les unités, que η ne peut pas produire (§2.3).
   sur des sites marins, pour un coût de complexité important et sans traiter le CL61.
 
 **Recommandation (unique) :** conserver la calibration O'Connor à scalaire par flux telle quelle
-pour CL31/CL51, et traiter le résidu CL61 **à la source instrumentale** : caractériser et
-soustraire la baseline additive dépendant de la portée (voie déjà démontrée à Payerne, cohérente
-avec la correction en température de [LE26]) avant l'intégrale nuage, puis re-mesurer la pente de
-type sur `calout` — critère de succès : résidu CL61 < 3 %/km, dans l'enveloppe des deux autres
-types. En parallèle, publier la pente dC/dCBH par flux comme **diagnostic QC** sur le dashboard
+pour CL31/CL51, publier la pente dC/dCBH par flux comme **diagnostic QC** sur le dashboard
 (elle signale un biais dépendant de la scène — pas la qualité de calibration, Q3), sans jamais
-l'appliquer comme correction. D'ici la correction de baseline, considérer le C nuage CL61 comme
-porteur d'un biais de scène de ±5 % selon la CBH de la période, couvert par la comparaison croisée
-Rayleigh du rapport 07.
+l'appliquer comme correction, et considérer le C nuage CL61 comme porteur d'un biais de scène de
+±5 % selon la CBH de la période, couvert par la comparaison croisée Rayleigh du rapport 07.
+
+**⚠ CORRECTION 2026-08-16 (fermeture quantitative) — la piste « baseline additive » est
+RÉFUTÉE pour la pente NUAGE.** La version initiale de cette recommandation proposait de traiter
+le résidu CL61 en soustrayant la baseline additive avant l'intégrale nuage. Le test de fermeture
+avec la baseline **mesurée sous capot** à Payerne tranche : dans la zone du retour nuage
+(0,5–2,4 km, signal ~1e-4 sr⁻¹m⁻¹) la baseline vaut ~1e-9 → contamination ~0,001 % de
+l'intégrale, pente induite **−0,01 %/km** — incapable de produire le +9 observé (figure
+`cl61_ray_vs_cloud_altitude.png`). La baseline additive reste la cause dominante côté
+**Rayleigh** (signal faible : b/signal ~4 % à 4,5 km, 66 % du gradient intra-nuit) mais ne peut
+pas toucher le signal fort du nuage. **Le mécanisme du +9 %/km nuage CL61 reste ouvert** ; la
+piste restante la plus cohérente est **spectrale** : le laser CL61 est étroit (FWHM ~1 nm) et
+posé sur le flanc de la bande WV à 910,55 nm — une erreur/dérive de λ₀ crée une erreur de
+transmission WV *qui croît avec le trajet sous le nuage, donc avec la CBH*, et à laquelle les
+CL31/CL51 (FWHM 3,4–6 nm, moyennage multi-raies) sont bien moins sensibles — cohérent avec un
+effet de type CL61 pur et avec la régulation thermique de diode perdue observée à Payerne.
+Test discriminant proposé : recalculer les scènes nuage CL61 avec λ₀ balayé (±0,3 nm) et mesurer
+le déplacement de la pente.
 
 ---
 
