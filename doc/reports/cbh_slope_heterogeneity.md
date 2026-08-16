@@ -296,6 +296,47 @@ spectrale. Le **8 % empirique reste la base opérationnelle** en attendant.
 ![Spectre LUT autour de la raie CL61](figs_cbh_heterogeneity/lut_spectrum_910.png)
 ![Scan FWHM à λ₀ mesuré](figs_cbh_heterogeneity/wv_fwhm_scan.png)
 
+### 2.3quater HITRAN line-by-line : la « mitigation par conception » est QUANTIFIÉE
+
+*Ajouté 2026-08-16. `rayleigh_availability/hitran_cl61_lbl.py` : raies H2O HITRAN (hapi, 7
+isotopologues, 906–914 nm), profils de Voigt aux niveaux 0,49–3 km d'une atmosphère type
+Payerne, grille **0,041 pm** (200× plus fine que notre LUT), puis convolution par le gabarit
+laser. Les pourcentages ci-dessous sont calculés **à l'intérieur du même calcul LBL** (rapportés
+au modèle opérationnel actuel : λ₀ = 910,74 nm, FWHM = 1,0 nm), donc insensibles au décalage
+systématique LBL/LUT de ×1,6 constaté par ailleurs.*
+
+![HITRAN line-by-line CL61](figs_cbh_heterogeneity/hitran_cl61_lbl.png)
+
+| λ₀ | FWHM 0,01–0,10 nm (laser étroit) | FWHM 1,0 nm (notre modèle) |
+|---|---|---|
+| **910,55 nm** (nominal Vaisala) | **4,4 – 6,6 %** du modèle | 104 % |
+| **910,74 nm** (mesuré Qmini) | 31 – 32 % | 100 % (référence) |
+
+**Le compte y est.** Un laser étroit posé à **910,55 nm** ne voit que **4,4–6,6 %** de
+l'absorption que notre modèle lui applique — à comparer aux **8 %** que le signal brut exhibe sur
+les 781 scènes réelles (§2.3ter). Le panneau de gauche montre pourquoi : 910,55 tombe au fond
+d'une **vallée réelle** de ~300 pm (910,40–910,70) où σ ≈ 4e-25 cm², tandis que 910,74 est
+**sur l'épaule d'un complexe de raies fortes** (σ monte à 5e-23 juste au-dessus). Le balayage fin
+(panneau de droite) est sans ambiguïté : pour un laser étroit, la pente injectée s'effondre à
+~0 dans la vallée 910,40–910,70 et explose à +380 %/km à 910,79. La revendication constructeur
+« different wavelength and a very narrow bandwidth » est donc **littéralement vérifiable** : le
+CL61 est conçu pour cette fenêtre.
+
+**Tension avec la mesure Qmini (à arbitrer).** Notre spectromètre donne 910,74 ± 0,10 nm, soit
+0,19 nm (≈ 2σ) au-dessus du nominal. Or à 910,74 un laser étroit verrait 31 % (pas 8 %) et
+serait posé sur un **flanc de raie extrêmement instable** (facteur ~50 sur 0,3 nm) : la
+**homogénéité inter-unités** du résidu CL61 (I² = 2 %, 9–11 flux, §1.3) est incompatible avec
+une position sur ce flanc, et plaide fortement pour la vallée. Explication la plus probable :
+biais de centroïde du Qmini (échantillonnage 0,3 nm, résolution 1,5 nm, échelle vérifiée à
+760 nm puis extrapolée de 150 nm). **Une mesure haute résolution (ou le spectre constructeur)
+tranche définitivement.**
+
+**Corollaire CL31 (hypothèse testable)** : l'appendice A1 mesure un CL31 **multimode dont le pic
+vagabonde entre 909,0 et 910,1 nm** d'une acquisition à l'autre sous une enveloppe de 5–7 nm.
+Un tel spectre moyenne des dizaines de raies (d'où ses 80 % d'absorption « normale »), mais la
+répartition de puissance entre modes **diffère d'une unité à l'autre** — candidat naturel pour
+le τ ≈ 3 %/km d'hétérogénéité inter-unités CL31 resté inexpliqué au §2.4.
+
 **Actions** : (1) pour la calibration NUAGE CL61, remplacer la correction WV actuelle par une
 correction fortement réduite (voire nulle, pratique Le-O'Connor) — critère d'acceptation : pente
 CBH ré-mesurée ≈ 0 et niveau −~10 % ; (2) re-fermer le budget Rayleigh CL61 avec le nouveau
