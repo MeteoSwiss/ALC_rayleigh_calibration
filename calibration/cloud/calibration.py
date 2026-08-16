@@ -219,12 +219,13 @@ def set_defaults(config: CloudCalConfig) -> CloudCalConfig:
     # (`InstrumentType.wavelength_nm` ; effet 0,33 % sur C_L, insensible) et 910,55 nm pour la
     # generation des tables eta de diffusion multiple (`validation/multiple_scattering_eta.py`,
     # insensible aussi).
-    from ..water_vapor_correction.water_vapor import LASER_SPECTRUM
+    from ..water_vapor_correction.water_vapor import LASER_SPECTRUM, laser_spectrum_for
 
     inst = config.instrument.upper()
     _canon = {k.upper(): k for k in LASER_SPECTRUM}
     if inst in _canon:
-        wl, fwhm = LASER_SPECTRUM[_canon[inst]]
+        # via laser_spectrum_for : la surcharge ALC_WV_SPECTRUM s'applique aux DEUX methodes
+        wl, fwhm = laser_spectrum_for(_canon[inst], 910.0)
     elif inst in ("MINI-MPL", "MINIMPL", "MINI_MPL", "MPL"):
         # Mini-MPL is a 532 nm system (M. Hervo): far outside the 910 nm water-vapor
         # band, so it must NEVER get the WV correction. Giving it the correct wavelength

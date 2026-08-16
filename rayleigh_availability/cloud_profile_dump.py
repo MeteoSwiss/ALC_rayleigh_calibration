@@ -54,12 +54,18 @@ WV_LUT = REPO / "calibration" / "data" / "abs_cross_wv_910nm.nc"
 CENSUS = REPO / "validation" / "scope_l1_2026_census.json"
 SCENES_CSV = REPO / "rayleigh_availability" / "cbh_native" / "cbh_scenes.csv"
 SLOPES_CSV = REPO / "rayleigh_availability" / "cbh_native" / "per_flux_slopes.csv"
-DUMP_DIR = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/cloud_profile_dump")
+# ALC_DUMP_TAG suffixe le dossier de sortie : un dossier par configuration nuage (WV nominale,
+# sans WV, 910,55/1,0, 910,55/0,1) pour que le dashboard puisse afficher la heatmap Hopkin
+# correspondant a la configuration choisie par l'operateur.
+_TAG = os.environ.get("ALC_DUMP_TAG", "").strip()
+DUMP_DIR = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/cloud_profile_dump"
+                + (f"_{_TAG}" if _TAG else ""))
 GALLERY_DIR = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/cbh_hopkin_gallery")
 REPORT_FIG_DIR = REPO / "doc" / "reports" / "figs_cbh_heterogeneity"
 
 # The 10 units (wmo, ident) -- see the study report for the selection rationale.
 UNITS = [
+    ("0-20000-0-06610", "C"),   # CL61  Payerne  (site du dashboard)
     ("0-20000-0-03809", "A"),   # CL31  network extreme negative slope
     ("0-20000-0-07627", "A"),   # CL31  network extreme positive slope
     ("0-20000-0-02055", "A"),   # CL31  flat control (NAIMAKKA)
@@ -71,6 +77,14 @@ UNITS = [
     ("0-20000-0-03808", "C"),   # CL61  Camborne
     ("0-380-5-1", "B"),         # CL61  Aosta (alpine)
 ]
+
+# ALC_DUMP_UNITS restreint la liste (ex. aux seules unites des sites du dashboard) :
+# "<wmo>_<ident>,<wmo>_<ident>". Vide = les 10 unites de l'etude.
+_ONLY = [s.strip() for s in os.environ.get("ALC_DUMP_UNITS", "").split(",") if s.strip()]
+if _ONLY:
+    _extra = [tuple(k.rsplit("_", 1)) for k in _ONLY
+              if tuple(k.rsplit("_", 1)) not in UNITS]
+    UNITS = [u for u in UNITS if f"{u[0]}_{u[1]}" in _ONLY] + _extra
 
 # Plot domain -- SAME conventions as the per-day gallery (make_hopkin_heatmaps.py):
 # x = per-profile constant (1/C_oconnor) as % of the unit median, y = CBH km (Y axis ALWAYS).
@@ -103,8 +117,12 @@ def process_day(task):
             liquid_cloud_calibration_from_data, set_defaults, build_cloud_input_from_day)
         from calibration.io.instrument_day import load_instrument_day
 
+        # ALC_WV_DISABLE=1 -> sans correction WV ; ALC_WV_SPECTRUM -> autre (lambda0, FWHM).
+        # set_defaults lit la table partagee via laser_spectrum_for, donc la surcharge de
+        # spectre s'applique ici aussi : un meme script produit toutes les variantes nuage.
         cfg = set_defaults(CloudCalConfig(
-            nc_file=str(fp), instrument=itype, apply_wv_correction=True,
+            nc_file=str(fp), instrument=itype,
+            apply_wv_correction=(os.environ.get("ALC_WV_DISABLE") != "1"),
             apply_transmission_correction=True, aerosol_lidar_ratio=50.0,
             cams_folder=CAMS_FOLDERS, abs_cs_lookup_table=str(WV_LUT),
             cams_folder_fallback="",

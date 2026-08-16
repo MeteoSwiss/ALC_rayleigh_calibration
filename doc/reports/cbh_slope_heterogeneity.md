@@ -260,7 +260,50 @@ verdict « ne pas retoucher η ». Chiffres : `alpha_scan.json` (scratchpad de s
 > la recommandation du §5.4 tient : le C nuage CL61 porte une incertitude de scène de ±5 % selon
 > la CBH, à publier comme diagnostic QC.
 >
-> ### ⚠ AVERTISSEMENT — les §2.3ter/quater sont EN ARBITRAGE
+> ### ✔ RÉSOLUTION DOCUMENTAIRE (2026-08-16, nuit) — le spectre CL61 est établi, l'arbitrage se referme
+>
+> La réponse des auteurs au relecteur RC1 (Le & O'Connor, supplément AC1) + une recherche de
+> sources graduée referment l'essentiel :
+>
+> 1. **λ₀ = 910,55 nm est public et primaire** : le CL61 Datasheet B211780EN-H (©2026) le donne,
+>    et le User Guide public du DIAL Vaisala DA10 (M212895EN-E) liste « Laser wavelength
+>    910.55 nm and 910.99 nm » avec, en toutes lettres : « *Offline wavelength (910.6 nm) in a
+>    nearby section of the spectrum with **low water vapor absorption*** » — le 910,55 est le
+>    canal hors-raie d'un DIAL, choisi POUR le creux d'absorption. La revendication qualitative
+>    est aussi dans la datasheet courante : « *The new patented transmitter technology in CL61
+>    minimizes the effect of water vapor absorption* » (source primaire — corrige notre audit
+>    précédent qui ne l'avait trouvée nulle part).
+> 2. **La largeur : σ = 0,08 nm → FWHM = 0,188 nm** (AC1, communication personnelle Vaisala ;
+>    la conversion σ→FWHM est validée par leur valeur CL51 « ±1,44 » qui redonne exactement le
+>    3,4 nm de Wiegner 2015). Corroboration publiée : le transmetteur DA10/BB-DIAL mesuré à
+>    **0,19–0,21 nm FWHM** (Mariani et al. 2021, co-auteurs Vaisala). ⚠ Reste non public : le
+>    lien « transmetteur CL61 = transmetteur offline du DA10 » (communication personnelle).
+> 3. **Fermeture quantitative triple** : leur HITRAN (AC1) donne CL51 ≈ 10× plus d'atténuation
+>    WV que le CL61 ; notre LUT avec (910,55 ; 0,188) donne **9,3×** ; et le CL61 ne subirait
+>    que **11 %** de ce que notre modèle (910,74 ; 1,0) corrige — contre **8 %** mesurés
+>    indépendamment sur les 781 scènes nuage (§2.3ter). Trois chemins, un chiffre.
+> 4. **Contre-évidences à garder en tête** (elles bornent, elles n'annulent pas) : Filioglou
+>    et al. 2023 (co-auteurs Vakkari ET O'Connor) *appliquaient* une correction WV au CL61 et
+>    attribuaient des écarts de calibration en partie à la WV ; Looschelders 2025 concède une
+>    part de variabilité site-à-site liée à la WV ; l'argument « <5 % inter-unités » d'AC1 est
+>    mono-site donc aveugle au mode commun WV (leur argument solide est l'absence de
+>    saisonnalité multi-sites, leur Fig. 6) ; et l'analyse HITRAN d'AC1 n'a PAS été reprise
+>    dans le papier AMT publié (vérifié sur le texte final). « Facteur 10 de moins » ≠ zéro.
+> 5. **Notre erreur de modèle est donc identifiée et double** : λ₀ (910,74 mesuré au Qmini,
+>    probablement un biais de centroïde — le vrai est 910,55) et surtout le FWHM (1,0 nm au
+>    lieu de ~0,19). La calibration de référence passe à **(910,55 ; FWHM 0,188)** — runs
+>    `diag_v22_l55s008`, échelle complète visible dans le dashboard v3. La tension Rayleigh
+>    (+19 % sans WV) reste à re-fermer avec ce spectre correct (correction ~9× plus faible,
+>    ni nulle ni l'ancienne).
+> 6. **Demande à formuler à Vaisala** (formulation précise) : « the CL61 transmitter optical
+>    emission spectrum specification: centre wavelength and FWHM with production tolerance,
+>    plus its dependence on laser temperature and drive current, as measured in factory
+>    acceptance testing » — en référençant Mariani 2021/Boyd 2021 (Vaisala mesure déjà cela
+>    pour le DA10) et en demandant si le transmetteur CL61 est de la famille DAT111 offline.
+>    La dépendance en température importe : ~0,3 nm/K déplacerait 910,55 vers les raies
+>    voisines au fil des saisons — le mécanisme que notre calibration verrait.
+>
+> ### ⚠ AVERTISSEMENT HISTORIQUE — les §2.3ter/quater ci-dessous furent EN ARBITRAGE (lecture : voir la résolution ci-dessus)
 >
 > L'interprétation « le CL61 est aveugle à la vapeur d'eau », construite ci-dessous, est
 > **contredite par un test indépendant** : dans le dashboard d'inter-comparaison, l'état
