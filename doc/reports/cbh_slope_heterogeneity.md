@@ -258,12 +258,32 @@ Trois conclusions :
 3. **L'anomalie est donc côté instrument CL61, en amont de notre pipeline** : son β_att livré ne
    porte quasiment pas l'absorption WV attendue sur 0,5–2,4 km — compatible avec une
    compensation WV interne (firmware/traitement Vaisala) ou une caractéristique spectrale
-   effective très différente du modèle (mais pas à ±0,3 nm près). Tension à résoudre : côté
-   RAYLEIGH (fenêtres 2–6,5 km), le CL61 corrigé WV s'accorde à ±3 % avec le CHM15k (Payerne,
-   Lindenberg) — la correction y semble nécessaire. Une compensation interne limitée en portée
-   ou climatologique réconcilierait les deux. **Test discriminant proposé** : régresser le
-   ratio CL61/CHM15k co-localisés contre le PWV CAMS (un brut WV-aveugle donne une pente nulle) ;
-   et interroger Vaisala sur le traitement WV du CL61.
+   effective très différente du modèle (mais pas à ±0,3 nm près).
+
+**Verdict littérature/constructeur (fouille 2026-08-16, PDF locaux + web)** : AUCUN Vaisala ne
+corrige la WV en firmware (consensus CL31/CL51 : Wiegner 2015 « the signal must be corrected for
+water vapor », correction toujours côté utilisateur depuis Markowicz 2008 ; Hopkin 2019 l'applique
+lui-même, ~12 %/an de cycle sinon). Pour le **CL61**, la position constructeur (User Guide
+M212475EN-E) est une **atténuation par CONCEPTION spectrale** : « mitigated by selecting a
+different wavelength and a very narrow bandwidth » — le laser (910,55 nm, diode InGaAs chauffée)
+est posé dans un creux d'absorption avec une largeur « très étroite ». La littérature CL61
+actuelle n'applique d'ailleurs **aucune** correction WV (Le & O'Connor 2026 : la WV n'est jamais
+mentionnée dans la chaîne ; Looschelders 2025 : « Despite not correcting for water vapor… ») et
+le référé RC2 du preprint relaie la même position constructeur. Filioglou 2023 rapporte
+néanmoins une sensibilité WV résiduelle site-à-site (~15 %) — cohérente avec nos 8 % restants.
+**Notre erreur est donc identifiée : le modèle spectral CL61 (λ₀ = 910,74 nm, FWHM = 1,0 nm)
+surestime l'absorption effective ~12×** ; le suspect principal est le FWHM (1 nm n'est pas
+« very narrow » — une émission sub-nm dans un interstice de raies effondre l'absorption, ce que
+la convolution à 1 nm lisse ; c'est aussi pourquoi le balayage λ₀ seul ne trouvait rien).
+
+**Actions** : (1) pour la calibration NUAGE CL61, remplacer la correction WV actuelle par une
+correction fortement réduite (voire nulle, pratique Le-O'Connor) — critère d'acceptation : pente
+CBH ré-mesurée ≈ 0 et niveau −~10 % ; (2) re-fermer le budget Rayleigh CL61 avec le nouveau
+modèle (les accords ±3 % avec le CHM15k obtenus AVEC l'ancienne correction doivent être
+re-vérifiés — une part de l'attribution dark/WV peut se redistribuer) ; (3) demander à Vaisala
+le spectre d'émission mesuré du CL61 (λ₀, FWHM, dérive thermique) — l'action C5 existante
+devient précise ; (4) même examen pour le CL51 (brut à 45 % du modèle (910,0, 3,4) — cf. aussi
+Chen et al. 2025) ; (5) test PWV co-localisé CL61/CHM15k comme confirmation indépendante.
 
 **Aucun facteur mesurable dans L1 n'explique les différences intra-type.** Les seuls signaux
 (firmware 170/171, altitude < 100 m, blocs WMO) sont mutuellement confondus avec le pays
