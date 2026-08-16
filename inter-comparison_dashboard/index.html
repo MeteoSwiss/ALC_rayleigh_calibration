@@ -4147,8 +4147,8 @@ const SITE_ORDER = ["payerne", "amsterdam", "lindenberg"];
 const VARIANTS = {"rayleigh": ["v2.0", "v2.2", "v2.2dark", "v2.2sansWV", "v2.2_l55s008", "v2.2_l55w10", "v2.2_l55w01"], "cloud": ["cloudWV", "cloudNoWV", "cloud_l55s008", "cloud_l55w10", "cloud_l55w01"]};
 const VARIANT_LABEL = {"v2.0": "v2.0 (op\u00e9rationnel)", "v2.2": "v2.2 \u2014 WV \u03bb910,74 / FWHM 1,0 (mod\u00e8le actuel)", "v2.2dark": "v2.2 + fond soustrait (dark)", "v2.2sansWV": "v2.2 \u2014 sans correction WV", "v2.2_l55s008": "v2.2 \u2014 WV \u03bb910,55 \u03c30,08 (spectre constructeur) \u2605", "v2.2_l55w10": "v2.2 \u2014 WV \u03bb910,55 / FWHM 1,0", "v2.2_l55w01": "v2.2 \u2014 WV \u03bb910,55 / FWHM 0,1", "cloudWV": "nuage \u2014 WV \u03bb910,74 / FWHM 1,0 (mod\u00e8le actuel)", "cloudNoWV": "nuage \u2014 sans correction WV", "cloud_l55s008": "nuage \u2014 WV \u03bb910,55 \u03c30,08 (spectre constructeur) \u2605", "cloud_l55w10": "nuage \u2014 WV \u03bb910,55 / FWHM 1,0", "cloud_l55w01": "nuage \u2014 WV \u03bb910,55 / FWHM 0,1"};
 const VSHORT = {"v2.0": "v2.0", "v2.2": "v2.2 (\u03bb910,74)", "v2.2dark": "v2.2+dark", "v2.2sansWV": "v2.2 sans WV", "v2.2_l55s008": "v2.2 \u03bb910,55 \u03c30,08 \u2605", "v2.2_l55w10": "v2.2 \u03bb910,55 F1,0", "v2.2_l55w01": "v2.2 \u03bb910,55 F0,1", "cloudWV": "nuage (\u03bb910,74)", "cloudNoWV": "nuage sans WV", "cloud_l55s008": "nuage \u03bb910,55 \u03c30,08 \u2605", "cloud_l55w10": "nuage \u03bb910,55 F1,0", "cloud_l55w01": "nuage \u03bb910,55 F0,1"};
-const VARIANT_LABEL_1064 = {"v2.2": "v2.2"};
-const VARIANT_SHORT_1064 = {"v2.2": "v2.2"};
+const VLBL_BY_TYPE = {"CHM15k": {"v2.2": "v2.2"}, "CL31": {"v2.2": "v2.2 \u2014 WV \u03bb909,7 / FWHM 6,0 (mod\u00e8le actuel)", "cloudWV": "nuage \u2014 WV \u03bb909,7 / FWHM 6,0 (mod\u00e8le actuel)"}, "CL51": {"v2.2": "v2.2 \u2014 WV \u03bb910,0 / FWHM 3,4 (mod\u00e8le actuel)", "cloudWV": "nuage \u2014 WV \u03bb910,0 / FWHM 3,4 (mod\u00e8le actuel)"}};
+const VSH_BY_TYPE = {"CHM15k": {"v2.2": "v2.2"}, "CL31": {"v2.2": "v2.2 (\u03bb909,7)", "cloudWV": "nuage (\u03bb909,7)"}, "CL51": {"v2.2": "v2.2 (\u03bb910,0)", "cloudWV": "nuage (\u03bb910,0)"}};
 const METHOD_BY_TYPE = {"CHM15k": ["rayleigh"], "CL31": ["cloud"], "CL61": ["rayleigh", "cloud"]};
 const METHOD_WHY = {"CHM15k|cloud": "le CHM15k sature dans les nuages liquides \u2014 \u00e9talonnage nuage impossible", "CL31|rayleigh": "aucune nuit Rayleigh exploitable pour le CL31 (SNR insuffisant dans la fen\u00eatre mol\u00e9culaire) \u2014 \u00e9talonnage nuage uniquement"};
 const VARIANTS_FOR = {"CHM15k": {"rayleigh": ["v2.0", "v2.2", "v2.2dark"]}, "CL31": {"cloud": ["cloudWV", "cloudNoWV"]}, "CL61": {"rayleigh": ["v2.0", "v2.2", "v2.2dark", "v2.2sansWV", "v2.2_l55s008", "v2.2_l55w10", "v2.2_l55w01"], "cloud": ["cloudWV", "cloudNoWV", "cloud_l55s008", "cloud_l55w10", "cloud_l55w01"]}};
@@ -4443,11 +4443,10 @@ function diffLayout(title, xr) {
   lay.shapes = [zoneShape()];
   return lay;
 }
-/* Variant naming is wavelength-aware: the laser-line wording only means something at 910 nm. */
-const vLabel = (itype, v) => (itype === 'CHM15k' && VARIANT_LABEL_1064[v])
-  || VARIANT_LABEL[v] || v;
-const vShort = (itype, v) => (itype === 'CHM15k' && VARIANT_SHORT_1064[v])
-  || VSHORT[v] || v;
+/* Variant naming is wavelength-aware: each type shows ITS OWN water-vapour model
+   (CL31 909.7/6.0, CL51 910.0/3.4, CL61 910.74/1.0), and 1064 nm none at all. */
+const vLabel = (itype, v) => (VLBL_BY_TYPE[itype] || {})[v] || VARIANT_LABEL[v] || v;
+const vShort = (itype, v) => (VSH_BY_TYPE[itype] || {})[v] || VSHORT[v] || v;
 function chLabel(k) {
   const P = S(), inst = P.instruments[k], s = state.pick[inst.ident];
   return inst.label + ' — ' + (s.method === 'rayleigh' ? 'Ray.' : 'nuage') + ' / ' +

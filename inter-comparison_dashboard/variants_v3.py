@@ -68,8 +68,25 @@ VARIANT_LABEL = {
 }
 # A 1064 nm instrument has no water-vapour term at all, so naming its variants after a laser line
 # would be nonsense — the page swaps in these labels for the CHM15k rows.
-VARIANT_LABEL_1064 = {"v2.2": "v2.2"}
-VARIANT_SHORT_1064 = {"v2.2": "v2.2"}
+# Per-type label overrides.  The generic labels above carry the CL61 spectrum (910.74/1.0)
+# because the lambda LADDER is a CL61 story; every other type must display ITS OWN water-vapour
+# model -- CL31 909.7/6.0, CL51 910.0/3.4 (Qmini campaign / Wiegner) -- and the 1064 nm CHM15k
+# no spectrum at all (operator rule: never name a 1064 nm variant after a laser line).
+VARIANT_LABEL_BY_TYPE = {
+    "CHM15k": {"v2.2": "v2.2"},
+    "CL31": {"v2.2":    "v2.2 — WV λ909,7 / FWHM 6,0 (modèle actuel)",
+             "cloudWV": "nuage — WV λ909,7 / FWHM 6,0 (modèle actuel)"},
+    "CL51": {"v2.2":    "v2.2 — WV λ910,0 / FWHM 3,4 (modèle actuel)",
+             "cloudWV": "nuage — WV λ910,0 / FWHM 3,4 (modèle actuel)"},
+}
+VARIANT_SHORT_BY_TYPE = {
+    "CHM15k": {"v2.2": "v2.2"},
+    "CL31": {"v2.2": "v2.2 (λ909,7)", "cloudWV": "nuage (λ909,7)"},
+    "CL51": {"v2.2": "v2.2 (λ910,0)", "cloudWV": "nuage (λ910,0)"},
+}
+# retro-compat (anciens noms utilises par le rendu)
+VARIANT_LABEL_1064 = VARIANT_LABEL_BY_TYPE["CHM15k"]
+VARIANT_SHORT_1064 = VARIANT_SHORT_BY_TYPE["CHM15k"]
 
 
 def variants_for(itype, method):

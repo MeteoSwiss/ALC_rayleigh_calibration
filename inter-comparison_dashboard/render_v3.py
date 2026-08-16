@@ -395,11 +395,10 @@ function diffLayout(title, xr) {
   lay.shapes = [zoneShape()];
   return lay;
 }
-/* Variant naming is wavelength-aware: the laser-line wording only means something at 910 nm. */
-const vLabel = (itype, v) => (itype === 'CHM15k' && VARIANT_LABEL_1064[v])
-  || VARIANT_LABEL[v] || v;
-const vShort = (itype, v) => (itype === 'CHM15k' && VARIANT_SHORT_1064[v])
-  || VSHORT[v] || v;
+/* Variant naming is wavelength-aware: each type shows ITS OWN water-vapour model
+   (CL31 909.7/6.0, CL51 910.0/3.4, CL61 910.74/1.0), and 1064 nm none at all. */
+const vLabel = (itype, v) => (VLBL_BY_TYPE[itype] || {})[v] || VARIANT_LABEL[v] || v;
+const vShort = (itype, v) => (VSH_BY_TYPE[itype] || {})[v] || VSHORT[v] || v;
 function chLabel(k) {
   const P = S(), inst = P.instruments[k], s = state.pick[inst.ident];
   return inst.label + ' — ' + (s.method === 'rayleigh' ? 'Ray.' : 'nuage') + ' / ' +
@@ -921,8 +920,8 @@ def html(payloads):
         f"const VARIANTS = {json.dumps(V3.VARIANTS)};\n"
         f"const VARIANT_LABEL = {json.dumps(V3.VARIANT_LABEL)};\n"
         f"const VSHORT = {json.dumps(V3.VARIANT_SHORT)};\n"
-        f"const VARIANT_LABEL_1064 = {json.dumps(V3.VARIANT_LABEL_1064)};\n"
-        f"const VARIANT_SHORT_1064 = {json.dumps(V3.VARIANT_SHORT_1064)};\n"
+        f"const VLBL_BY_TYPE = {json.dumps(V3.VARIANT_LABEL_BY_TYPE)};\n"
+        f"const VSH_BY_TYPE = {json.dumps(V3.VARIANT_SHORT_BY_TYPE)};\n"
         f"const METHOD_BY_TYPE = {json.dumps(V3.METHOD_BY_TYPE)};\n"
         f"const METHOD_WHY = {json.dumps({f'{a}|{b}': w for (a, b), w in V3.METHOD_WHY.items()})};\n"
         f"const VARIANTS_FOR = {json.dumps({t: {m: V3.variants_for(t, m) for m in ms} for t, ms in V3.METHOD_BY_TYPE.items()})};\n"
