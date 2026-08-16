@@ -1,0 +1,16 @@
+# Scan dark nuits-claires -- tous les CL61 europeens du census + le CL31 de Payerne
+# (validation capot). Format : wmo ident [start]
+0-20000-0-03808 C            # CAMBORNE
+0-20000-0-06418 B            # ZEEBRUGGE
+0-20000-0-06447 B            # UCCLE
+0-20000-0-06610 C            # PAYERNE (verite capot)
+0-20000-0-10393 C            # LINDENBERG
+0-20000-0-11538 B            # TEMELIN
+0-20000-0-14015 B            # LJUBLJANA
+0-20008-0-BIR A              # BIRKENES
+0-203-10-LNG A               # LANZHOT
+0-380-5-1 B                  # SAINT-CHRISTOPHE AOSTA
+0-756-4-EERLCL61 A           # SION EPFL ALPOLE
+0-20000-0-06610 B            # PAYERNE CL31 (verite capot, type CL31)
+# 0-20008-0-EDT B            # EDMONTON : hors domaine CAMS Europe
+# 0-20008-0-LAU A            # LAUDER : hors domaine CAMS Europe

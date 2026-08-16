@@ -1,0 +1,15 @@
+# Reliquat du scan (les deux listes initiales ont ete tuees au timeout de l'outil)
+0-20000-0-10393 0            # LINDENBERG CHM15k (partiel, diag non ecrit)
+0-20000-0-06348 A            # CABAUW
+0-20000-0-10140 0            # HAMBURG
+0-100-20000-0000001 A        # SOFIA
+0-20008-0-UGR A              # GRANADA
+0-250-1001-07151 B           # PALAISEAU
+0-20000-0-03005 A            # LERWICK
+0-20000-0-06240 A            # AMSTERDAM
+0-20000-0-06240 B
+0-20000-0-06240 C
+0-20000-0-06240 D
+0-380-5-1 B                  # AOSTA CL61
+0-756-4-EERLCL61 A           # SION CL61
+0-20000-0-06610 B            # PAYERNE CL31 (verite capot)
