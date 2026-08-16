@@ -228,7 +228,52 @@ l'hétérogénéité — un contributeur plausible de τ sans marqueur géograph
 **insuffisant pour le CL61** (+4,7 max à α = 3 /km, contre +9,05 observé) et ne change pas le
 verdict « ne pas retoucher η ». Chiffres : `alpha_scan.json` (scratchpad de session).
 
-### 2.3ter Addendum — balayage λ₀ ±0,3 nm et test SANS correction WV : le mécanisme du +9 CL61 est identifié
+> ### ⚠ ARBITRAGE TENTÉ ET ÉCHOUÉ (2026-08-16, soir) — 4 tests, 4 confondants
+>
+> **Conclusion : les données dont nous disposons ne permettent PAS de trancher.** Les quatre
+> arbitrages tentés, avec leurs résultats, pour qu'ils ne soient pas refaits :
+>
+> | # | test | résultat | pourquoi il ne tranche pas |
+> |---|---|---|---|
+> | 1 | pente de ln(S₉₁₀/S₁₀₆₄) vs PWV (`wv_shape_test.py`) | Payerne +344 % ± 46, Lindenberg +20 % ± 33 | 4σ d'écart entre sites : la croissance hygroscopique de l'aérosol est corrélée au PWV et le rapport 910/1064 y est très sensible |
+> | 2 | CL61 vs CL31 co-localisés, même 910 nm (`wv_pair_910_test.py`) | R = −7,9 ± 1,7 (borne physique \|R\|≲1,5) | le CL31 de Payerne a son propre dark (−14…−60 % proche portée) et un faible SNR : sa forme dépend du niveau de signal, donc de la saison, donc du PWV |
+> | 3 | idem 1 avec l'aérosol CAMS en covariable (`wv_shape_test_v3.py`) | Payerne a = +2,32 ± 0,39, Lindenberg a = −0,08 ± 0,43 | le coefficient aérosol est significatif (+0,73 ± 0,14 : le contrôle agit) mais les deux sites restent à 4σ — le prédicteur WV est colinéaire avec la saison |
+> | 4 | cohérence interne nuage/Rayleigh du CL61 (aucune référence externe) | ratio 1,248 (avec WV) vs 1,270 (sans) ; le modèle prédit un écart de −11,5 % entre les deux états, on observe −1,7 % | les nuits nuage et les nuits claires n'ont pas la même humidité : l'appariement mensuel ne l'absorbe pas |
+>
+> Vérification faite au passage : le run sans-WV n'est PAS sous-échantillonné (46→44 nuits
+> Rayleigh, 19→20 dans la fenêtre de comparaison ; 72→69 nuages) — le +19 % du dashboard est un
+> vrai décalage de niveau, pas un artefact d'extrapolation du Kalman.
+>
+> **Ce qui reste établi**, et qui n'est contesté par aucun de ces tests : appliquer notre
+> correction WV aux scènes nuage CL61 **crée** une pente CBH de +9,4 %/km là où le signal brut
+> n'en a pas (−0,9), tandis que le contrôle CL31 se comporte exactement à l'inverse (brut −6,0,
+> corrigé +1,5). C'est une mesure différentielle propre. Son interprétation — « le CL61 ne subit
+> pas cette absorption » — reste **plausible mais non démontrée**, et elle est en tension avec
+> le comportement du canal Rayleigh.
+>
+> **Décision : ne rien changer en opérationnel.** La correction WV reste appliquée (pratique
+> communautaire documentée à 910 nm, et c'est l'état où le canal Rayleigh s'accorde). La suite
+> est **externe, pas calculatoire** : (a) obtenir de Vaisala le spectre d'émission mesuré du CL61
+> (λ₀, FWHM, dérive thermique) et sa position sur le traitement WV ; (b) une mesure spectrale
+> haute résolution (≤ 10 pm) de la raie CL61 — notre Qmini (0,3 nm/pixel) ne peut pas distinguer
+> 910,55 de 910,74, or l'absorption effective varie d'un facteur ~3 entre les deux. En attendant,
+> la recommandation du §5.4 tient : le C nuage CL61 porte une incertitude de scène de ±5 % selon
+> la CBH, à publier comme diagnostic QC.
+>
+> ### ⚠ AVERTISSEMENT — les §2.3ter/quater sont EN ARBITRAGE
+>
+> L'interprétation « le CL61 est aveugle à la vapeur d'eau », construite ci-dessous, est
+> **contredite par un test indépendant** : dans le dashboard d'inter-comparaison, l'état
+> *cohérent* sans WV (constantes ET profils non corrigés) **dégrade** l'accord du canal Rayleigh
+> CL61 avec le CHM15k de −1,9 % à **+19,0 %** — ce qui indique au contraire que la correction
+> fait un travail réel. Le fait mesuré (la pente dC/dCBH nuage s'annule quand on retire la
+> correction WV) n'est pas en cause ; c'est le **passage du fait à l'interprétation** qui n'est
+> pas tranché. Les §2.3ter et §2.3quater doivent donc être lus comme une **hypothèse
+> quantitativement cohérente mais non validée** : aucune action opérationnelle ne doit en
+> découler avant l'arbitrage (test constant-free CL61-vs-CL31 à 910 nm, en cours ;
+> `rayleigh_availability/wv_pair_910_test.py`).
+
+### 2.3ter Addendum — balayage λ₀ ±0,3 nm et test SANS correction WV : une hypothèse quantitative pour le +9 CL61
 
 *Ajouté 2026-08-16 sur demande opérateur. Rejeu semi-analytique des scènes réelles du run réseau
 (la correction WV entre comme facteur T²_wv(CBH) par scène : `beta /= trans2` avant l'intégrale,
@@ -296,7 +341,7 @@ spectrale. Le **8 % empirique reste la base opérationnelle** en attendant.
 ![Spectre LUT autour de la raie CL61](figs_cbh_heterogeneity/lut_spectrum_910.png)
 ![Scan FWHM à λ₀ mesuré](figs_cbh_heterogeneity/wv_fwhm_scan.png)
 
-### 2.3quater HITRAN line-by-line : la « mitigation par conception » est QUANTIFIÉE
+### 2.3quater HITRAN line-by-line : la « mitigation par conception » est quantitativement POSSIBLE (⚠ voir l'avertissement ci-dessus)
 
 *Ajouté 2026-08-16. `rayleigh_availability/hitran_cl61_lbl.py` : raies H2O HITRAN (hapi, 7
 isotopologues, 906–914 nm), profils de Voigt aux niveaux 0,49–3 km d'une atmosphère type
