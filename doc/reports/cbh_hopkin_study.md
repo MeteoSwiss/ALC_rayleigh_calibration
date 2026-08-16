@@ -107,6 +107,79 @@ scène à CBH atypique sur les unités extrêmes.
 
 ---
 
+## 1bis. Heatmaps par profil (10 unités)
+
+*Les heatmaps du §1 réduisent chaque jour à sa médiane (une scène = un jour). Hopkin et al. 2019
+(fig. 6) tracent au contraire **chaque profil calibré individuellement**. Vérification ici sur 10
+unités choisies (les extrêmes CL31, un témoin plat, Payerne, le suspect CL51 11487, un CL51
+typique, Nicosie, et les 3 CL61 clés) : re-run de la calibration nuage opérationnelle — même
+config que `scripts/run_network_calibration.py` (WV CAMS obligatoire à 910 nm, correction de
+transmission aérosol, tables η PVC natives) — sur leurs seuls jours de calibration connus, en
+collectant les tableaux par profil que `CloudCalResults` porte déjà (`all_coefficients`, `cbh`,
+`time`, `S_apparent`). **346 588 profils sur 2 478 jours-instrument** ; driver
+`rayleigh_availability/cloud_profile_dump.py`, un npz par flux sous
+`C:/DATA/Projects/202606_E-PROFILE_calibration/cloud_profile_dump/`, galerie
+`<key>_perprofile.png` à côté des heatmaps par jour. Contrôle : sur les jours communs, le nombre
+de profils récoltés reproduit exactement le `n_profiles` opérationnel (6/45/590 sur les trois
+jours testés à Payerne).*
+
+![Heatmaps Hopkin par profil pour les 10 unités (chaque profil calibré est un point ; pente = OLS jour-grappée de 100·ln(1/C) contre la CBH, pente par jour du §1 en regard)](figs_cbh_heterogeneity/perprofile_hopkin_10units.png)
+
+Conventions du §1.1 (X = constante par profil 1/C normalisée par la médiane de l'unité, %, bins
+de 2 % ; Y = CBH, bins de 100 m ; couleur = nombre de **profils**, échelle log ; moyenne ± SD par
+bande de 250 m). La pente est l'OLS de 100·ln(1/C) contre la CBH avec **erreur-type par grappes
+de jours** (sandwich cluster-robuste CR1, grappe = jour civil) : les profils d'un même jour
+partagent la météo et l'état instrumental — les traiter comme indépendants donnerait des SE
+absurdes (~10× trop petites). La colonne « fenêtre » refait le même ajustement restreint au
+domaine affiché 60–140 % (robustesse à la queue, voir plus bas).
+
+| unité (site) | type | profils | pente/profil (SE grappée) | idem, fenêtre 60–140 % | pente/jour (§1) | accord à 2 SE |
+|---|---|---|---|---|---|---|
+| 03809_A (Culdrose) | CL31 | 54 262 | **−12,6 ± 2,7** | −7,5 ± 2,3 | −12,8 ± 3,6 | oui |
+| 07627_A (St-Girons) | CL31 | 49 224 | **+8,7 ± 1,8** | +8,3 ± 1,7 | +11,2 ± 1,8 | oui |
+| 02055_A (Naimakka) | CL31 | 64 970 | **−1,0 ± 1,1** | −0,3 ± 1,0 | +0,0 ± 1,4 | oui |
+| 06610_B (Payerne) | CL31 | 43 428 | −13,1 ± 9,7 | **+8,8 ± 1,6** (13 % hors fenêtre) | +1,1 ± 4,3 | oui |
+| 11487_A (Kocelovice) | CL51 | 33 593 | +12,5 ± 5,5 | **+3,1 ± 1,1** | +17,4 ± 4,0 | oui |
+| 11679_A (Ústí n. Orlicí) | CL51 | 50 279 | **+2,6 ± 0,8** | +2,6 ± 0,8 | +4,8 ± 0,8 | oui (limite) |
+| CYPN_A (Nicosie) | CL51 | 2 154 | +3,1 ± 3,3 | +3,2 ± 3,2 | +9,5 ± 3,7 | oui |
+| 10393_C (Lindenberg) | CL61 | 35 739 | +12,9 ± 5,5 | **+11,4 ± 1,0** (28 % hors fenêtre) | +12,0 ± 4,5 | oui |
+| 03808_C (Camborne) | CL61 | 1 180 | **+8,3 ± 3,1** | +8,3 ± 3,1 | +9,4 ± 3,8 | oui |
+| 0-380-5-1_B (Aoste) | CL61 | 11 759 | **+9,9 ± 2,3** | +9,9 ± 2,3 | +3,3 ± 5,6 | oui |
+
+(accord = \|Δ\| ≤ 2·√(SE²_profil + SE²_jour), sur l'estimateur pleine-donnée ; deux flux restent
+minces — Nicosie 2 154 et Camborne 1 180 profils, unités à faible rendement de profils nuage.)
+
+**La structure par jour est confirmée profil par profil : 10/10 accords à 2 SE.** Les pentes du
+§1 ne sont pas un artefact de la réduction jour-médiane : Culdrose reste l'extrême négatif à
+−12,6, St-Girons le positif à +8,7, Naimakka plat, et les 3 CL61 gardent l'effet de type
+(+8 à +13 %/km) avec des SE resserrées (Lindenberg +11,4 ± 1,0 en fenêtre — la pente CL61 la
+mieux mesurée du rapport ; Aoste passe de +3,3 ± 5,6 à +9,9 ± 2,3 : 60 jours ne suffisaient pas,
+11 759 profils tranchent en faveur de l'effet de type).
+
+**Mais le comptage « par profils » à la Hopkin surestime l'information d'un facteur ~100.** Les
+SE jour-grappées (0,8–9,7 %/km) sont du même ordre que les SE par jour du §1 (0,8–5,6) alors que
+n est 100–180× plus grand. La vérification de levier intra-jour l'explique : la dispersion de CBH
+**dans** un jour (médiane du p90−p10 des profils d'un même jour : 0,06–0,40 km selon l'unité) est
+3–15× plus étroite que la dispersion **entre** jours (p90−p10 des CBH médianes journalières :
+0,94–1,31 km). Les jours sont quasi homogènes en CBH — le levier qui mesure la pente vient des
+jours, pas des profils. L'échantillon effectif d'une heatmap par profil est donc ~le nombre de
+jours ; tout SE naïf sur n = 50 000 profils (et tout « n » affiché à la Hopkin) est à lire avec
+cette réserve.
+
+**Réserve de queue : l'OLS par profil est fragile aux C extrêmes — la médiane par jour est le bon
+statistique.** Les 1/C individuels s'étalent de ~30 à ~350 % de la médiane d'unité (queue que la
+réduction jour-médiane du §1 écrête par construction). À Payerne, 13 % de profils hors fenêtre
+suffisent à retourner la pente pleine-donnée (−13,1 ± 9,7, non significative) contre +8,8 ± 1,6
+dans le domaine affiché — le SE grappé énorme signale correctement la fragilité. Lindenberg à
+l'inverse : 28 % hors fenêtre (la queue lourde CL61, cohérente avec la baseline additive) et une
+pente pourtant insensible (+12,9 pleine vs +11,4 fenêtre). Cas instructif : Kocelovice 11487_A,
+le suspect aux trois drapeaux — son cœur de profils ne penche que de +3,1 ± 1,1 alors que ses
+médianes journalières penchent de +17,4 ± 4,0 : l'essentiel de sa pente vit dans le déplacement
+jour-à-jour (état instrumental/météo), pas dans une réponse à la CBH au sein des jours — un indice
+de plus que cette unité a un problème d'état, pas une simple sensibilité à l'altitude des nuages.
+
+---
+
 ## 2. Stabilité temporelle des pentes
 
 **Méthode.** OLS glissant de ln C contre CBH par unité : fenêtre 180 j, pas 30 j, ≥ 30 scènes et
@@ -243,3 +316,7 @@ re-poser après la campagne dark CL61.
   `correction_test.py`.
 - Données sources : `rayleigh_availability/cbh_native/cbh_scenes.csv`,
   `cbh_native/per_flux_slopes.csv`. Figures du rapport : `doc/reports/figs_cbh_heterogeneity/`.
+- Par profil (§1bis) : driver `rayleigh_availability/cloud_profile_dump.py` (dump + stats +
+  figures, résumable) ; npz par flux + `perprofile_stats.csv` sous
+  `C:/DATA/Projects/202606_E-PROFILE_calibration/cloud_profile_dump/` ; heatmaps
+  `<key>_perprofile.png` dans la galerie.
