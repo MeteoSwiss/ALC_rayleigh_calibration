@@ -97,6 +97,14 @@ from monitoring import periods as periods_mod  # noqa: E402  (period set: auto y
 # PLOTS=1 emits a diagnostic PNG per SUCCESSFUL calibration (Rayleigh via plot_main, cloud via
 # plot_cloud_diagnostics_compact). Env-controlled so it propagates to every per-stream subprocess.
 PLOT_ENABLED = os.environ.get("PLOTS", "0") == "1"
+# Candidate-algorithm override for the Rayleigh method (see _do_rayleigh). Empty -> options.json wins,
+# so the operational daily run is unaffected.
+MOLECULAR_METHOD = os.environ.get("ALC_MOLECULAR_METHOD", "").strip()
+try:
+    MOLECULAR_PARAMS = json.loads(os.environ.get("ALC_MOLECULAR_PARAMS", "") or "{}")
+except json.JSONDecodeError:
+    MOLECULAR_PARAMS = {}
+    print("ALC_MOLECULAR_PARAMS is not valid JSON - ignored", flush=True)
 
 # --- Paths / configuration --------------------------------------------------
 # Paths are env-overridable (set them in ops/config.sh on the server); the defaults are the local
@@ -301,6 +309,17 @@ def _do_rayleigh(s, start, end, shared=None, screen=False):
     o.cams_folder = CAMS
     o.plot_all = False
     o.plot_main = PLOT_ENABLED           # PLOTS=1 -> Rayleigh diagnostic PNG per success
+    # Method override, so a candidate algorithm can be run over the network WITHOUT editing the
+    # operational options.json (which the daily cron also reads). ALC_MOLECULAR_PARAMS is a JSON
+    # object merged into molecular_params, e.g. ALC_MOLECULAR_METHOD=eprof_v2.2
+    # ALC_MOLECULAR_PARAMS='{"max_chi2red": 2.5}'.
+    if MOLECULAR_METHOD:
+        o.molecular_method = MOLECULAR_METHOD
+    if MOLECULAR_PARAMS:
+        o.molecular_params = dict(o.molecular_params or {}, **MOLECULAR_PARAMS)
+    # Measured dark-baseline profile (rayleigh_availability/dark_profiles.py). Empty = off.
+    if os.environ.get("ALC_DARK_PROFILE"):
+        o.dark_profile_file = os.environ["ALC_DARK_PROFILE"]
     rows = []
     for d in _days(start, end):
         if not _l1_file(s["wmo"], s["ident"], d).exists():
