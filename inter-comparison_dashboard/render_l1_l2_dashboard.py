@@ -206,7 +206,7 @@ function l1l2Traces() {
 
 /* ---------- calibration coefficient time series (station-page style) ---------- */
 const METHOD_COLOR = { 'Rayleigh':'#1f77b4', 'Liquid clouds':'#2ca02c' };
-const VAR_COLOR = { 'v2.2':'#2f9e44', 'v2.2dark':'#7048e8' };
+const VAR_COLOR = { 'v2.2':'#2f9e44', 'v2.2dark':'#7048e8', 'v2.2sansWV':'#e8590c' };
 const VAR_PALETTE = ['#2f9e44', '#7048e8', '#e8590c', '#0ca678'];
 const VAR_SYMBOL = ['triangle-up', 'diamond', 'square', 'cross'];
 
@@ -229,11 +229,14 @@ function calibFigure(ident, chan) {
       line:{color:'#d62728', width:2},
       hovertemplate:'%{x|%Y-%m-%d}<br>Kalman = %{y:.3e}<extra></extra>' });
   }
-  /* the other variants alongside, only where they actually differ — the cloud-calibrated channels
-     are CARRIED OVER identically between variants, so drawing them twice would just duplicate. */
+  /* the other variants alongside, only where they actually differ — a channel CARRIED OVER
+     identically (cloud channels between v2.0/v2.2/v2.2dark, the 1064 nm CHM15k between v2.2 and
+     v2.2sansWV) keeps its source's `created`, so an already-drawn series is never duplicated. */
+  const drawn = new Set([c.created]);
   VN.slice(1).forEach((vn, i) => {
     const c2 = (CS[vn] || {})[chan];
-    if (!c2 || !c2.kalman || c2.key !== c.key || c2.created === c.created) return;
+    if (!c2 || !c2.kalman || c2.key !== c.key || drawn.has(c2.created)) return;
+    drawn.add(c2.created);
     const col = VAR_COLOR[vn] || VAR_PALETTE[i % VAR_PALETTE.length];
     const k2 = c2.kalman;
     if (k2.date.length) traces.push({ x:k2.date, y:k2.value, mode:'lines',
@@ -304,6 +307,52 @@ function drawPcolor() {
     lay.xaxis = { title:'' };
     Plotly.react(el, traces, lay, PCFG);
   });
+}
+
+/* ---------- residual vs PWV scatter (the WV design-mitigation test — static) ---------- */
+/* [state key, label, colour, symbol]; the two COHERENT states saturated, the crossed ones pale.
+   The states are fixed combos (variant x WV-comparison at the molecular wavelength mode), so the
+   panel is drawn once and does not follow the controls. */
+const PWV_STATES = [
+  ['v2.2_wv1',       'v2.2 (cal avec WV) × comp. ON — historique',   '#d62728', 'circle'],
+  ['v2.2_wv0',       'v2.2 (cal avec WV) × comp. OFF — croisé',      '#f1a8a8', 'circle-open'],
+  ['v2.2sansWV_wv0', 'v2.2 sans WV(cal) × comp. OFF — cohérent',     '#2f9e44', 'diamond'],
+  ['v2.2sansWV_wv1', 'v2.2 sans WV(cal) × comp. ON — croisé',        '#a8d8b0', 'diamond-open']
+];
+
+function drawPwv() {
+  const P = D.pwv, el = document.getElementById('pwv_scatter');
+  if (!P || !el) return;
+  const xs = P.pwv_mm, traces = [];
+  let xmin = 1e9, xmax = -1e9;
+  xs.forEach(v => { if (v !== null) { xmin = Math.min(xmin, v); xmax = Math.max(xmax, v); } });
+  PWV_STATES.forEach(([st, label, col, sym]) => {
+    const r = P.resid_by_state[st];
+    if (!r) return;
+    const x = [], y = [], txt = [];
+    r.forEach((v, i) => {
+      if (v !== null && xs[i] !== null) { x.push(xs[i]); y.push(v); txt.push(P.hours[i]); }
+    });
+    if (!x.length) return;
+    const f = (P.fits || {})[st];
+    const name = label + (f ? ' — pente ' + (f.slope > 0 ? '+' : '') + f.slope.toFixed(2) +
+                              ' %/mm (n=' + f.n + ')' : '');
+    traces.push({ x, y, text:txt, mode:'markers', name,
+      marker:{ size:5, color:col, symbol:sym, opacity:0.5 },
+      hovertemplate:'%{text}<br>PWV %{x:.1f} mm<br>résidu %{y:+.1f}%<extra>' + st + '</extra>' });
+    if (f) traces.push({ x:[xmin, xmax],
+      y:[f.intercept + f.slope * xmin, f.intercept + f.slope * xmax], mode:'lines',
+      line:{color:col, width:2}, showlegend:false, hoverinfo:'skip' });
+  });
+  const cc = CH.find(c => (c.chan || c.ident) === P.chan);
+  const lay = JSON.parse(JSON.stringify(BASE));
+  lay.title = { text:'Résidu ' + (cc ? cc.label : P.chan) + ' vs ' + P.ref +
+                     ' — en fonction du PWV (CAMS)', font:{size:13} };
+  lay.xaxis = { title:'PWV [mm]', zeroline:false };
+  lay.yaxis = { title:'résidu relatif [%] (médiane ' + P.band[0].toFixed(0) + '–' +
+                      P.band[1].toFixed(0) + ' m)', zeroline:true, zerolinewidth:1.4,
+                zerolinecolor:'#888' };
+  Plotly.react(el, traces, lay, PCFG);
 }
 
 /* ---------- statistics table ---------- */
@@ -389,8 +438,8 @@ function bind() {
   }));
 }
 
-fillMonths(); bind(); draw(); drawPcolor();
-window.addEventListener('resize', () => ['p_l1','p_l2','d_diff','p_hist','d_l1l2']
+fillMonths(); bind(); draw(); drawPcolor(); drawPwv();
+window.addEventListener('resize', () => ['p_l1','p_l2','d_diff','p_hist','d_l1l2','pwv_scatter']
   .concat(CH.map(c => 'pc_' + (c.chan || c.ident)))
   .forEach(id => { const el = document.getElementById(id);
                    if (el && el.data) Plotly.Plots.resize(el); }));
@@ -416,18 +465,28 @@ def html(data):
         f'  <div class="card" style="margin-bottom:12px"><div id="pc_{c.get("chan", c["ident"])}"></div></div>'
         for c in ch)
 
-    # correction controls: hidden entirely on all-1064 sites (both toggles are exact no-ops there)
+    # correction controls: hidden entirely on all-1064 sites (both toggles are exact no-ops there).
+    # "WV comparaison" gates ONLY the profile-side two-way-transmission division (T² of the
+    # comparison); the WV used INSIDE the constants is the calibration-variant choice above
+    # ("v2.2 sans WV(cal)" = constants computed without it). The wavelength buttons follow the
+    # site's wl_modes (Payerne drops the single-Ångström mode); the molecular conversion is purely
+    # Rayleigh (CAMS T/p), so it stays WV-free whatever the checkbox.
+    wl_labels = {"none": "None", "angstrom": f"Simple (Ångström α={m['alpha']:.0f})",
+                 "molecular": "Advanced (molecular)"}
+    wl_modes = m.get("wl_modes", ["none", "angstrom", "molecular"])
+    wl_buttons = "\n".join(
+        '        <button data-wl="%s"%s>%s</button>'
+        % (wl, ' class="on"' if wl == "molecular" else "", wl_labels.get(wl, wl))
+        for wl in wl_modes)
     corr_controls = "" if m.get("collapse") else f"""
     <div class="ctl-group">
       <span class="ctl-label">Corrections</span>
-      <label class="chk"><input type="checkbox" id="wv" checked> Water vapour</label>
+      <label class="chk"><input type="checkbox" id="wv" checked> WV comparaison</label>
     </div>
     <div class="ctl-group">
       <span class="ctl-label">Wavelength → {m['target']:.0f} nm</span>
       <span class="seg" id="wlseg">
-        <button data-wl="none">None</button>
-        <button data-wl="angstrom">Simple (Ångström α={m['alpha']:.0f})</button>
-        <button data-wl="molecular" class="on">Advanced (molecular)</button>
+{wl_buttons}
       </span>
     </div>"""
 
@@ -453,6 +512,20 @@ def html(data):
   <div class="card"><div id="d_l1l2"></div></div>
   <p class="note">Positive = the v2-calibrated L1 profile is higher than the L2 product at that
     altitude. CL31 is the extreme case: its L2 constant is the uncalibrated 1e8 default.</p>
+"""
+
+    pwv_section = "" if not data.get("pwv") else f"""
+  <h2>Résidu CL61 (Rayleigh) vs PWV <span class="muted">— le test discriminant de l'hypothèse
+    «&nbsp;mitigated by design&nbsp;»</span></h2>
+  <div class="card"><div id="pwv_scatter"></div></div>
+  <p class="note">Chaque point = une heure appariée : résidu = médiane
+    {m['zmin']:.0f}–{m['zmax']:.0f} m de la différence relative CL61-Rayleigh vs CHM15k, contre le
+    PWV CAMS du jour au-dessus de Payerne (mêmes fichiers et même fenêtre que la correction WV).
+    <b>Une pente ~plate dans l'état cohérent sans WV</b> (constantes sans WV ×
+    «&nbsp;WV&nbsp;comparaison&nbsp;» OFF) <b>et une pente positive dans l'état historique</b>
+    (v2.2 × ON) confirment que la raie étroite mesurée du CL61 (910.74 nm, FWHM &lt; 1.5 nm)
+    n'absorbe qu'une faible fraction (~8 %) du modèle WV — la correction du pipeline est alors
+    ~12× trop forte pour cet instrument.</p>
 """
 
     base_series = data.get("calib_series", {}).get(variants[0], {})
@@ -513,7 +586,7 @@ def html(data):
     <div class="card"><div id="d_diff"></div></div>
     <div class="card"><div id="p_hist"></div></div>
   </div>
-{l1l2_section}
+{l1l2_section}{pwv_section}
   <h2>Agreement over {m['zmin']:.0f}–{m['zmax']:.0f} m a.g.l.</h2>
   <div class="card">
     <table class="stats" id="stats">

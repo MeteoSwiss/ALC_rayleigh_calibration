@@ -67,6 +67,15 @@ RAW = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/inter-comparison_dashb
 # corrected profile / dark-free cloud constant) is the physically consistent one.
 OUT_DARK = OUT.parent / "calib_v22dark"
 DARK_RUN = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/diag_v22_dark")
+# Fourth variant: v2.2 WITHOUT the water-vapour correction inside the calibration (diag_v22_nowv
+# run, 20250101-20260813). It moves every 910 nm channel — the cloud constants (CL31 B, CL61 C) AND
+# the CL61 Rayleigh one (Cr) — while the 1064 nm CHM15k (A) has no WV correction to remove and is
+# carried over from v2.2 unchanged, so the variant is a complete series. Motivation: the measured
+# CL61 emission line (910.74 nm, FWHM < 1.5 nm) makes the pipeline's WV correction ~12x too strong
+# for that instrument (design mitigation); pairing these constants with the page's "WV comparaison"
+# toggle OFF is the coherent no-WV state.
+OUT_NOWV = OUT.parent / "calib_v22nowv"
+NOWV_RUN = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/diag_v22_nowv")
 
 V22_SRC = {
     # The fresh run_payerne_v22 output, NOT the availability-corpus file: settings-identical
@@ -257,6 +266,27 @@ def build_dark_channel(chan, outdir=OUT_DARK):
         kalman=dict(date=[str(t)[:10] for t in kt], value=[float(v) for v in ks],
                     std=[float(s) if np.isfinite(s) else 0.0 for s in kstd]),
     )
+
+
+def build_nowv_channel(chan, outdir=OUT_NOWV):
+    """One channel's v2.2-sans-WV series from the diag_v22_nowv runner CSVs.
+
+    Unlike the dark variant (Rayleigh-only), the WV correction sits inside BOTH retrievals of a
+    910 nm unit, so the cloud channels (B, C) are rebuilt too, each from its own method rows of the
+    same per-stream CSV. The degraded (flag 0.5) nights are kept, as on the network-run sites --
+    the Kalman relative-uncertainty weighting keeps them from steering the estimate."""
+    spec = INSTR[chan]
+    ident = spec.get("ident", chan)
+    csvf = NOWV_RUN / f"{WMO}_{ident}" / f"{WMO}_{ident}_cal.csv"
+    nights = run_csv_nights(csvf, spec["calib"])
+    if nights is None:
+        print(f"  {chan}: no usable {spec['calib']} nights in {csvf} -> skipped")
+        return None
+    dates, C, Cstd = nights
+    key = f"{WMO}_{ident}_{spec['calib']}"
+    return smooth_and_write(key, spec["itype"], spec["calib"], dates, C, Cstd, outdir,
+                            source=f"diag_v22_nowv/{WMO}_{ident}",
+                            created="eprof_v2.2 sans WV(cal) (diag_v22_nowv)")
 
 
 # --------------------------------------------------------------------------- network-run sites
@@ -470,8 +500,35 @@ def main():
     if any_dark:
         (OUT_DARK / "points.json").write_text(json.dumps(outdark), encoding="utf-8")
         print(f"-> {OUT_DARK}")
+
+    # v2.2 sans WV(cal): every 910 nm channel (CL31 B, CL61 C and Cr) is rebuilt from the no-WV
+    # run; the 1064 nm CHM15k (A) has no WV correction to remove and is carried over from v2.2
+    # (CSV included) so the variant is a complete series. A missing 910 nm stream is a LOUD skip,
+    # never a carry-over -- v2.2 constants presented as "sans WV" would be wrong.
+    print("== eprof_v2.2 sans WV variant (910 nm channels from diag_v22_nowv) ==")
+    outnowv, any_nowv = {}, False
+    for chan in ("A", "B", "C", "Cr"):
+        if chan == "A":
+            r0 = out22.get(chan) or out.get(chan)
+            if r0 is not None:
+                outnowv[chan] = r0
+                src = (OUT_V22 if out22.get(chan) else OUT) / f"{r0['key']}_L1.csv"
+                if src.exists():
+                    OUT_NOWV.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src, OUT_NOWV / src.name)
+                    print(f"  A: 1064 nm, no WV correction -- carried over from "
+                          f"{'v2.2' if out22.get(chan) else 'v2.0'}")
+            continue
+        r = build_nowv_channel(chan)
+        if r is not None:
+            outnowv[chan] = r
+            any_nowv = True
+    if any_nowv:
+        (OUT_NOWV / "points.json").write_text(json.dumps(outnowv), encoding="utf-8")
+        print(f"-> {OUT_NOWV}")
     return {"v2.0": out, "v2.2": out22 if any_v22 else {},
-            "v2.2dark": outdark if any_dark else {}}
+            "v2.2dark": outdark if any_dark else {},
+            "v2.2sansWV": outnowv if any_nowv else {}}
 
 
 if __name__ == "__main__":

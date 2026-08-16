@@ -103,7 +103,10 @@ def set_site(site_key):
         # combo per variant carries the whole page (the render stage hides those controls).
         COMBOS = [(v, True, "molecular") for v in s["variants"]]
     else:
-        COMBOS = [(v, wv, wl) for v in s["variants"] for wv in (False, True) for wl in WL_MODES]
+        # A site may restrict the wavelength modes (sites.py wl_modes) to contain the page size --
+        # Payerne drops the single-Angstrom mode: 4 variants x 2 WV x 2 modes = 16 combos.
+        wl_list = [wl for wl in s.get("wl_modes", WL_MODES) if wl in WL_MODES]
+        COMBOS = [(v, wv, wl) for v in s["variants"] for wv in (False, True) for wl in wl_list]
     DARK_NPZ = Path(os.environ.get("ALC_DASH_DARK_NPZ", s["dark_npz"])) \
         if s.get("dark_npz") else None
     CACHE_NPZ = OUT / f"_streams_{site_key}.npz"
@@ -464,6 +467,23 @@ def _run(spec):
     if canonical and panels["L1"][0].size:
         out["pcolor"] = _pcolor_payload(panels["L1"][0], z_agl, panels["L1"][1], panels["L1"][3])
 
+    # Per-hour residual of the PWV test channel vs the reference (sites.py `pwv`): the median
+    # relative difference over the stats band, one scalar per paired hour, for the four
+    # coherent/crossed (constants-variant x WV-comparison) states at the canonical wavelength mode.
+    # main() joins these to the per-day CAMS PWV -- the discriminating scatter of the page.
+    pwv_spec = SITE.get("pwv")
+    if pwv_spec and cal in pwv_spec["cals"] and wl == pwv_spec.get("wl", "molecular"):
+        k_c = next((k for k, c in enumerate(CHANNELS)
+                    if c.get("chan", c["ident"]) == pwv_spec["chan"]), None)
+        if k_c is not None and k_c != IREF and hours.size:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                resid = np.nanmedian(
+                    _rel_diff(B["L1"][k_c][:, band], B["L1"][IREF][:, band]), axis=1)
+            out["pwv_resid"] = dict(
+                hours=[str(t) for t in hours.astype("datetime64[h]")],
+                resid=[None if not np.isfinite(v) else round(float(v), 3) for v in resid])
+
     # Every contiguous run of whole months in the window, so the page can offer a from/to selector.
     # The corrections + gridding above are independent of the subset, so a range costs only medians.
     months = [str(m) for m in np.unique(hours.astype("datetime64[M]"))]
@@ -572,6 +592,71 @@ def l2_applied_constants(npz_path, t0, t1):
     return out
 
 
+# --------------------------------------------------------------------------- PWV (CAMS)
+_PWV_DAY = {}
+# kg per H2O molecule; a column integral of the number density then lands in kg m^-2, and
+# 1 kg m^-2 of liquid water is exactly 1 mm of precipitable water.
+_M_H2O = 18.015e-3 / 6.02214076e23
+
+
+def pwv_mm_for_day(ds):
+    """Precipitable water vapour [mm] above the station for one day ('YYYYMMDD'), from the SAME
+    CAMS file and the SAME day window the WV correction itself uses (l1_l2_io.cams_for_day +
+    intercompare's memoised profile), so the scatter's x-axis is exactly the water the correction
+    saw. NaN when no CAMS covers the day (those hours are dropped from the fit)."""
+    if ds in _PWV_DAY:
+        return _PWV_DAY[ds]
+    val = np.nan
+    cams = IO.cams_for_day(ds)
+    if cams is not None:
+        t0, t1 = IO._win(ds)
+        prof = IC._cams_wv_profile_cached(str(cams), STA[0], STA[1], t0, t1)
+        if prof is not None:
+            h = np.asarray(prof[0], "f8")
+            n = np.asarray(prof[1], "f8")
+            ok = np.isfinite(h) & np.isfinite(n)
+            h, n = h[ok], n[ok]
+            if h.size >= 2:
+                # integrate the column ABOVE the station (below-surface levels are constant fill)
+                if h[0] < STA[2] < h[-1]:
+                    n0 = np.interp(STA[2], h, n)
+                    m = h > STA[2]
+                    h = np.concatenate([[STA[2]], h[m]])
+                    n = np.concatenate([[n0], n[m]])
+                val = float(np.trapz(n, h) * _M_H2O)
+    _PWV_DAY[ds] = val
+    return val
+
+
+def assemble_pwv(parts, spec):
+    """Join the per-state hourly residual series (from _run) to the per-day CAMS PWV.
+
+    parts: {state_key ('cal_wv0'/'cal_wv1'): {hours, resid}}. States share the hour axis only where
+    their pairing agrees (WV-off keeps days the WV exclusion drops), so the union axis carries None
+    where a state lacks the hour. The per-state linear fit (slope in % per mm) is computed here
+    once, not client-side."""
+    hours = sorted({h for p in parts.values() for h in p["hours"]})
+    x = np.array([pwv_mm_for_day(h[:10].replace("-", "")) for h in hours])
+    resid_by_state, fits = {}, {}
+    for st, p in sorted(parts.items()):
+        idx = {h: i for i, h in enumerate(p["hours"])}
+        r = [p["resid"][idx[h]] if h in idx else None for h in hours]
+        resid_by_state[st] = r
+        y = np.array([np.nan if v is None else float(v) for v in r])
+        m = np.isfinite(x) & np.isfinite(y)
+        if m.sum() >= 3:
+            slope, icept = np.polyfit(x[m], y[m], 1)
+            fits[st] = dict(slope=round(float(slope), 3), intercept=round(float(icept), 3),
+                            n=int(m.sum()))
+            print(f"   pwv {st:<16s} n={int(m.sum()):4d}  slope {slope:+.3f} %/mm  "
+                  f"intercept {icept:+.2f} %", flush=True)
+    return dict(hours=hours,
+                pwv_mm=[None if not np.isfinite(v) else round(float(v), 3) for v in x],
+                resid_by_state=resid_by_state, fits=fits,
+                chan=spec["chan"], ref=CHANNELS[IREF]["label"],
+                band=[float(ZMIN), float(ZMAX)])
+
+
 def main(site_key=None):
     if site_key is None:
         args = [a for a in sys.argv[1:] if not a.startswith("--")]
@@ -601,13 +686,16 @@ def main(site_key=None):
     workers = min(len(COMBOS), max(1, (os.cpu_count() or 8) - 2), 6)
     print(f"computing {len(COMBOS)} correction combos x {len(SOURCES)} sources over "
           f"{workers} workers ...", flush=True)
-    combos, months, pcolor = {}, [], None
+    combos, months, pcolor, pwv_parts = {}, [], None, {}
     others = [k for k in range(len(CHANNELS)) if k != IREF]
     with ProcessPoolExecutor(max_workers=workers, initializer=_init,
                              initargs=(site_key, npz, t0, t1)) as ex:
         for key, res in ex.map(_run, COMBOS):
             if "pcolor" in res:
                 pcolor = res.pop("pcolor")
+            if "pwv_resid" in res:
+                # state key = variant + WV toggle; the wavelength mode is fixed by the pwv spec
+                pwv_parts[key.rsplit("_", 1)[0]] = res.pop("pwv_resid")
             combos[key] = res
             months = res["months"]
             full = res[range_key(0, len(months) - 1)]           # the whole window
@@ -619,6 +707,8 @@ def main(site_key=None):
                                      if st[k]["medrelbias_pct"] is not None else "—")
                           for k in others)), flush=True)
 
+    pwv = assemble_pwv(pwv_parts, SITE["pwv"]) if pwv_parts else None
+
     alt_agl = (np.arange(0.0, ZTOP_PLOT + DZ, DZ)).tolist()
     payload = dict(
         meta=dict(site=site_key, wmo=WMO, station=SITE["name"], lat=STA[0], lon=STA[1], alt=STA[2],
@@ -629,6 +719,7 @@ def main(site_key=None):
                   variant_labels=SITE.get("variant_labels", {}),
                   variant_short=SITE.get("variant_short", {}),
                   collapse=bool(SITE.get("collapse_combos", False)),
+                  wl_modes=[wl for wl in SITE.get("wl_modes", WL_MODES) if wl in WL_MODES],
                   title=SITE["title"], subtitle=SITE["subtitle"],
                   warnings=SITE.get("warnings", []),
                   profiles_note=SITE.get("profiles_note")),
@@ -637,7 +728,7 @@ def main(site_key=None):
                        calib=c["calib"], chan=c.get("chan", c["ident"])) for c in CHANNELS],
         iref=IREF, months=months, combos=combos, calib_series=cal_series, l2_applied=l2c,
         hist_edges=[round(float(x), 3) for x in HIST_EDGES],
-        pcolor=pcolor,
+        pcolor=pcolor, pwv=pwv,
     )
     out_json = OUT / f"data_{site_key}.json"
     out_json.write_text(json.dumps(payload), encoding="utf-8")

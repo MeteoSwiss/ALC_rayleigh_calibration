@@ -35,6 +35,13 @@ NETWORK_V22 = Path(r"C:/DATA/Projects/202606_E-PROFILE_calibration/calout_v22_04
 # Same runner, with the ESTIMATED (clear-night) dark subtracted inside the calibration.
 # Demonstration variant only — see the per-site note.
 DARK_EST = Path(r"C:/DATA/Projects/202606_E-PROFILE_calibration/dark_test")
+# Payerne rerun WITHOUT the water-vapour correction inside the calibration (eprof_v2.2 settings
+# otherwise identical; 20250101-20260813). Motivated by the measured CL61 emission line
+# (910.74 ± 0.10 nm, FWHM < 1.5 nm) sitting between the strong WV absorption features: the
+# semi-analytic replay shows the CL61 RAW cloud signal carries only ~8 % of the modelled WV path
+# absorption (CL51 45 %, CL31 80 %), so the pipeline's WV correction is suspected ~12x too strong
+# for the CL61 — this variant lets the page pair no-WV constants with the WV-free profile view.
+NOWV_RUN = Path(r"C:/DATA/Projects/202606_E-PROFILE_calibration/diag_v22_nowv")
 
 # Note appended to the sites that carry the demonstration variant.
 _DARK_EST_NOTE = """<b>v2.2 dark-est</b> = soustraction du dark ESTIMÉ des nuits claires
@@ -68,6 +75,13 @@ _PAYERNE_WARNINGS = [
     the v2.0 NetCDFs, all available years (43 CHM15k / 264 CL31 / 82 CL61 nights); the raw
     operational <code>_cal.csv</code> is deliberately not used, as its flag=0.5 nights include two
     wild CHM15k outliers (20–21 Jun, 3.4–4.1e12) that the published NetCDF drops.""",
+    """<b>v2.2 sans WV(cal)</b> : constantes calculées <b>SANS</b> la correction de vapeur d'eau
+    (raie CL61 mesurée à 910.74 nm, FWHM &lt; 1.5 nm — l'absorption WV est atténuée par
+    conception spectrale, le signal brut n'en porte que ~8 % du modèle). Le test <b>cohérent</b> =
+    cette variante avec la case «&nbsp;WV comparaison&nbsp;» <b>décochée</b> ; la vue historique =
+    <b>v2.2</b> avec «&nbsp;WV comparaison&nbsp;» <b>cochée</b>. Les états croisés (sans-WV(cal) ×
+    comparaison ON, ou v2.2 × comparaison OFF) sont des diagnostics seulement — ils mélangent deux
+    définitions du signal.""",
 ]
 
 SITES = {
@@ -87,16 +101,24 @@ SITES = {
         sources=("L1", "L2"),
         start="20260601", end="20260814",
         win_start="20260601", win_end="20260813",
-        variants=["v2.0", "v2.2", "v2.2dark"],
+        variants=["v2.0", "v2.2", "v2.2dark", "v2.2sansWV"],
         variant_labels={"v2.0": "v2.0 (operational)", "v2.2": "v2.2 (noise-aware gates)",
-                        "v2.2dark": "v2.2 + dark (electronic baseline subtracted)"},
-        variant_short={"v2.2dark": "v2.2+dark"},
+                        "v2.2dark": "v2.2 + dark (electronic baseline subtracted)",
+                        "v2.2sansWV": "v2.2 sans WV(cal)"},
+        variant_short={"v2.2dark": "v2.2+dark", "v2.2sansWV": "v2.2 sansWV"},
         calib_dirs={"v2.0": DATA_ROOT / "calib", "v2.2": DATA_ROOT / "calib_v22",
-                    "v2.2dark": DATA_ROOT / "calib_v22dark"},
+                    "v2.2dark": DATA_ROOT / "calib_v22dark",
+                    "v2.2sansWV": DATA_ROOT / "calib_v22nowv"},
         calib_builder="payerne",
         dark_variants=("v2.2dark",),
         dark_npz=str(DATA_ROOT.parent / "rayleigh_availability" / "dark_profiles_payerne.npz"),
         collapse_combos=False,
+        # Page-size containment: the single-Ångström wavelength mode is dropped from the COMBOS
+        # (4 variants x 2 WV x 2 modes = 16 combos instead of 18). The other sites keep the default.
+        wl_modes=["none", "molecular"],
+        # The discriminating test: per-hour CL61-Rayleigh residual vs the CHM15k reference, against
+        # the CAMS PWV of that hour, for the 4 coherent/crossed (variant x WV-comparison) states.
+        pwv=dict(chan="Cr", cals=["v2.2", "v2.2sansWV"], wl="molecular"),
         title="Payerne — three co-located ceilometers: L1 + v2 calibration vs the L2 product",
         subtitle=_PAYERNE_SUBTITLE,
         warnings=_PAYERNE_WARNINGS,
