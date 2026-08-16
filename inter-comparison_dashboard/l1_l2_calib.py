@@ -15,7 +15,12 @@ Smoothing uses the SAME filter and parameters as the operational dashboard,
 monitoring.kalman.kalman_best_estimate: median-normalised so one set of RELATIVE noise parameters
 fits any instrument magnitude, 4 % day-to-day random-walk drift, 15 %/yr seasonal accumulation over
 gaps, daily-median aggregation, rolling-IQR outlier rejection, measurement noise from rolling-mean
-residuals, predict-only on gap days.
+residuals, predict-only on gap days. Each night's reported uncertainty is passed through
+(uncertainty-weighted measurement noise, relative u/C so a level step is not down-weighted for its
+magnitude): v2.2's recovered nights carry ~2.5x the relative uncertainty of the strict-gate nights,
+and unweighted they pulled the Payerne CHM15k reference ~14 % low over Jun-Aug; weighted, the same
+series lands within ~4 % of the v2.0 level while keeping every night. Applied to BOTH variants and
+all channels, so no comparison is asymmetric.
 
 That choice matters at Payerne: the CL31 optical block was replaced on 2026-07-07 ~13:00 and its
 constant steps ~2.8x (4.1e7 -> 9.1e7). With 4 % daily drift the operational filter absorbs the step
@@ -56,9 +61,18 @@ RAW = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/inter-comparison_dashb
 # Per-channel v2.2 source. The CHM15k comes from the availability corpus; the CL61's RAYLEIGH
 # series had to be produced separately (run_payerne_v22.py) because the CL61 was only ever a
 # cloud-calibrated reference in that study -- and it is a Rayleigh retrieval, so v2.2 moves it too.
+# Third variant: v2.2 WITH the measured dark baseline subtracted inside the calibration
+# (diag_v22_dark run). Only the RAYLEIGH constants move; the cloud method integrates 100-2400 m
+# where dark/signal ~ 1e-3, so the cloud series are carried over UNCHANGED -- that pairing (dark-
+# corrected profile / dark-free cloud constant) is the physically consistent one.
+OUT_DARK = OUT.parent / "calib_v22dark"
+DARK_RUN = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/diag_v22_dark")
+
 V22_SRC = {
-    "A":  Path("C:/DATA/Projects/202606_E-PROFILE_calibration/rayleigh_availability/candidates"
-               "/cand_N2.5_PAYERNE_CHM15k_A.json"),
+    # The fresh run_payerne_v22 output, NOT the availability-corpus file: settings-identical
+    # (bit-identical constants on common nights) but it extends through 2026-08-14, where the
+    # corpus stops at 2026-07-13 and the Kalman would clamp for the dashboard's last month.
+    "A":  RAW / "payerne_A_v2.2.json",
     "Cr": RAW / "payerne_C_v2.2.json",
 }
 
@@ -128,7 +142,7 @@ def build(chan, outdir=OUT):
     key = f"{WMO}_{ident}_{spec['calib']}"
     outdir.mkdir(parents=True, exist_ok=True)
 
-    kt, ks, kstd = kalman_best_estimate(dates, C)
+    kt, ks, kstd = kalman_best_estimate(dates, C, uncertainties=Cstd)
     if not len(kt):
         print(f"  {chan} ({spec['itype']}): too few nights ({len(C)}) for the operational filter")
         return None
@@ -186,6 +200,65 @@ def v22_nights(chan="A"):
     return (d, np.array(c), np.array(u)) if len(d) >= 5 else None
 
 
+def dark_run_nights(ident):
+    """Per-night dark-corrected Rayleigh constants from the diag_v22_dark runner CSVs."""
+    f = DARK_RUN / f"{WMO}_{ident}" / f"{WMO}_{ident}_cal.csv"
+    if not f.exists():
+        return None
+    d, c, u = [], [], []
+    with open(f, newline="", encoding="utf-8") as fh:
+        for r in csv.DictReader(fh):
+            if r["method"] == "rayleigh" and r["flag"] in ("1.0", "0.5"):
+                try:
+                    v = float(r["cal_value"])
+                except ValueError:
+                    continue
+                if v > 0:
+                    d.append(datetime.strptime(r["date"], "%Y%m%d"))
+                    c.append(v)
+                    u.append(float(r["uncertainty"]) if r["uncertainty"] else np.nan)
+    return (d, np.array(c), np.array(u)) if len(d) >= 5 else None
+
+
+def build_dark_channel(chan, outdir=OUT_DARK):
+    """One Rayleigh channel's v2.2+dark series, from the dark-corrected run."""
+    spec = INSTR[chan]
+    ident = spec.get("ident", chan)
+    nights = dark_run_nights(ident)
+    if nights is None:
+        print(f"  {chan}: no dark-corrected run ({DARK_RUN}) -> skipped")
+        return None
+    outdir.mkdir(parents=True, exist_ok=True)
+    dates, C, Cstd = nights
+    key = f"{WMO}_{ident}_{spec['calib']}"
+    kt, ks, kstd = kalman_best_estimate(dates, C, uncertainties=Cstd)
+    daily = defaultdict(list)
+    for d, c in zip(dates, C):
+        daily[d.date()].append(float(c))
+    rows = []
+    for t, v, s in zip(kt, ks, kstd):
+        day = t.astype("datetime64[D]").astype(object)
+        obs = daily.get(day, [])
+        rows.append([str(day), (np.median(obs) if obs else ""),
+                     (np.std(obs) if len(obs) > 1 else (0.0 if obs else "")), v, s])
+    with open(outdir / f"{key}_L1.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["time", "C_daily", "C_daily_std", "C_kalman", "C_kalman_std"])
+        w.writerows(rows)
+    print(f"  {chan} ({spec['itype']}, {spec['calib']}) v2.2+dark: {len(C)} nights "
+          f"{dates[0]:%Y-%m-%d}..{dates[-1]:%Y-%m-%d}  median C_L={np.median(C):.4g}  "
+          f"-> Kalman {len(kt)} days, last {ks[-1]:.4g}")
+    return dict(
+        ident=ident, itype=spec["itype"], calib=spec["calib"], key=key,
+        source=f"diag_v22_dark/{WMO}_{ident}", created="eprof_v2.2 + dark b(z)",
+        points=[dict(date=d.strftime("%Y-%m-%d"), value=float(c),
+                     std=(float(s) if np.isfinite(s) else None), method="Rayleigh")
+                for d, c, s in zip(dates, C, Cstd)],
+        kalman=dict(date=[str(t)[:10] for t in kt], value=[float(v) for v in ks],
+                    std=[float(s) if np.isfinite(s) else 0.0 for s in kstd]),
+    )
+
+
 def build_v22_channel(chan, outdir=OUT_V22):
     """One channel's v2.2 series from its own per-night constants."""
     nights = v22_nights(chan)
@@ -197,7 +270,7 @@ def build_v22_channel(chan, outdir=OUT_V22):
     outdir.mkdir(parents=True, exist_ok=True)
     dates, C, Cstd = nights
     key = f"{WMO}_{ident}_{spec['calib']}"
-    kt, ks, kstd = kalman_best_estimate(dates, C)
+    kt, ks, kstd = kalman_best_estimate(dates, C, uncertainties=Cstd)
     daily = defaultdict(list)
     for d, c in zip(dates, C):
         daily[d.date()].append(float(c))
@@ -257,7 +330,29 @@ def main():
     if any_v22:
         (OUT_V22 / "points.json").write_text(json.dumps(out22), encoding="utf-8")
         print(f"-> {OUT_V22}")
-    return {"v2.0": out, "v2.2": out22 if any_v22 else {}}
+
+    # v2.2+dark: Rayleigh channels from the dark-corrected run, cloud channels carried over.
+    print("== eprof_v2.2 + dark variant (Rayleigh constants from diag_v22_dark) ==")
+    outdark, any_dark = {}, False
+    for chan in ("A", "B", "C", "Cr"):
+        if INSTR[chan]["calib"] == "rayleigh":
+            r = build_dark_channel(chan)
+            if r is not None:
+                outdark[chan] = r
+                any_dark = True
+                continue
+        r0 = out.get(chan)
+        if r0 is not None:
+            outdark[chan] = r0
+            src = OUT / f"{r0['key']}_L1.csv"
+            if src.exists():
+                OUT_DARK.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, OUT_DARK / src.name)
+    if any_dark:
+        (OUT_DARK / "points.json").write_text(json.dumps(outdark), encoding="utf-8")
+        print(f"-> {OUT_DARK}")
+    return {"v2.0": out, "v2.2": out22 if any_v22 else {},
+            "v2.2dark": outdark if any_dark else {}}
 
 
 if __name__ == "__main__":

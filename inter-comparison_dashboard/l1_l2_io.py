@@ -42,7 +42,11 @@ L2_ROOT = Path(os.environ.get("ALC_DASH_L2_ROOT", "D:/E-PROFILE_L2_2026"))
 # CAMS: the daily operational cache first (it is the only thing covering Jun-Aug 2026), then the
 # monthly archives intercompare uses (0.4 deg primary, 1 deg fallback).
 CAMS_DAILY = [Path(p) for p in os.environ.get(
-    "ALC_DASH_CAMS_DAILY", "D:/CAMS_daily;D:/CAMS").split(";") if p]
+    "ALC_DASH_CAMS_DAILY", "D:/CAMS_daily").split(";") if p]
+# NOTE deliberately NOT listing D:/CAMS here: that folder holds 1-DEGREE monthlies (2018-...), and
+# find_cams_file prefers a monthly over a daily within each folder -- for any window before the
+# daily cache starts, the 1-degree grid (grid-point orography 894 m too high at Payerne, PWV -26 %)
+# would silently win. Missing days fall back to find_cams_month = ALC_VAL_CAMS_04 (0.4 deg).
 
 
 # --------------------------------------------------------------------------- file discovery
@@ -141,7 +145,57 @@ def read_l2(wmo, ident, start, end, workers=12):
 
 
 # --------------------------------------------------------------------------- L1
-def _l1_files(files):
+                     # --------------------------------------------------- dark baseline (measured)
+_DARK_NPZ = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/rayleigh_availability"
+                 "/dark_profiles_payerne.npz")
+_DARK_CACHE = {}
+
+
+def dark_profile(wmo, ident):
+    """Measured electronic baseline b(z), in `rcs_0 / z^2` units, or None.
+
+    From the Payerne dark campaign (telescopes covered, May-July 2026): the detector reads a
+    NON-ZERO, NON-FLAT baseline. It matters for an inter-comparison because it is not the same
+    shape on the two instruments -- measured here: CHM15k -17.0 % of the molecular night signal
+    with a +1.2 %/km slope (essentially a scale error), CL61 -16.0 % with a -5.7 %/km slope
+    (-3.0 % at 2 km down to -38.4 % at 6 km). The LEVELS nearly cancel in a CHM15k/CL61 ratio;
+    the ~7 %/km SLOPE difference does not, and it opens with altitude -- which is exactly the
+    divergence the profile panels show.
+
+    Only Payerne (0-20000-0-06610) has been measured; other stations return None and are left
+    untouched. This is a MEASURED profile, not the fitted intercept that `subtract_background`
+    removes -- that one is atmosphere in disguise (see doc/reports/altitude_forward_model_study.md).
+    """
+    key = (str(wmo), str(ident))
+    if key in _DARK_CACHE:
+        return _DARK_CACHE[key]
+    out = None
+    if str(wmo) == "0-20000-0-06610" and _DARK_NPZ.exists():
+        try:
+            with np.load(_DARK_NPZ) as z:
+                if f"{ident}_b" in z:
+                    out = (np.asarray(z[f"{ident}_range"], "f8"), np.asarray(z[f"{ident}_b"], "f8"))
+        except Exception:
+            out = None
+    _DARK_CACHE[key] = out
+    return out
+
+
+def _subtract_dark(rcs, rng, dark):
+    """rcs_0 - b(z)*z^2, with b resampled onto this file's range grid."""
+    if dark is None:
+        return rcs
+    rd, bd = dark
+    b = np.interp(rng, rd, bd, left=np.nan, right=np.nan)
+    ok = np.isfinite(b)
+    if not ok.any():
+        return rcs
+    corr = np.zeros_like(rng)
+    corr[ok] = b[ok] * rng[ok] ** 2
+    return rcs - corr[None, :]
+
+
+def _l1_files(files, dark=None):
     """One day's L1 file(s) -> hourly-median retimed arrays (mirrors intercompare._l1_day, but over
     a LIST so a day of 5-minute granules retimes as one block)."""
     ts, rcss, cbhs, vvs, temps = [], [], [], [], []
@@ -157,6 +211,8 @@ def _l1_files(files):
                     rcs = rcs.T if rcs.shape == (r.size, t.size) else None
                 if rcs is None or t.size == 0:
                     continue
+                # Before any retiming or filtering: the baseline is a property of the raw counts.
+                rcs = _subtract_dark(rcs, r, dark)
                 if rng is None:
                     rng = r
                 elif r.size != rng.size:
@@ -214,8 +270,14 @@ def read_l1(wmo, ident, start, end, workers=12):
         return None
     nR = meta["rng"].size
     parts = []
+    # ALC_DASH_DARK=1 forces the baseline subtraction at CACHE time -- default OFF: the dashboard's
+    # "v2.2dark" variant applies it per-combo instead (exact, since the baseline is time-constant
+    # and the cache holds hourly MEDIANS), which lets one cache serve corrected and uncorrected
+    # views. Correcting only the profile while dividing by an uncorrected constant mixes two signal
+    # definitions and WORSENS the comparison (measured 2026-08-15) -- the variant corrects both.
+    dark = dark_profile(wmo, ident) if os.environ.get("ALC_DASH_DARK", "0") == "1" else None
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        for res in ex.map(lambda j: _l1_files(j[1]) if j[1] else None, jobs):
+        for res in ex.map(lambda j: _l1_files(j[1], dark) if j[1] else None, jobs):
             if res is not None and res[5].size == nR:
                 parts.append(res[:5])
     if not parts:

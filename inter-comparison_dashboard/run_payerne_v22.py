@@ -63,6 +63,10 @@ def run_one(job):
     o = CalibrationOptions.from_json(REPO / "options.json")
     o.folder_root = L1_ROOT
     o.data_level = DataLevel.L1
+    # The monthly CAMS archive (options.json cams_folder) stops at the last complete month;
+    # recent nights live as daily files in a separate folder. Point there when asked.
+    if os.environ.get("ALC_CAMS_DIR"):
+        o.cams_folder = Path(os.environ["ALC_CAMS_DIR"])
     o.molecular_method = meth
     o.molecular_params = dict(params)
     o.plot_main = o.plot_all = False

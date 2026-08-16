@@ -228,6 +228,18 @@ function calibFigure(ident, chan) {
       name:'v2.2 — Rayleigh', marker:{ size:5, color:'#2f9e44', opacity:0.55, symbol:'triangle-up' },
       hovertemplate:'%{x|%Y-%m-%d}<br>v2.2 C_L = %{y:.3e}<extra></extra>' });
   }
+  /* v2.2+dark: the measured electronic baseline subtracted inside the calibration. Same skip rule:
+     cloud channels are carried over unchanged, so only genuinely different series are drawn. */
+  const c22d = (D.calib22dark || {})[chan];
+  if (c22d && c22d.kalman && c22d.key === c.key && c22d.created !== c.created) {
+    const k3 = c22d.kalman;
+    if (k3.date.length) traces.push({ x:k3.date, y:k3.value, mode:'lines',
+      name:'v2.2+dark Kalman estimate', line:{color:'#7048e8', width:2},
+      hovertemplate:'%{x|%Y-%m-%d}<br>v2.2+dark Kalman = %{y:.3e}<extra></extra>' });
+    traces.push({ x:c22d.points.map(p => p.date), y:c22d.points.map(p => p.value), mode:'markers',
+      name:'v2.2+dark — Rayleigh', marker:{ size:5, color:'#7048e8', opacity:0.5, symbol:'diamond' },
+      hovertemplate:'%{x|%Y-%m-%d}<br>v2.2+dark C_L = %{y:.3e}<extra></extra>' });
+  }
   const byM = {};
   c.points.forEach(p => (byM[p.method] = byM[p.method] || []).push(p));
   Object.keys(byM).sort().forEach(m => {
@@ -402,6 +414,7 @@ def html(data):
       <span class="seg" id="calseg">
         <button data-cal="v2.0" class="on">v2.0 (operational)</button>
         <button data-cal="v2.2">v2.2 (noise-aware gates)</button>
+        <button data-cal="v2.2dark">v2.2 + dark (electronic baseline subtracted)</button>
       </span>
     </div>
     <div class="ctl-group">

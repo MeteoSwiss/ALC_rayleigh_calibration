@@ -87,7 +87,40 @@ WL_MODES = ["none", "angstrom", "molecular"]
 # cannot be applied after the hourly medians are taken (median(beta/c) != median(beta)/median(c)).
 # The L2 panel is independent of it and is recomputed identically for each variant -- wasteful, but
 # it keeps one combo key for the whole payload and the pool absorbs it.
-CALIB_VARIANTS = {"v2.0": CAL.OUT, "v2.2": CAL.OUT_V22}
+CALIB_VARIANTS = {"v2.0": CAL.OUT, "v2.2": CAL.OUT_V22, "v2.2dark": CAL.OUT_DARK}
+
+# Measured dark baseline b(z), rcs_0 units, from the covered-telescope campaign. The "v2.2dark"
+# variant subtracts it from the L1 profiles AND uses constants from the dark-corrected calibration
+# run -- both sides or neither: a corrected profile divided by an uncorrected constant (or vice
+# versa) mixes two signal definitions and WORSENS the comparison (measured 2026-08-15). Subtracting
+# after the hourly median is exact because the baseline is constant in time.
+DARK_NPZ = Path(os.environ.get(
+    "ALC_DASH_DARK_NPZ",
+    "C:/DATA/Projects/202606_E-PROFILE_calibration/rayleigh_availability/dark_profiles_payerne.npz"))
+_DARKP = {}
+
+
+def dark_for(ident, rng):
+    """b(z) resampled on this channel's range grid (rcs_0 units), or None."""
+    key = str(ident)
+    if key not in _DARKP:
+        prof = None
+        if DARK_NPZ.exists():
+            try:
+                with np.load(DARK_NPZ) as z:
+                    if f"{ident}_b_rcs" in z:
+                        prof = (np.asarray(z[f"{ident}_range"], "f8"),
+                                np.asarray(z[f"{ident}_b_rcs"], "f8"))
+            except Exception:
+                prof = None
+        _DARKP[key] = prof
+    prof = _DARKP[key]
+    if prof is None:
+        return None
+    rd, bd = prof
+    ok = np.isfinite(rd) & np.isfinite(bd)
+    b = np.interp(np.asarray(rng, "f8"), rd[ok], bd[ok], left=np.nan, right=np.nan)
+    return np.nan_to_num(b, nan=0.0)
 COMBOS = [(cal, wv, wl) for cal in CALIB_VARIANTS for wv in (False, True) for wl in WL_MODES]
 
 
@@ -124,6 +157,10 @@ def process_channel(d, ch, source, wv, wl, cal="v2.0"):
     """One channel, one source, one correction combo -> the dict grid_and_stats() consumes."""
     beta = d["beta"].copy()
     med_corr = 1.0
+    if source == "L1" and cal == "v2.2dark":
+        b = dark_for(ch["ident"], np.asarray(d["alt"], "f8") - float(d["station_alt"]))
+        if b is not None:
+            beta = beta - b[None, :]
     if source == "L1":
         saved = IC.CALIB
         try:
@@ -458,8 +495,9 @@ def main():
     t0, t1 = common_window(npz)
     print(f"common window: {t0} .. {t1}", flush=True)
 
-    cal_all = CAL.main()                                 # {'v2.0': {...}, 'v2.2': {...}}
+    cal_all = CAL.main()                     # {'v2.0': {...}, 'v2.2': {...}, 'v2.2dark': {...}}
     calib, calib22 = cal_all['v2.0'], cal_all['v2.2']
+    calib22dark = cal_all.get('v2.2dark', {})
     l2c = l2_applied_constants(npz, t0, t1)
 
     workers = min(len(COMBOS), max(1, (os.cpu_count() or 8) - 2), 6)
@@ -485,7 +523,8 @@ def main():
         alt_agl=alt_agl,
         channels=[dict(label=c["label"], itype=c["itype"], ident=c["ident"], color=c["color"],
                        calib=c["calib"], chan=c.get("chan", c["ident"])) for c in CHANNELS],
-        iref=IREF, months=months, combos=combos, calib=calib, calib22=calib22, l2_applied=l2c,
+        iref=IREF, months=months, combos=combos, calib=calib, calib22=calib22,
+        calib22dark=calib22dark, l2_applied=l2c,
         hist_edges=[round(float(x), 3) for x in HIST_EDGES],
     )
     (OUT / "data.json").write_text(json.dumps(payload), encoding="utf-8")
