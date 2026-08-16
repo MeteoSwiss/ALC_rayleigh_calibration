@@ -228,7 +228,42 @@ l'hétérogénéité — un contributeur plausible de τ sans marqueur géograph
 **insuffisant pour le CL61** (+4,7 max à α = 3 /km, contre +9,05 observé) et ne change pas le
 verdict « ne pas retoucher η ». Chiffres : `alpha_scan.json` (scratchpad de session).
 
-### 2.4 Verdict Q1
+### 2.3ter Addendum — balayage λ₀ ±0,3 nm et test SANS correction WV : le mécanisme du +9 CL61 est identifié
+
+*Ajouté 2026-08-16 sur demande opérateur. Rejeu semi-analytique des scènes réelles du run réseau
+(la correction WV entre comme facteur T²_wv(CBH) par scène : `beta /= trans2` avant l'intégrale,
+donc ln C_L ⊃ −ln T² — recalculé avec les MÊMES fonctions/LUT/CAMS 0,4° que le pipeline ;
+`rayleigh_availability/wv_lambda_sweep.py` ; 781 scènes CL61 + 1 997 CL51 + 1 611 CL31 en
+contrôle, pente poolée à démoyennage par unité).*
+
+![Balayage λ₀ et sans-WV](figs_cbh_heterogeneity/wv_lambda_sweep.png)
+
+| type | nominale | λ₀ ±0,3 nm | **SANS correction WV** | terme WV (nom−sans) | part du terme vue par le brut |
+|---|---|---|---|---|---|
+| CL61 | +9,41 ± 1,85 | +8,4 à +9,6 | **−0,87 ± 1,90** | +10,3 %/km | **8 %** |
+| CL51 | +5,19 ± 0,66 | +5,1 à +5,2 | −4,31 ± 0,68 | +9,5 %/km | 45 % |
+| CL31 | +1,47 ± 0,74 | +1,4 à +1,6 | −5,96 ± 0,78 | +7,4 %/km | 80 % |
+
+Trois conclusions :
+
+1. **λ₀ statique : réfuté.** ±0,3 nm ne déplace aucune pente de plus de ~0,5 %/km — le +9 CL61
+   n'est pas une petite erreur de longueur d'onde de la correction.
+2. **La décomposition résout l'échelle des types.** Le terme de correction WV porte une
+   dépendance CBH de +7 à +10 %/km pour les trois types (l'absorption croît avec le trajet
+   sous-nuage, quel que soit le FWHM). Un signal brut physiquement normal doit montrer la pente
+   NÉGATIVE opposée — le CL31 la montre à 80 % (son modèle spectral est presque juste, résidu
+   +1,5), le CL51 à 45 % (résidu +5,2), **le CL61 à 8 % seulement (résidu +9,4)**. La pente
+   dC/dCBH de chaque type EST l'écart entre l'absorption WV modélisée et celle que son signal
+   brut contient réellement.
+3. **L'anomalie est donc côté instrument CL61, en amont de notre pipeline** : son β_att livré ne
+   porte quasiment pas l'absorption WV attendue sur 0,5–2,4 km — compatible avec une
+   compensation WV interne (firmware/traitement Vaisala) ou une caractéristique spectrale
+   effective très différente du modèle (mais pas à ±0,3 nm près). Tension à résoudre : côté
+   RAYLEIGH (fenêtres 2–6,5 km), le CL61 corrigé WV s'accorde à ±3 % avec le CHM15k (Payerne,
+   Lindenberg) — la correction y semble nécessaire. Une compensation interne limitée en portée
+   ou climatologique réconcilierait les deux. **Test discriminant proposé** : régresser le
+   ratio CL61/CHM15k co-localisés contre le PWV CAMS (un brut WV-aveugle donne une pente nulle) ;
+   et interroger Vaisala sur le traitement WV du CL61.
 
 **Aucun facteur mesurable dans L1 n'explique les différences intra-type.** Les seuls signaux
 (firmware 170/171, altitude < 100 m, blocs WMO) sont mutuellement confondus avec le pays
