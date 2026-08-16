@@ -1,0 +1,266 @@
+{
+ "closure_shipped": {
+  "max_abs_dev_pct": 0.004571616819259994,
+  "slope_pct_per_km": 1.0400302569527823e-05,
+  "linearity_max_abs_err": 0.0,
+  "dev_by_centre_pct": {
+   "2500": -0.0028718709458752656,
+   "3000": -0.004571616819259994,
+   "3500": -0.002910517530840817,
+   "4000": -0.0029295529474171467,
+   "4500": -0.0043826613434494455,
+   "5000": -0.002964868679611321,
+   "5500": -0.0029822431461434817,
+   "6000": -0.00421793696109285,
+   "6500": -0.003014436829529288
+  }
+ },
+ "closure_mine": {
+  "centres_m": [
+   2500.0,
+   3000.0,
+   3500.0,
+   4000.0,
+   4500.0,
+   5000.0,
+   5500.0,
+   6000.0,
+   6500.0
+  ],
+  "dev_pct": [
+   5.9015503595105656e-08,
+   5.366564970188392e-08,
+   4.7470827269080473e-08,
+   4.4483017269669745e-08,
+   4.031448508357016e-08,
+   3.554221361667942e-08,
+   3.318847419109261e-08,
+   2.996796144572045e-08,
+   2.632469797703152e-08
+  ],
+  "max_abs_dev_pct": 5.9015503595105656e-08
+ },
+ "head_to_head_below": [
+  {
+   "aod": 0.05,
+   "aod_check": 0.05000000000000002,
+   "s_true": 20.0,
+   "shipped_3km_pct": 15.038004924840266,
+   "shipped_6km_pct": 15.038169616504526,
+   "mine_3km_pct": 15.134391959189353,
+   "mine_6km_pct": 15.134391872559938,
+   "fwd_max_rel_diff": 0.0,
+   "analytic_linear_pct": 17.35108709918103
+  },
+  {
+   "aod": 0.05,
+   "aod_check": 0.05,
+   "s_true": 30.0,
+   "shipped_3km_pct": 6.889855011118962,
+   "shipped_6km_pct": 6.890069767708917,
+   "mine_3km_pct": 6.936131419326896,
+   "mine_6km_pct": 6.936131353556796,
+   "fwd_max_rel_diff": 0.0,
+   "analytic_linear_pct": 7.608917352979017
+  },
+  {
+   "aod": 0.05,
+   "aod_check": 0.049999999999999996,
+   "s_true": 52.0,
+   "shipped_3km_pct": -0.01895146612846954,
+   "shipped_6km_pct": -0.0186943564488673,
+   "mine_3km_pct": -1.1391984222619556e-05,
+   "mine_6km_pct": -1.144034970090857e-05,
+   "fwd_max_rel_diff": 2.220446049250313e-16,
+   "analytic_linear_pct": 0.0
+  },
+  {
+   "aod": 0.05,
+   "aod_check": 0.05000000000000002,
+   "s_true": 80.0,
+   "shipped_3km_pct": -3.3187644824377083,
+   "shipped_6km_pct": -3.318487589888597,
+   "mine_3km_pct": -3.3072713867224324,
+   "mine_6km_pct": -3.3072714266729086,
+   "fwd_max_rel_diff": 0.0,
+   "analytic_linear_pct": -3.4394583742433538
+  },
+  {
+   "aod": 0.05,
+   "aod_check": 0.05,
+   "s_true": 90.0,
+   "shipped_3km_pct": -4.000074902475459,
+   "shipped_6km_pct": -3.999793795648965,
+   "mine_3km_pct": -3.98972230252832,
+   "mine_6km_pct": -3.9897223407423743,
+   "fwd_max_rel_diff": 0.0,
+   "analytic_linear_pct": -4.134327792693259
+  },
+  {
+   "aod": 0.2,
+   "aod_check": 0.20000000000000007,
+   "s_true": 20.0,
+   "shipped_3km_pct": 51.07463544206994,
+   "shipped_6km_pct": 51.07436068566147,
+   "mine_3km_pct": 52.437027847078625,
+   "mine_6km_pct": 52.43702761208249,
+   "fwd_max_rel_diff": 0.0,
+   "analytic_linear_pct": 89.64808793049517
+  },
+  {
+   "aod": 0.2,
+   "aod_check": 0.2,
+   "s_true": 30.0,
+   "shipped_3km_pct": 23.405718500968796,
+   "shipped_6km_pct": 23.405608783337573,
+   "mine_3km_pct": 24.03226575089319,
+   "mine_6km_pct": 24.03226558815681,
+   "fwd_max_rel_diff": 0.0,
+   "analytic_linear_pct": 34.08896791724778
+  },
+  {
+   "aod": 0.2,
+   "aod_check": 0.19999999999999998,
+   "s_true": 52.0,
+   "shipped_3km_pct": -0.2189545971522877,
+   "shipped_6km_pct": -0.21892170410772183,
+   "mine_3km_pct": -0.0005744884842950881,
+   "mine_6km_pct": -0.0005745902573961459,
+   "fwd_max_rel_diff": 0.0,
+   "analytic_linear_pct": 0.0
+  },
+  {
+   "aod": 0.2,
+   "aod_check": 0.20000000000000007,
+   "s_true": 80.0,
+   "shipped_3km_pct": -11.559722353658108,
+   "shipped_6km_pct": -11.55962070470311,
+   "mine_3km_pct": -11.460551681363263,
+   "mine_6km_pct": -11.460551753978777,
+   "fwd_max_rel_diff": 0.0,
+   "analytic_linear_pct": -13.064176460119414
+  },
+  {
+   "aod": 0.2,
+   "aod_check": 0.2,
+   "s_true": 90.0,
+   "shipped_3km_pct": -13.905993864218491,
+   "shipped_6km_pct": -13.90587784068198,
+   "mine_3km_pct": -13.825332532315915,
+   "mine_6km_pct": -13.825332598914663,
+   "fwd_max_rel_diff": 0.0,
+   "analytic_linear_pct": -15.539725707815622
+  },
+  {
+   "aod": 0.35,
+   "aod_check": 0.35,
+   "s_true": 20.0,
+   "shipped_3km_pct": 76.17554333965764,
+   "shipped_6km_pct": 76.17496492412666,
+   "mine_3km_pct": 80.06923874683017,
+   "mine_6km_pct": 80.06923840197632,
+   "fwd_max_rel_diff": 0.0,
+   "analytic_linear_pct": 206.48542032930015
+  },
+  {
+   "aod": 0.35,
+   "aod_check": 0.35,
+   "s_true": 30.0,
+   "shipped_3km_pct": 34.866635212929786,
+   "shipped_6km_pct": 34.86629600261841,
+   "mine_3km_pct": 36.697568225471876,
+   "mine_6km_pct": 36.697567990888636,
+   "fwd_max_rel_diff": 0.0,
+   "analytic_linear_pct": 67.08514275016029
+  },
+  {
+   "aod": 0.35,
+   "aod_check": 0.35,
+   "s_true": 52.0,
+   "shipped_3km_pct": -0.651433751478514,
+   "shipped_6km_pct": -0.651562772813663,
+   "mine_3km_pct": -0.002875969848559201,
+   "mine_6km_pct": -0.002876111177207985,
+   "fwd_max_rel_diff": 0.0,
+   "analytic_linear_pct": 0.0
+  },
+  {
+   "aod": 0.35,
+   "aod_check": 0.35,
+   "s_true": 80.0,
+   "shipped_3km_pct": -17.79477765973885,
+   "shipped_6km_pct": -17.7948039030401,
+   "mine_3km_pct": -17.504881399569427,
+   "mine_6km_pct": -17.50488149637126,
+   "fwd_max_rel_diff": 0.0,
+   "analytic_linear_pct": -21.729546175813187
+  },
+  {
+   "aod": 0.35,
+   "aod_check": 0.35,
+   "s_true": 90.0,
+   "shipped_3km_pct": -21.349859700205588,
+   "shipped_6km_pct": -21.34986441171465,
+   "mine_3km_pct": -21.11651975845922,
+   "mine_6km_pct": -21.11651984607228,
+   "fwd_max_rel_diff": 0.0,
+   "analytic_linear_pct": -25.588192631821826
+  },
+  {
+   "aod": 0.5,
+   "aod_check": 0.5000000000000001,
+   "s_true": 20.0,
+   "shipped_3km_pct": 93.116961473173,
+   "shipped_6km_pct": 93.11617804656814,
+   "mine_3km_pct": 100.5261911657866,
+   "mine_6km_pct": 100.52619073964819,
+   "fwd_max_rel_diff": 0.0,
+   "analytic_linear_pct": 395.3032424395115
+  },
+  {
+   "aod": 0.5,
+   "aod_check": 0.49999999999999994,
+   "s_true": 30.0,
+   "shipped_3km_pct": 42.50129970869061,
+   "shipped_6km_pct": 42.50080148043822,
+   "mine_3km_pct": 46.076148154699005,
+   "mine_6km_pct": 46.076147866959815,
+   "fwd_max_rel_diff": 1.1102230246251565e-16,
+   "analytic_linear_pct": 108.20090840784556
+  },
+  {
+   "aod": 0.5,
+   "aod_check": 0.49999999999999994,
+   "s_true": 52.0,
+   "shipped_3km_pct": -1.311392539624101,
+   "shipped_6km_pct": -1.3116369422428664,
+   "mine_3km_pct": -0.008012658770395475,
+   "mine_6km_pct": -0.008012829385106723,
+   "fwd_max_rel_diff": 0.0,
+   "analytic_linear_pct": 0.0
+  },
+  {
+   "aod": 0.5,
+   "aod_check": 0.5000000000000001,
+   "s_true": 80.0,
+   "shipped_3km_pct": -22.57583417682213,
+   "shipped_6km_pct": -22.575952914419737,
+   "mine_3km_pct": -21.987082994042893,
+   "mine_6km_pct": -21.987083108747786,
+   "fwd_max_rel_diff": 0.0,
+   "analytic_linear_pct": -29.531191028128656
+  },
+  {
+   "aod": 0.5,
+   "aod_check": 0.5000000000000001,
+   "s_true": 90.0,
+   "shipped_3km_pct": -26.996749246926132,
+   "shipped_6km_pct": -26.99684155300406,
+   "mine_3km_pct": -26.522742904046158,
+   "mine_6km_pct": -26.52274300721239,
+   "fwd_max_rel_diff": 0.0,
+   "analytic_linear_pct": -34.44116630922144
+  }
+ ],
+ "indep_vs_shipped_max_abs_pp": 7.409229692613593
+}
