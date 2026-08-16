@@ -294,6 +294,50 @@ def _classification_on_fit_grid(classification, times_night, range_fit, codes):
         return None
 
 
+_DARK_CACHE: dict = {}
+
+
+def _dark_on_grid(options, info, range_alc):
+    """Measured baseline b(z) for this unit, resampled onto the fit grid (or None).
+
+    File format: npz holding "<ident>_range" (m) and "<ident>_b_rcs" (in rcs_0 units, i.e. the
+    range-corrected counts themselves), as produced by rayleigh_availability/dark_profiles.py from
+    the covered-telescope campaign. Counts are the natural unit: divided by z^2 the baseline blows
+    up near the ground and any range smoothing drags that blow-up upward. Missing file, missing
+    unit, or a grid that does not overlap -> None, and the calibration is untouched: a diagnostic
+    must never cost a calibration.
+    """
+    path = str(getattr(options, "dark_profile_file", "") or "")
+    if not path:
+        return None
+    key = (path, str(getattr(info, "identifier", "")))
+    if key not in _DARK_CACHE:
+        entry = None
+        try:
+            p = Path(path)
+            if p.exists():
+                with np.load(p) as z:
+                    ident = str(getattr(info, "identifier", ""))
+                    if f"{ident}_b_rcs" in z:
+                        entry = (np.asarray(z[f"{ident}_range"], float),
+                                 np.asarray(z[f"{ident}_b_rcs"], float))
+        except Exception:
+            logger.debug("dark profile unreadable", exc_info=True)
+            entry = None
+        _DARK_CACHE[key] = entry
+    entry = _DARK_CACHE[key]
+    if entry is None:
+        return None
+    rd, bd = entry
+    ok = np.isfinite(rd) & np.isfinite(bd)
+    if ok.sum() < 5:
+        return None
+    b = np.interp(np.asarray(range_alc, float), rd[ok], bd[ok], left=np.nan, right=np.nan)
+    if not np.any(np.isfinite(b)):
+        return None
+    return np.nan_to_num(b, nan=0.0)          # outside the measured range: no correction
+
+
 def _compute_cl_for_perturbation(
     rcs_mean: NDArray[np.float64],
     range_alc: NDArray[np.float64],
@@ -765,6 +809,17 @@ def calibrate_rayleigh(
                     logger.info(f"Outlier screen: kept {keep_idx.size}/{data.rcs.shape[0]} profiles")
     rcs_use = data.rcs[keep_idx]
 
+    # MEASURED electronic baseline removed HERE, on the range-corrected counts themselves, so every
+    # downstream consumer sees the same corrected signal: the molecular fit, the pointwise C_L in
+    # calculate_lidar_constant (which re-derives signal from rcs_mean) and the whole perturbation
+    # ensemble. Correcting only the fit input would leave the two C_L estimators disagreeing and the
+    # night would be rejected with flag -3. Unlike `subtract_background` (fitted intercept, shown to
+    # be atmosphere in disguise), this profile is measured with the telescope covered.
+    dark_b = _dark_on_grid(options, info, data.range_alc)
+    if dark_b is not None:
+        rcs_use = rcs_use - dark_b[None, :]              # dark_b is already in rcs_0 units
+        logger.info("Dark baseline subtracted (mean %.3e counts)", np.nanmean(dark_b))
+
     # Collapse the kept profiles in time. Mean is efficient for the weak-signal photon
     # noise at 3-6 km; "median" is robust but ~1.5x noisier there (set via options).
     _agg = np.nanmedian if getattr(options, "time_aggregation", "mean") == "median" else np.nanmean
@@ -782,6 +837,7 @@ def calibrate_rayleigh(
     # Range-normalized signal (night mean) + per-profile stack. The stack feeds the
     # E-PROF v2 ("optimal") method's temporal-variability aerosol rejection (molecular is
     # steady in time; aerosol fluctuates).
+    # rcs_use / rcs_mean already carry the dark subtraction (see above), so signal does too.
     signal = rcs_mean / (data.range_alc ** 2)
     signal_stack = rcs_use / (data.range_alc[None, :] ** 2)
 
@@ -797,17 +853,23 @@ def calibrate_rayleigh(
     # temporal MAD screen (union, never replacing it); the veto profile is rebuilt over the same night
     # so the -11 fraction means "of this night" -- see _classification_on_fit_grid.
     extra_cell_mask = None
-    if classification is not None and getattr(options, "use_classification_mask", True):
+    if classification is not None:
         t_night = [data.time_datetime[i] for i in np.asarray(keep_idx).tolist()]
-        extra_cell_mask = _classification_on_fit_grid(
-            classification, t_night, data.range_alc, PREFIT_CONTAM_CODES)
-        if extra_cell_mask is not None:
-            logger.info(f"Classification mask: {100 * extra_cell_mask.mean():.1f}% of cells excluded")
+        # The -11 veto repair (fraction over THIS night, not the 48 h file) applies whenever a
+        # classification is supplied; use_classification_mask only switches the pre-fit CELL mask
+        # below. The two are separate decisions -- gating both on one flag silently reverted the
+        # veto denominator fix when the mask was disabled.
         veto = _classification_on_fit_grid(
             classification, t_night, data.range_alc, VETO_CONTAM_CODES)
         if veto is not None:
             contam_profile = np.column_stack([np.asarray(data.range_alc, float),
                                               veto.mean(axis=0)])
+        if getattr(options, "use_classification_mask", True):
+            extra_cell_mask = _classification_on_fit_grid(
+                classification, t_night, data.range_alc, PREFIT_CONTAM_CODES)
+            if extra_cell_mask is not None:
+                logger.info(
+                    f"Classification mask: {100 * extra_cell_mask.mean():.1f}% of cells excluded")
 
     if fit_inputs_out is not None:
         fit_inputs_out.update(

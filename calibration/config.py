@@ -229,6 +229,15 @@ class CalibrationOptions:
     calc_ext_above_molecular: bool = False
     subtract_background: bool = False
     consider_points_lower_than_molecular: bool = True
+    # Path to a MEASURED electronic-baseline profile b(z), in `rcs_0 / z^2` units, subtracted from
+    # the signal before the molecular fit (npz with "<ident>_range" / "<ident>_b"). Empty = off.
+    # This is NOT subtract_background: that one removes the FITTED intercept, which a forward-model
+    # study showed is mostly atmosphere in disguise (a modest haze reproduces it with b_true = 0)
+    # and which makes the altitude gradient worse. A dark-campaign profile, measured with the
+    # telescope covered, contains no atmosphere by construction. Applying it changes C_L itself
+    # (-16 to -17 % at Payerne), so it must be used CONSISTENTLY: a profile corrected with it and a
+    # constant computed without it do not belong together.
+    dark_profile_file: str = ""
 
     # Quality thresholds
     threshold_quality: float = 15.0
@@ -327,6 +336,7 @@ class CalibrationOptions:
             calc_ext_above_molecular=bool(data.get("calc_ext_above_molecular", 0)),
             subtract_background=bool(data.get("subtract_background", 0)),
             consider_points_lower_than_molecular=bool(data.get("consider_points_lower_than_molecular", 1)),
+            dark_profile_file=str(data.get("dark_profile_file", "") or ""),
             threshold_quality=float(data.get("threshold_quality", 15)),
             use_std_atm=bool(data.get("use_std_atm", 1)),
             molecular_source=str(data.get("molecular_source", "standard")),
