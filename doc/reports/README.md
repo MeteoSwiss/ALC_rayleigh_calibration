@@ -21,6 +21,21 @@ in the consolidated reports, whose provenance lines list exactly which notes eac
 | 9 | [Calibration stability, conventions & monitoring](09_calibration_stability_monitoring.md) | The Wiegner `C_L = RCS/β_att` convention (canonical); stability drivers; short-term-variability diagnosis; per-calibration outlier rate; network v2(C8)-vs-v1.1; June-2026 changelog. |
 | 10 | [Operations, deployment & pipeline architecture](10_operations_deployment.md) | The read-once / shared-30 s×10 m-grid pipeline (implemented); the daily flow; the CSCS OmB + sensitivity runbook; the EWC dashboard deployment; the ceiloclass integration plan. |
 
+## Campaign reports — altitude independence & dark noise (2026-08)
+
+*Five linked studies (2026-08-14/16) triggered by the eprof_v2.2 availability work: "is the
+calibration constant altitude-independent, and why do cloud and Rayleigh disagree on the CL61?"
+Every headline figure in these reports passed an independent adversarial re-derivation; refuted
+claims are labelled as such inside each report.*
+
+| Report | One-line verdict |
+|--------|------------------|
+| [Altitude-independence audit (observations)](altitude_independence_audit.md) | Rayleigh `C_L` is height-independent on the windows the gates actually allow (3–5 % spread, covered by the published uncertainty) but falls −7.5 %/km below 3.75 km on clear nights; cloud `C` rose +6–14 %/km with CBH under the legacy η tables — PVC cures CL31, half-cures CL51, not CL61. Within-night vs across-night gradients have OPPOSITE signs (endogeneity trap). |
+| [Forward-model study (theory, closed simulators)](altitude_forward_model_study.md) | The shipped estimator is exact (closure 0.005 %, 1e-5 %/km); the observed gradient is ~95 % atmosphere / ~5 % estimator; overlap and photon noise are quantitatively ruled out; `subtract_background=True` subtracts atmosphere in disguise — never enable it; the published uncertainty is blind to the backscatter term (haze nights weigh ~6× too much in the Kalman). |
+| [Dark campaign, saturation, AERONET, radiosondes](dark_aeronet_sonde_audit.md) | The covered-telescope campaign: CHM15k carries a constant −17 % pedestal (no proven drift); CL61 carries a range-growing baseline explaining 66 % of its within-night gradient; CL61 cloud-CBH saturation ruled out; WV exonerated within-night (sonde swap); AERONET closes the "AOD ×36" question — same column, different scale height, S = 52 sr validated; CAMS-1° PWV −26 % at Payerne (grid-point orography). |
+| [CL61 cloud-vs-Rayleigh origin](cl61_cloud_vs_rayleigh_origin.md) | The disagreement closes: dark (−10 %) + in-window aerosol (+3 %) + λ_mol (−0.3 %) inside the cloud method's own floor (S_c ± 4.3 %). η tables PROVEN correct (no static table can produce the CBH residual). New instrument findings: Payerne CL61 diode thermal regulation lost 2026-06-11; the FOV ± convention supports 0.56 mrad half-angle. |
+| [Phase-4 network validation (CSCS run, 433 streams)](phase4_network_validation.md) | v2.2 validated for deployment: availability CHM15k 86.6 %, corpus gain ×1.49, superset 99.5 %, recovered-night offset +0.37 % (time-paired). CL61 CBH residual NOT cured by native PVC + 0.4° CAMS (+9.05 ± 1.49 %/km, 11/11 streams). Payerne dark correction +24 % / +24 nights/yr confirmed on an independent run; ~3 % of CHM15k streams (5) carry a strong dark; the far-field proxy does NOT generalise (null result). |
+
 ## Conventions and current defaults (as of 2026-07-10)
 
 - **Calibration coefficient:** the Wiegner lidar constant **`C_L = RCS/β_att`** everywhere (report 9 §1).

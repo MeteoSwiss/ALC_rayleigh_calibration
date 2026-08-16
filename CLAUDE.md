@@ -111,6 +111,24 @@ never calibrated WV-free.
   (`ALC_CAMS_DIR_FALLBACK`) for months the 0.4° download has not covered — both are L137 model levels,
   so vertical resolution is preserved. Applies to the cloud WV correction and OmB alike.
 
+## Candidate-method & CAMS plumbing (2026-08)
+
+- `cams_folder` (options.json / `ALC_CAMS_DIR`) accepts a **`;`-separated folder list**, searched in
+  order (monthly then daily per folder) — e.g. `"A:/CAMS_Monthly_04;D:/CAMS_daily"`. ⚠️ Never point
+  it at a folder holding **1° monthlies** (`D:/CAMS_run_v20`, `D:/CAMS`): the 1° grid-point orography
+  at Payerne is 894 m too high → PWV −26 % → WV column truncated.
+- Runner env overrides (leave unset → options.json wins, operational cron unaffected):
+  `ALC_MOLECULAR_METHOD` / `ALC_MOLECULAR_PARAMS` (JSON) — run a candidate algorithm network-wide;
+  `ALC_DARK_PROFILE` — measured dark-baseline npz (see below); `ALC_L1_ROOT`, `ALC_CAMS_DIR`.
+- `scripts/run_streams_parallel.py` — few-streams × long-window runs on many cores (chunks the date
+  range, per-chunk output dirs — **mandatory**, concurrent writers corrupt the shared per-ident
+  NetCDF — then merges; verified bit-identical to a sequential run).
+- **Measured dark baseline** (`dark_profile_file` option / `ALC_DARK_PROFILE`): subtracts the
+  covered-telescope b(z) profile (rcs_0 units, `rayleigh_availability/dark_profiles.py`) before the
+  Rayleigh fit. At Payerne: +24 % on the CHM15k constant, +24 nights/yr, gradient −10.5 → −2.5 %/km.
+  Do **NOT** confuse with `subtract_background` (fitted intercept = atmosphere in disguise, keep 0).
+- Campaign reports index: `doc/reports/README.md` §2026-08.
+
 ## Working preferences (user hervo63)
 
 - **Ask before relocating/moving data**; when proposing to write somewhere, state *what* / *how much*
