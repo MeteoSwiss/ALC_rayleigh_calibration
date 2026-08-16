@@ -10,6 +10,16 @@
         "--directory", "C:/DATA/Projects/202606_E-PROFILE_calibration/dashboard_l1_2026"
       ],
       "port": 8732
+    },
+    {
+      "name": "intercomp",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m", "http.server", "8741",
+        "--bind", "127.0.0.1",
+        "--directory", "C:/Users/hervo/OneDrive/Documents/ALC_rayleigh_calibration/inter-comparison_dashboard"
+      ],
+      "port": 8741
     }
   ]
 }
