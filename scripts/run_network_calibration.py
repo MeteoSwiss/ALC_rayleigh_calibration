@@ -320,6 +320,13 @@ def _do_rayleigh(s, start, end, shared=None, screen=False):
     # Measured dark-baseline profile (rayleigh_availability/dark_profiles.py). Empty = off.
     if os.environ.get("ALC_DARK_PROFILE"):
         o.dark_profile_file = os.environ["ALC_DARK_PROFILE"]
+    # R&D : ALC_WV_DISABLE=1 desactive la correction vapeur d'eau (Rayleigh). Motivation : le
+    # spectre CL61 mesure (910.74 nm, FWHM < 1.5 nm non resolu) est concu pour un creux
+    # d'absorption ("mitigated by design", M212475EN-E) et son signal brut ne montre que ~8 %
+    # de l'absorption modelisee -> variante de constantes "sans WV" pour le dashboard.
+    # Defaut (env absent) : comportement operationnel inchange.
+    if os.environ.get("ALC_WV_DISABLE") == "1":
+        o.apply_wv_correction = False
     rows = []
     for d in _days(start, end):
         if not _l1_file(s["wmo"], s["ident"], d).exists():
@@ -368,7 +375,9 @@ def _do_cloud(s, start, end, shared=None):
         ds = d.strftime("%Y%m%d")
         try:
             cfg = set_defaults(CloudCalConfig(
-                nc_file=str(fp), instrument=s["type"], apply_wv_correction=True,
+                nc_file=str(fp), instrument=s["type"],
+                # ALC_WV_DISABLE=1 : variante R&D sans correction WV (voir _do_rayleigh)
+                apply_wv_correction=(os.environ.get("ALC_WV_DISABLE") != "1"),
                 apply_transmission_correction=True, aerosol_lidar_ratio=50.0,
                 cams_folder=str(CAMS), abs_cs_lookup_table=str(WV_LUT),
                 cams_folder_fallback=(str(CAMS_FALLBACK) if CAMS_FALLBACK else ""),

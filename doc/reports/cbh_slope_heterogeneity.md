@@ -269,12 +269,32 @@ different wavelength and a very narrow bandwidth » — le laser (910,55 nm, dio
 est posé dans un creux d'absorption avec une largeur « très étroite ». La littérature CL61
 actuelle n'applique d'ailleurs **aucune** correction WV (Le & O'Connor 2026 : la WV n'est jamais
 mentionnée dans la chaîne ; Looschelders 2025 : « Despite not correcting for water vapor… ») et
-le référé RC2 du preprint relaie la même position constructeur. Filioglou 2023 rapporte
+le référé RC1 (10 mars 2026, Specific Comments 4b — vérifié à la source) du preprint relaie la
+même position constructeur. Filioglou 2023 rapporte
 néanmoins une sensibilité WV résiduelle site-à-site (~15 %) — cohérente avec nos 8 % restants.
 **Notre erreur est donc identifiée : le modèle spectral CL61 (λ₀ = 910,74 nm, FWHM = 1,0 nm)
 surestime l'absorption effective ~12×** ; le suspect principal est le FWHM (1 nm n'est pas
 « very narrow » — une émission sub-nm dans un interstice de raies effondre l'absorption, ce que
 la convolution à 1 nm lisse ; c'est aussi pourquoi le balayage λ₀ seul ne trouvait rien).
+
+**La LUT peut-elle voir le « trou d'absorption » ? NON, pas pour un laser sub-nm (vérifié).**
+La LUT (`abs_cross_wv_910nm.nc`, variable `abscs_ave`) échantillonne à **8,3 pm en moyenne par
+bin**, alors que les raies élargies par pression font ~17 pm FWHM au sol et ~8 pm à 500 hPa :
+~2 échantillons par raie au sol, ~1 en altitude — les cœurs de raies et les creux étroits sont
+**lissés par la moyenne de bin**. Autour de la raie CL61 mesurée : σ(910,74) = 0,33× la moyenne
+de bande (bord d'un creux de 323 pm couvrant 910,41–910,74 nm — la spec Vaisala 910,55 tombe
+DEDANS), mais une raie forte siège juste au-dessus : à FWHM 0,1 nm centré 910,74, le σ effectif
+vaut **1,78×** la moyenne de bande (pire qu'à 1 nm !). Le scan sur les 781 scènes réelles
+confirme : pente injectée **+8,5 à +11,0 %/km pour TOUT FWHM de 0,05 à 1,5 nm** à λ₀ = 910,74
+(`wv_fwhm_scan.py`) — aucune combinaison plausible ne descend vers le +0,8 %/km (8 %) que le
+signal brut exhibe. **Conclusion : le déficit d'absorption du CL61 est hors de portée de notre
+LUT** — soit le vrai spectre a des fenêtres sub-bin bien plus profondes (il faut un calcul
+line-by-line HITRAN à ≤ 1 pm sur 909,5–911,5 nm), soit la position vraie de la raie (±0,10 nm de
+notre mesure, à cheval sur le bord du creux) est décisive, soit la mitigation n'est pas purement
+spectrale. Le **8 % empirique reste la base opérationnelle** en attendant.
+
+![Spectre LUT autour de la raie CL61](figs_cbh_heterogeneity/lut_spectrum_910.png)
+![Scan FWHM à λ₀ mesuré](figs_cbh_heterogeneity/wv_fwhm_scan.png)
 
 **Actions** : (1) pour la calibration NUAGE CL61, remplacer la correction WV actuelle par une
 correction fortement réduite (voire nulle, pratique Le-O'Connor) — critère d'acceptation : pente
