@@ -60,6 +60,8 @@ h2 { font-size:17px; margin:26px 0 10px; }
 /* ---- control block ---- */
 .ctlwrap { position:sticky; top:40px; z-index:50; margin:12px 0 16px;
            box-shadow:0 2px 12px rgba(0,0,0,.06); }
+/* wide tables scroll inside their own container — the page never scrolls horizontally */
+.tscroll { overflow-x:auto; }
 table.instr { border-collapse:collapse; width:100%; font-size:13px; }
 table.instr th { color:var(--muted); font-weight:600; font-size:11.5px; text-align:left;
                  padding:2px 8px; text-transform:uppercase; letter-spacing:.03em; }
@@ -100,10 +102,13 @@ table.stats th:nth-child(2), table.stats td:nth-child(2) { text-align:left; }
 table.stats thead th { color:var(--muted); font-weight:600; font-size:12px; }
 table.stats tbody tr:hover { background:#f6f9fc; }
 table.ladder tbody tr.sel { background:#eef4fb; }
+table.ladder tbody tr.l2row { background:#faf8f5; color:#6b5d4a; }
+table.ladder tbody tr.l2row td { border-bottom-width:2px; }
 table.ladder tbody tr.sel td { font-weight:600; box-shadow:inset 0 0 0 9999px rgba(31,119,180,.05); }
 table.ladder tbody tr.sel td:first-child { box-shadow:inset 3px 0 0 var(--accent),
                                             inset 0 0 0 9999px rgba(31,119,180,.05); }
 .warnflag { color:#c92a2a; font-weight:700; margin-left:5px; cursor:help; }
+.warnflag.ok { color:#1971c2; font-weight:600; }
 .num { font-variant-numeric:tabular-nums; }
 .good { color:#1a7f37; font-weight:600; }
 .bad  { color:#c92a2a; font-weight:600; }
@@ -135,7 +140,10 @@ function decodeStream(enc) {
 function decodeF32(blk) { return blk ? new Float32Array(b64bytes(blk.b).buffer) : null; }
 
 /* ===================== state ===================== */
-const state = { site:null, wv:'nom', wl:'molecular', filter:false, logx:false, r0:0, r1:0,
+/* boot state (operator-confirmed): WV comparison on the manufacturer spectrum, molecular
+   wavelength, noise filter off, full period — per-instrument picks come from each site's
+   default/default_dark in variants_v3.SITE_V3 */
+const state = { site:null, wv:'ctor', wl:'molecular', filter:false, logx:false, r0:0, r1:0,
                 iref:0, pick:{} };
 const CACHE = {};
 const PCFG = { displaylogo:false, responsive:true };
@@ -351,8 +359,8 @@ function bandStatsAB(A, B, V) {
                                           sxy += dx * dy; sxx += dx * dx; syy += dy * dy; }
     rlog = sxy / Math.sqrt(sxx * syy);
   }
-  return { n, medrel:med, mad, rlog, relbias: sb !== 0 ? 100 * (sd / n) / (sb / n) : null,
-           hist, histmed:med };
+  return { n, nrel:rel.length, medrel:med, mad, rlog,
+           relbias: sb !== 0 ? 100 * (sd / n) / (sb / n) : null, hist, histmed:med };
 }
 
 /* ===================== plots ===================== */
@@ -397,8 +405,16 @@ function diffLayout(title, xr) {
 }
 /* Variant naming is wavelength-aware: each type shows ITS OWN water-vapour model
    (CL31 909.7/6.0, CL51 910.0/3.4, CL61 910.74/1.0), and 1064 nm none at all. */
-const vLabel = (itype, v) => (VLBL_BY_TYPE[itype] || {})[v] || VARIANT_LABEL[v] || v;
-const vShort = (itype, v) => (VSH_BY_TYPE[itype] || {})[v] || VSHORT[v] || v;
+/* one variant id 'v2.2dark' covers two very different dark sources: the MEASURED covered-
+   telescope b(z) at Payerne vs the clear-night ESTIMATED dark (demonstration-only) elsewhere —
+   the label must say which one this site is showing */
+const darkSuffix = v => (DARK_RUNS.indexOf(v) >= 0 && S().dark_kind === 'estimated')
+  ? ' — dark ESTIMÉ ciel clair (démonstration)' : '';
+const vLabel = (itype, v) =>
+  ((VLBL_BY_TYPE[itype] || {})[v] || VARIANT_LABEL[v] || v) + darkSuffix(v);
+const vShort = (itype, v) =>
+  ((VSH_BY_TYPE[itype] || {})[v] || VSHORT[v] || v) +
+  (darkSuffix(v) ? ' (dark estimé)' : '');
 function chLabel(k) {
   const P = S(), inst = P.instruments[k], s = state.pick[inst.ident];
   return inst.label + ' — ' + (s.method === 'rayleigh' ? 'Ray.' : 'nuage') + ' / ' +
@@ -433,31 +449,23 @@ function draw() {
   Plotly.react('d_diff', dt, diffLayout('Différence vs ' + chLabel(kref) +
                (hasL2 ? ' — L1 plein, L2 tireté' : ''), [-100, 100]), PCFG);
 
-  /* histogram + statistics table */
+  /* histogram (the tabulated per-state agreement lives in the Tableau récapitulatif) */
   const mid = HIST_EDGES.slice(0, -1).map((e, i) => (e + HIST_EDGES[i + 1]) / 2);
-  const ht = [], byRow = {};
+  const ht = [];
   specs.forEach(([src, w, dash]) => {
-    byRow[src] = [];
     P.instruments.forEach((c, k) => {
       if (k === kref || !V.ok[k] || !V.ok[kref]) return;
       const s = bandStats(V, src, k, kref);
-      const tot = s.hist.reduce((a, b) => a + b, 0);
+      /* normalise by ALL relative samples, not the in-range subset — a heavy-tailed trace
+         (21% of the CL31 samples fall outside [-100,200)) must not be inflated vs the others */
+      const tot = s.nrel || s.hist.reduce((a, b) => a + b, 0);
       if (tot) ht.push({ x:mid, y:s.hist.map(v => v / tot * 100), mode:'lines',
         line:{color:c.color, width:w, dash:dash, shape:'hvh'},
         name:chLabel(k) + ' — ' + src + ' (méd ' +
              (s.medrel === null ? '—' : (s.medrel > 0 ? '+' : '') + s.medrel.toFixed(1) + '%') + ')',
         hovertemplate:'%{x:+.1f}%<br>%{y:.2f}% des échantillons<extra></extra>' });
-      const cls = s.medrel === null ? '' :
-                  (Math.abs(s.medrel) <= 5 ? 'good' : (Math.abs(s.medrel) > 20 ? 'bad' : ''));
-      byRow[src].push(`<tr><td>${src === 'L1' ? 'L1 + étalonnage v2' : 'L2 tel que distribué'}</td>
-        <td>${chLabel(k)}</td>
-        <td class="num ${cls}">${s.medrel === null ? '—' : s.medrel.toFixed(1) + ' %'}</td>
-        <td class="num">${s.rlog === null ? '—' : s.rlog.toFixed(2)}</td>
-        <td class="num">${s.relbias === null ? '—' : s.relbias.toFixed(1) + ' %'}</td>
-        <td class="num">${s.n.toLocaleString('fr-FR')}</td></tr>`);
     });
   });
-  const rows = P.sources.flatMap(s => byRow[s] || []);   /* table reads L1 first, then L2 */
   const hl = JSON.parse(JSON.stringify(BASE));
   hl.title = { text:'Différence vs ' + chLabel(kref) + ' — distribution sur ' +
                P.zmin.toFixed(0) + '–' + P.zmax.toFixed(0) + ' m', font:{size:13} };
@@ -465,8 +473,6 @@ function draw() {
                zerolinewidth:1.4, zerolinecolor:'#888' };
   hl.yaxis = { title:'part des échantillons [%]' };
   Plotly.react('p_hist', ht, hl, PCFG);
-  document.querySelector('#stats tbody').innerHTML = rows.join('') ||
-    '<tr><td colspan="6" class="muted">aucun canal exploitable dans cet état</td></tr>';
 
   /* L1 vs L2, same instrument */
   if (hasL2) {
@@ -518,7 +524,14 @@ function drawLadder(V) {
     list.forEach(vn => {
       const rec = P.calib[id + '|' + sel.method + '|' + vn];
       if (!rec || !rec.ok) return;
-      const A = computeSel(id, 'L1', { method:sel.method, variant:vn, dark:sel.dark });
+      /* each Rayleigh row is swept in ITS coherent dark pairing (dark on iff the variant is a
+         dark-corrected run and the measured b(z) exists) — sweeping with the CURRENT selection's
+         flag tabulated hybrid states ~1 pt off what clicking the variant displays (2026-08-16
+         review).  Cloud rows keep the selection's profile dark: constants are dark-immune there
+         and both profile states are coherent user choices. */
+      const rdark = sel.method === 'rayleigh'
+        ? (DARK_RUNS.indexOf(vn) >= 0 && !!P.dark[id]) : sel.dark;
+      const A = computeSel(id, 'L1', { method:sel.method, variant:vn, dark:rdark });
       if (!A) return;
       let delta = '—', disp = '—';
       if (k === kref) {
@@ -547,18 +560,75 @@ function drawLadder(V) {
                               hk.se.toFixed(1) + ' %/km' : '<span class="muted">—</span>'}</td>
       </tr>`);
     });
+    /* the distributed product as one more row per instrument, so the whole ladder is judged
+       against what the network actually ships today (L2 vs the reference's L2, same band).
+       The applied-constant provenance DIFFERS per instrument type; the tooltip appends the
+       constants actually observed in the window, computed live so it cannot go stale. */
+    if (hasL2 && V.ok[k] && V.L2 && V.L2[k]) {
+      let delta = '<span class="muted">réf.</span>', disp = '—';
+      if (k !== kref && V.ok[kref] && V.L2[kref]) {
+        const s = bandStatsAB(V.L2[k], V.L2[kref], V);
+        delta = s.medrel === null ? '—' : (s.medrel > 0 ? '+' : '') + s.medrel.toFixed(1) + ' %';
+        disp = s.mad === null ? '—' : s.mad.toFixed(1) + ' %';
+      }
+      const prov = l2Provenance(inst);
+      rows.push(`<tr class="l2row">
+        <td><span class="swatch" style="background:${inst.color}"></span>${inst.label}</td>
+        <td>L2 distribué <span class="pill l2" title="${prov.tip.replace(/"/g, '&quot;')}">${prov.pill}</span></td>
+        <td class="num">${delta}</td>
+        <td class="num">${disp}</td>
+        <td class="num">${V.n_hours.toLocaleString('fr-FR')}</td>
+        <td class="num">—</td>
+        <td class="num"><span class="muted">—</span></td>
+      </tr>`);
+    }
   });
   document.querySelector('#ladder tbody').innerHTML = rows.join('') ||
     '<tr><td colspan="7" class="muted">aucune variante exploitable</td></tr>';
+}
+
+/* per-type provenance of the L2 product's applied constant, + the values actually observed in
+   the paired window (computed from l2_applied, never hard-coded) */
+function l2Provenance(inst) {
+  const fmt = v => Math.abs(v) >= 1e4 ? (+v).toExponential(1).replace('e+', 'e') : (+v).toFixed(2);
+  const d = (S().l2_applied || {})[inst.ident];
+  let obs = '';
+  if (d && d.value && d.value.length) {
+    const cnt = {};
+    d.value.forEach(v => { const k = fmt(v); cnt[k] = (cnt[k] || 0) + 1; });
+    obs = ' Observé sur la fenêtre : ' +
+          Object.keys(cnt).map(k => `${k} (${cnt[k]} j)`).join(', ') + '.';
+  }
+  /* Operator-stated provenance (2026-08-16, corrected same day): the distributed L2 carries the
+     operational Rayleigh v1.0 calibration for the CHM15k AND — recently activated — the CL61;
+     the CL31 stays on the uncalibrated default. The observed CL61 constants confirm it:
+     1.00 (default) on 48 d then 2.1257 from mid-June 2026 = the v1.0 series going live.
+     The appended observed values keep the tooltip honest if the files ever change. */
+  const base = {
+    CHM15k: { pill:'calibration Rayleigh v1.0 (opérationnelle)',
+      tip:'Constante issue de la méthode Rayleigh opérationnelle E-PROF v1.0 (pré-v2).' },
+    CL31: { pill:'non calibré (constante par défaut)',
+      tip:'La chaîne opérationnelle n\'applique pas de calibration au CL31 — ' +
+          'la constante par défaut explique l\'écart de cette ligne ; c\'est exactement le ' +
+          'manque que l\'étalonnage nuage comble.' },
+    CL61: { pill:'calibration Rayleigh v1.0 (opérationnelle, activée mi-2026)',
+      tip:'Le CL61 est désormais calibré en opérationnel par la méthode Rayleigh v1.0 — ' +
+          'la bascule est visible dans les constantes observées : 1,00 (défaut) avant, puis ' +
+          'la valeur v1.0 depuis la mi-juin 2026.' },
+  }[inst.itype] || { pill:'constante appliquée', tip:'' };
+  return { pill: base.pill, tip: base.tip + obs };
 }
 
 /* ---------- constants over time ---------- */
 const VAR_COLOR = { 'v2.0':'#d62728', 'v2.2':'#2f9e44', 'v2.2dark':'#7048e8',
   'v2.2sansWV':'#e8590c', 'v2.2_l55s008':'#0b7285', 'v2.2_l55w10':'#ae3ec9',
   'v2.2_l55w01':'#f08c00', 'cloudWV':'#2f9e44', 'cloudNoWV':'#e8590c',
-  'cloud_l55s008':'#0b7285', 'cloud_l55w10':'#ae3ec9', 'cloud_l55w01':'#f08c00' };
+  'cloud_l55s008':'#0b7285', 'cloud_l55w10':'#ae3ec9', 'cloud_l55w01':'#f08c00',
+  'cloud_cl31l910':'#5c940d', 'cloud_cl31wieg':'#a61e4d' };
+/* EXCLUSIVE end of the month (first day of the next one), so the shaded stats window covers the
+   last day's 24 h too — day-0 gave midnight of the last day and under-covered by one day */
 function monthEnd(ym) { const [y, m] = ym.split('-').map(Number);
-  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10); }
+  return new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10); }
 
 function drawCalib() {
   const P = S();
@@ -590,8 +660,9 @@ function drawCalib() {
     lay.height = 300;
     lay.title = { text:inst.itype + ' (' + inst.ident + ') — C_L, variantes « ' +
                   (sel.method === 'rayleigh' ? 'Rayleigh' : 'nuage') + ' »', font:{size:13} };
-    lay.yaxis = { title:'C_L', exponentformat:'e' };
-    lay.xaxis = { title:'' };
+    /* the constant's unit is instrument-native (rcs_0 / beta_att; ~dimensionless for the CL61) */
+    lay.yaxis = { title:'C_L [unités rcs₀ de l’instrument]', exponentformat:'e' };
+    lay.xaxis = { title:'date (UTC)' };
     lay.shapes = [{ type:'rect', xref:'x', yref:'paper', x0:P.months[state.r0] + '-01',
                     x1:monthEnd(P.months[state.r1]), y0:0, y1:1,
                     fillcolor:'rgba(31,119,180,0.10)', line:{width:0}, layer:'below' }];
@@ -618,7 +689,7 @@ function drawPcolor() {
         colorscale:[[0, '#f1f3f5'], [1, '#868e96']], showscale:false, hoverinfo:'skip' },
       { type:'heatmap', x:C.hours, y:C.alt, z:unpack(cc.scr), zmin:-2, zmax:1,
         colorscale:'Viridis',
-        colorbar:{ title:{text:'log₁₀ β<sub>att</sub>'}, thickness:14, len:0.92 },
+        colorbar:{ title:{text:'log₁₀ β<sub>att</sub> [Mm⁻¹ sr⁻¹]'}, thickness:14, len:0.92 },
         hovertemplate:'%{x}<br>%{y:.0f} m<br>log₁₀ β = %{z:.2f}<extra>' +
                       (inst ? inst.label : cc.ident) + '</extra>' }];
     const lay = JSON.parse(JSON.stringify(BASE));
@@ -627,7 +698,8 @@ function drawPcolor() {
       ' — rétrodiffusion atténuée (couleur = flux ciel clair, gris = heures écartées)',
       font:{size:13} };
     lay.yaxis = { title:'Altitude a.g.l. [m]' };
-    lay.xaxis = { title:'' };
+    lay.xaxis = { title:'date (UTC)' };
+    lay.margin.b = 46;
     Plotly.react(el, traces, lay, PCFG);
   });
 }
@@ -647,10 +719,16 @@ function drawHopkin() {
   });
   sec.style.display = cards.length ? '' : 'none';
   if (!cards.length) return;
-  if (host.dataset.n !== String(cards.length))
+  /* side by side on one row (two columns as soon as there are two units, e.g. CL31 + CL61) */
+  if (host.dataset.n !== String(cards.length)) {
+    host.style.display = 'grid';
+    host.style.gridTemplateColumns = cards.length > 1 ? '1fr 1fr' : '1fr';
+    host.style.gap = '14px';
     host.innerHTML = cards.map((c, j) =>
-      `<div class="card" style="margin-bottom:12px"><div id="hk_${j}"></div></div>`).join('');
+      `<div class="card"><div id="hk_${j}"></div></div>`).join('');
+  }
   host.dataset.n = String(cards.length);
+  const half = cards.length > 1;
   cards.forEach(([inst, key, live], j) => {
     const p = H.panels[key], el = document.getElementById('hk_' + j);
     if (!el) return;
@@ -669,10 +747,17 @@ function drawHopkin() {
     const lay = JSON.parse(JSON.stringify(BASE));
     lay.height = 430;
     lay.showlegend = false;
+    /* half-width cards: the slope moves down into an annotation so the title stays readable */
     lay.title = { text:inst.label + ' — ' + vLabel(inst.itype, key.split('|')[1]) +
-      '  ·  pente ' + (p.slope > 0 ? '+' : '') + p.slope.toFixed(1) + ' ± ' + p.se.toFixed(1) +
-      ' %/km (n=' + p.n.toLocaleString('fr-FR') + ' profils, ' + p.ndays + ' jours)' +
-      (live ? '' : ' — variante nuage non sélectionnée, vue par défaut'), font:{size:13} };
+      (live ? '' : ' <span style="color:#888">(variante nuage non sélectionnée)</span>'),
+      font:{size: half ? 12 : 13} };
+    lay.annotations = [{ xref:'paper', yref:'paper', x:0.02, y:0.98, xanchor:'left',
+      yanchor:'top', showarrow:false, align:'left',
+      bgcolor:'rgba(255,255,255,.85)', bordercolor:'#ccc', borderwidth:1, borderpad:4,
+      font:{size:11.5},
+      text:'pente <b>' + (p.slope > 0 ? '+' : '') + p.slope.toFixed(1) + ' ± ' +
+           p.se.toFixed(1) + ' %/km</b><br>' + p.n.toLocaleString('fr-FR') + ' profils, ' +
+           p.ndays + ' jours' }];
     lay.xaxis = { title:'constante par profil (1/C) / médiane de l\'unité [%]',
                   range:[H.x[0], H.x[H.x.length - 1]] };
     lay.yaxis = { title:'Hauteur de base de nuage [km]',
@@ -683,40 +768,89 @@ function drawHopkin() {
   });
 }
 
-/* ---------- PWV scatter (static) ---------- */
+/* ---------- PWV panel (static) — binned medians + Theil-Sen, coherent states only ----------
+   The raw per-hour scatter was unreadable (678 points x 5 states on one axis); what the test
+   needs is the TREND, so each coherent state is shown as its PWV-binned median (2 mm bins,
+   >= 8 h per bin) with the inter-quartile band, and the slope quoted in the legend is the
+   Theil-Sen estimator over the individual hours — median of pairwise slopes, insensitive to the
+   heavy residual tails.  The crossed states mix two signal definitions and are not drawn. */
+const PWV_BIN = 2.0, PWV_MIN_H = 8;
+function theilSen(x, y) {
+  const slopes = [];
+  for (let i = 0; i < x.length; i++)
+    for (let j = i + 1; j < x.length; j++) {
+      const dx = x[j] - x[i];
+      if (dx !== 0) slopes.push((y[j] - y[i]) / dx);
+    }
+  if (!slopes.length) return null;
+  slopes.sort((a, b) => a - b);
+  const s = quantiles(slopes)[0];
+  const r = x.map((v, i) => y[i] - s * v).sort((a, b) => a - b);
+  return { slope:s, intercept:quantiles(r)[0], n:x.length };
+}
+function pwvBins(x, y) {
+  const bins = {};
+  for (let i = 0; i < x.length; i++) {
+    const b = Math.floor(x[i] / PWV_BIN);
+    (bins[b] = bins[b] || []).push(y[i]);
+  }
+  const out = [];
+  Object.keys(bins).map(Number).sort((a, b) => a - b).forEach(b => {
+    const v = bins[b];
+    if (v.length < PWV_MIN_H) return;
+    v.sort((a, c) => a - c);
+    const [m, q1, q3] = quantiles(v);
+    out.push({ xc:(b + 0.5) * PWV_BIN, m, q1, q3, n:v.length });
+  });
+  return out;
+}
 function drawPwv() {
   const P = S(), W = P.pwv, el = document.getElementById('pwv_scatter');
   if (!el) return;
   if (!W) { Plotly.purge(el); return; }
-  let xmin = 1e9, xmax = -1e9;
-  W.pwv_mm.forEach(v => { if (v !== null) { xmin = Math.min(xmin, v); xmax = Math.max(xmax, v); } });
+  let xmin = 1e9, xmax = -1e9, ylo = 1e9, yhi = -1e9;
   const traces = [];
-  W.states.forEach(([variant, wv, label, col, sym]) => {
+  W.states.filter(st => !st[2].includes('croisé')).forEach(([variant, wv, label, col, sym]) => {
     const key = variant + '|' + wv, r = W.resid[key];
     if (!r) return;
-    const x = [], y = [], t = [];
+    const x = [], y = [];
     r.forEach((v, i) => { if (v !== null && W.pwv_mm[i] !== null) {
-      x.push(W.pwv_mm[i]); y.push(v); t.push(P.hours[i]); } });
-    if (!x.length) return;
-    const f = (W.fits || {})[key];
-    traces.push({ x, y, text:t, mode:'markers',
-      name:label + (f ? ' — pente ' + (f.slope > 0 ? '+' : '') + f.slope.toFixed(2) +
-                        ' %/mm (n=' + f.n + ')' : ''),
-      marker:{ size:5, color:col, symbol:sym, opacity:0.5 },
-      hovertemplate:'%{text}<br>PWV %{x:.1f} mm<br>résidu %{y:+.1f}%<extra></extra>' });
-    if (f) traces.push({ x:[xmin, xmax],
-      y:[f.intercept + f.slope * xmin, f.intercept + f.slope * xmax], mode:'lines',
-      line:{color:col, width:2}, showlegend:false, hoverinfo:'skip' });
+      x.push(W.pwv_mm[i]); y.push(v); } });
+    if (x.length < PWV_MIN_H) return;
+    const bins = pwvBins(x, y);
+    if (!bins.length) return;
+    const ts = theilSen(x, y);
+    bins.forEach(b => { ylo = Math.min(ylo, b.q1); yhi = Math.max(yhi, b.q3); });
+    xmin = Math.min(xmin, bins[0].xc - PWV_BIN); xmax = Math.max(xmax, bins[bins.length-1].xc + PWV_BIN);
+    /* IQR band */
+    traces.push({ x:bins.map(b => b.xc).concat(bins.map(b => b.xc).reverse()),
+      y:bins.map(b => b.q3).concat(bins.map(b => b.q1).reverse()),
+      fill:'toself', fillcolor:rgba(col, 0.13), line:{width:0}, hoverinfo:'skip',
+      showlegend:false });
+    /* binned median line */
+    traces.push({ x:bins.map(b => b.xc), y:bins.map(b => b.m), mode:'lines+markers',
+      line:{color:col, width:2.4}, marker:{size:7, color:col, symbol:sym},
+      name:label + (ts ? ' — Theil-Sen ' + (ts.slope > 0 ? '+' : '') + ts.slope.toFixed(2) +
+                         ' %/mm (n=' + ts.n + ' h)' : ''),
+      text:bins.map(b => b.n),
+      hovertemplate:'PWV %{x:.0f} mm<br>médiane %{y:+.1f}% (%{text} h)<extra>' + variant + '</extra>' });
+    /* Theil-Sen fit line, thin */
+    if (ts) traces.push({ x:[bins[0].xc - PWV_BIN/2, bins[bins.length-1].xc + PWV_BIN/2],
+      y:[ts.intercept + ts.slope * (bins[0].xc - PWV_BIN/2),
+         ts.intercept + ts.slope * (bins[bins.length-1].xc + PWV_BIN/2)],
+      mode:'lines', line:{color:col, width:1.2, dash:'dot'}, showlegend:false,
+      hoverinfo:'skip' });
   });
   const lay = JSON.parse(JSON.stringify(BASE));
   lay.height = 500;
-  lay.title = { text:'Résidu CL61 (Rayleigh) vs CHM15k — en fonction du PWV ' +
-                      '(Precipitable Water Vapour, CAMS)', font:{size:13} };
+  lay.title = { text:'Résidu CL61 (Rayleigh) vs CHM15k — médianes par classes de PWV de ' +
+                      PWV_BIN.toFixed(0) + ' mm (CAMS)', font:{size:13} };
   lay.xaxis = { title:{ text:'PWV — Precipitable Water Vapour (eau précipitable intégrée) [mm]' },
-                zeroline:false };
+                zeroline:false, range:[Math.max(0, xmin), xmax] };
   lay.yaxis = { title:'résidu relatif [%] (médiane ' + W.band[0].toFixed(0) + '–' +
                 W.band[1].toFixed(0) + ' m)', zeroline:true, zerolinewidth:1.4,
                 zerolinecolor:'#888' };
+  if (yhi > ylo) lay.yaxis.range = [ylo - 4, yhi + 4];
   Plotly.react(el, traces, lay, PCFG);
 }
 
@@ -753,9 +887,18 @@ function buildControls() {
       ? `<span class="pill ref" title="${REFERENCE_NOTE.replace(/"/g, '&quot;')}">★ hypothèse de référence</span>` : '';
     /* profile-side measured-dark checkbox: only where the covered-telescope campaign measured b(z) */
     const hasDark = !!P.dark[id];
-    const halfState = sel.dark && !DARK_TWIN[sel.variant];
-    const warn = halfState
-      ? `<span class="warnflag" title="${DARK_NO_TWIN_WHY.replace(/"/g, '&quot;')}">⚠</span>` : '';
+    /* two half-states: profile dark-corrected but constants not (no twin run), and the reverse
+       (a dark-run variant with the profile-side box unticked) */
+    const halfProfile = sel.dark && !DARK_TWIN[sel.variant];
+    const halfConst = !sel.dark && hasDark && DARK_RUNS.indexOf(sel.variant) >= 0;
+    /* profile-only dark on a CLOUD variant is NOT a warning: the cloud constant is dark-immune
+       (CL31 +0.08 % measured, CL61 ~0.001 %), so only the profiles need correcting */
+    const warn = halfProfile
+      ? (sel.method === 'cloud'
+        ? `<span class="warnflag ok" title="${DARK_CLOUD_OK.replace(/"/g, '&quot;')}">ⓘ</span>`
+        : `<span class="warnflag" title="${DARK_NO_TWIN_WHY.replace(/"/g, '&quot;')}">⚠</span>`)
+      : (halfConst
+      ? `<span class="warnflag" title="constante issue d'un run dark-corrigé mais profil non corrigé — recocher la case pour l'état cohérent">⚠</span>` : '');
     const darkCell = `<label class="chk" title="${hasDark ? 'soustrait le profil b(z) mesuré ' +
         'télescope couvert avant la division par C_L' : DARK_NO_MEAS_WHY.replace(/"/g, '&quot;')}">
       <input type="checkbox" class="dchk" data-id="${id}" ${sel.dark ? 'checked' : ''}
@@ -788,11 +931,17 @@ function buildControls() {
     b.classList.toggle('on', b.dataset.wv === state.wv));
   document.querySelectorAll('#wlseg button').forEach(b =>
     b.classList.toggle('on', b.dataset.wl === state.wl));
-  /* the "constructeur" WV mode only means something where a CL61 is present */
+  /* the "constructeur" WV mode only means something where a CL61 is present — and the fallback
+     for the OTHER 910 nm types must be disclosed even when a CL61 sits next to them (the button
+     label names the CL61 spectrum; a CL31 under it is still corrected with its own 909,7/6,0) */
   const hasCL61 = P.instruments.some(i => i.itype === 'CL61');
+  const other910 = P.instruments.some(i => i.itype !== 'CHM15k' && i.itype !== 'CL61');
+  const fb = 'les autres types à 910 nm (CL31/CL51) gardent leur spectre nominal propre — seul ' +
+             'le spectre du CL61 change dans ce mode';
   const bctor = document.querySelector('#wvseg button[data-wv="ctor"]');
   bctor.disabled = !has910;
-  bctor.title = hasCL61 ? REFERENCE_NOTE
+  bctor.title = hasCL61 ? (REFERENCE_NOTE + (other910 ? ' ' + fb.charAt(0).toUpperCase() +
+                                             fb.slice(1) + '.' : ''))
     : 'aucun CL61 ici : ce mode retombe sur le spectre nominal de chaque instrument';
 
   /* months */
@@ -807,15 +956,35 @@ function buildControls() {
 function bindRow() {
   document.querySelectorAll('#instr .mseg button').forEach(b => b.addEventListener('click', () => {
     if (b.disabled) return;
-    const id = b.dataset.id, m = b.dataset.method;
-    state.pick[id].method = m;
-    state.pick[id].variant = firstAvailable(id, m);
-    state.pick[id].prev = null;
+    const id = b.dataset.id, m = b.dataset.method, sel = state.pick[id];
+    /* remember the profile-dark of the method we leave, restore it when we come back — a
+       cloud->rayleigh->cloud round trip must not silently drop the cloud channel's dark */
+    sel.dmem = sel.dmem || {};
+    sel.dmem[sel.method] = sel.dark;
+    sel.method = m;
+    sel.variant = firstAvailable(id, m);
+    sel.prev = null;
+    if (m === 'rayleigh')  /* authoritative both ways: set for dark runs, CLEAR otherwise */
+      sel.dark = DARK_RUNS.indexOf(sel.variant) >= 0 && !!S().dark[id];
+    else
+      sel.dark = (sel.dmem[m] !== undefined ? sel.dmem[m] : sel.dark) && !!S().dark[id];
     buildControls(); draw();
   }));
   document.querySelectorAll('#instr .vsel').forEach(s => s.addEventListener('change', e => {
-    state.pick[e.target.dataset.id].variant = e.target.value;
-    state.pick[e.target.dataset.id].prev = null;
+    const sel = state.pick[e.target.dataset.id];
+    /* defence in depth: browsers keep disabled options unselectable, but a programmatic set or
+       form-state restoration could commit a not-ok variant and silently drop the instrument */
+    const opt = e.target.selectedOptions && e.target.selectedOptions[0];
+    if (opt && opt.disabled) { e.target.value = sel.variant; return; }
+    sel.variant = e.target.value;
+    sel.prev = null;
+    /* Rayleigh: the dropdown is authoritative for the dark pairing — a dark-run variant ticks
+       the profile-side dark (where the measured b(z) exists), anything else unticks it, so the
+       constants/profile pair stays coherent without a second click.  Cloud: the constants are
+       dark-immune, the profile-side dark is an independent (and recommended) choice — changing
+       the variant must NOT silently untick it. */
+    if (sel.method === 'rayleigh')
+      sel.dark = DARK_RUNS.indexOf(sel.variant) >= 0 && !!S().dark[e.target.dataset.id];
     buildControls(); draw();
   }));
   /* Ticking the measured dark switches the CONSTANTS to their dark-corrected twin where one
@@ -854,13 +1023,18 @@ function setSite(key) {
   state.site = key;
   const P = S();
   state.pick = {};
+  const dd = P.default_dark || {};
   P.instruments.forEach(i => {
     const d = P.default[i.ident] || ['rayleigh', 'v2.2'];
     const method = (METHOD_BY_TYPE[i.itype] || ['rayleigh']).indexOf(d[0]) >= 0 ? d[0]
                  : (METHOD_BY_TYPE[i.itype] || ['rayleigh'])[0];
     const rec = P.calib[i.ident + '|' + method + '|' + d[1]];
-    state.pick[i.ident] = { method, dark:false, prev:null,
-      variant:(rec && rec.ok) ? d[1] : firstAvailable(i.ident, method) };
+    const variant = (rec && rec.ok) ? d[1] : firstAvailable(i.ident, method);
+    /* keep the boot dark coherent even when firstAvailable substituted the default variant:
+       on a Rayleigh channel the pairing rule (dark iff dark-run) overrides default_dark */
+    let dk = !!(dd[i.ident] && P.dark[i.ident]);
+    if (method === 'rayleigh') dk = DARK_RUNS.indexOf(variant) >= 0 && !!P.dark[i.ident];
+    state.pick[i.ident] = { method, prev:null, dark:dk, variant };
   });
   state.iref = P.iref;
   state.r0 = 0; state.r1 = P.months.length - 1;
@@ -926,7 +1100,9 @@ def html(payloads):
         f"const METHOD_WHY = {json.dumps({f'{a}|{b}': w for (a, b), w in V3.METHOD_WHY.items()})};\n"
         f"const VARIANTS_FOR = {json.dumps({t: {m: V3.variants_for(t, m) for m in ms} for t, ms in V3.METHOD_BY_TYPE.items()})};\n"
         f"const DARK_TWIN = {json.dumps(V3.DARK_TWIN)};\n"
+        f"const DARK_RUNS = {json.dumps(list(V3.DARK_RUNS))};\n"
         f"const DARK_NO_TWIN_WHY = {json.dumps(V3.DARK_NO_TWIN_WHY)};\n"
+        f"const DARK_CLOUD_OK = {json.dumps(V3.DARK_CLOUD_OK_WHY)};\n"
         f"const DARK_NO_MEAS_WHY = {json.dumps(V3.DARK_NO_MEAS_WHY)};\n"
         f"const DARK_HINT = {json.dumps(V3.DARK_HINT)};\n"
         f"const REFERENCE_VARIANTS = {json.dumps(list(V3.REFERENCE_VARIANTS))};\n"
@@ -953,15 +1129,19 @@ def html(payloads):
   <div id="warns"></div>
 
   <div class="card ctlwrap">
-    <table class="instr" id="instr"></table>
+    <div class="tscroll"><table class="instr" id="instr"></table></div>
     <div id="darkhint" style="padding:2px 8px 0"></div>
     <div class="ctl-row" id="corrrow">
       <div class="ctl-group">
         <span class="ctl-label">Correction longueur d'onde</span>
         <span class="seg" id="wlseg">
           <button data-wl="none">aucune</button>
-          <button data-wl="angstrom">simple (Ångström α=1)</button>
-          <button data-wl="molecular" class="on">avancée (moléculaire)</button>
+          <button data-wl="angstrom" title="toute la rétrodiffusion multipliée par
+(λ/λcible)^−α avec α=1 — moléculaire et aérosol confondus">simple (Ångström α=1)</button>
+          <button data-wl="molecular" class="on" title="le moléculaire analytique (Rayleigh,
+T/p CAMS) est retiré à λ source, le résidu AÉROSOL est mis à l'échelle Ångström (λ/λcible)^α
+avec α=1, puis le moléculaire calculé à λ cible est ré-ajouté — moléculaire exact, α=1 ne
+s'applique qu'à l'aérosol">avancée (moléculaire + aérosol α=1)</button>
         </span>
       </div>
       <div class="ctl-group">
@@ -990,23 +1170,30 @@ def html(payloads):
   <h2>Tableau récapitulatif — toutes les variantes <span class="muted">— l'échelle complète des
     hypothèses d'étalonnage, d'un coup d'œil</span></h2>
   <div class="card">
-    <table class="stats ladder" id="ladder">
+    <div class="tscroll"><table class="stats ladder" id="ladder">
       <thead><tr><th>Instrument</th><th>Variante</th><th>Médiane Δ vs référence</th>
         <th>Dispersion robuste (1,4826·MAD)</th><th>Heures appariées</th>
         <th>Nuits d'étalonnage</th><th>dC/dCBH (par profil)</th></tr></thead>
       <tbody></tbody>
-    </table>
+    </table></div>
     <p class="note">Toute l'échelle d'étalonnage à la fois : l'effet de chaque hypothèse (spectre
       de vapeur d'eau, fond électronique, version du pipeline) se lit sans passer d'un état à
-      l'autre. Ligne surlignée = variante actuellement sélectionnée. Les lignes de l'instrument de
+      l'autre. Ligne surlignée = variante actuellement sélectionnée ; ligne « <b>L2
+      distribué</b> » = le produit tel qu'expédié aujourd'hui (comparé au L2 de la référence),
+      avec la provenance de sa constante par instrument sur la pastille — CHM15k et CL61 =
+      calibration Rayleigh v1.0 opérationnelle (activée mi-2026 pour le CL61) ; CL31 = non
+      calibré (constante par défaut, qui laisse passer l'échelle native) — et, en infobulle, les
+      constantes réellement observées sur la fenêtre. Les lignes de l'instrument de
       référence donnent son écart L1–L2 lorsqu'un L2 existe, sinon « réf. ». Médiane et dispersion
-      portent sur la bande de statistiques et la période courantes ; la colonne dC/dCBH vient de la
-      configuration Hopkin correspondante (variantes nuage seulement).</p>
+      (médiane du rapport par échantillon, et 1,4826·MAD des mêmes rapports) portent sur la bande
+      de statistiques et la période courantes ; la colonne dC/dCBH vient de la configuration
+      par-profil correspondante (variantes nuage seulement).</p>
   </div>
 
   <h2>Profils verticaux <span class="muted">— médiane (trait) et intervalle interquartile
-    (bande). Chaque courbe s'arrête là où l'instrument n'a plus de signal ; vue par défaut
-    0–4 km.</span></h2>
+    (bande). Courbes brutes par défaut ; cocher « filtrage du plancher de bruit » pour arrêter
+    chaque courbe là où l'instrument n'a plus de signal. Vue par défaut 0–4 km — dézoomer pour le
+    reste.</span></h2>
   <div class="grid2">
     <div class="card"><p class="panel-title">L1 + étalonnage v2 <span class="pill l1">C<sub>L</sub>
       Kalman</span></p><p class="panel-sub">rcs_0 / C<sub>L</sub>(t) × 10<sup>6</sup></p>
@@ -1034,8 +1221,8 @@ def html(payloads):
   </div>
 
   <div id="hksec">
-    <h2>Constante par profil vs hauteur de base de nuage <span class="muted">— la vue « Hopkin »
-      de l'étalonnage nuage, pour la variante nuage sélectionnée ci-dessus</span></h2>
+    <h2>Constante par profil vs hauteur de base de nuage <span class="muted">— l'étalonnage nuage
+      profil par profil, pour la variante nuage sélectionnée ci-dessus</span></h2>
     <div id="hkholder"></div>
     <p class="note">Chaque profil calibré individuellement (et non la médiane du jour) : x = sa
       constante 1/C en % de la médiane de l'unité, y = la hauteur de base du nuage utilisé. Une
@@ -1054,22 +1241,17 @@ def html(payloads):
     <p class="note"><b title="Precipitable Water Vapour">PWV</b> = <i>Precipitable Water
       Vapour</i>, l'eau précipitable intégrée sur toute la colonne au-dessus de la station, en mm
       (1 mm = 1 kg m⁻²), calculée depuis les mêmes fichiers CAMS et la même fenêtre journalière que
-      la correction elle-même. Chaque point = une heure appariée. Une <b>pente plate</b> signale
-      l'hypothèse de spectre cohérente : si la correction de vapeur d'eau est du bon ordre, le
-      résidu ne doit plus dépendre de la quantité de vapeur d'eau présente. Panneau statique — il
-      compare des états fixes et ne suit pas les commandes ci-dessus.</p>
-  </div>
-
-  <h2>Accord sur la bande de statistiques</h2>
-  <div class="card">
-    <table class="stats" id="stats">
-      <thead><tr><th>Source</th><th>Instrument / état</th><th>Biais relatif médian</th>
-        <th>log r</th><th>Biais relatif linéaire</th><th>N paires</th></tr></thead>
-      <tbody></tbody>
-    </table>
-    <p class="note">Le biais relatif médian est la statistique robuste (médiane du rapport par
-      échantillon) ; log r est la corrélation de Pearson en espace logarithmique. Les deux sont
-      calculés contre l'instrument coché « référence », sur la bande grisée.</p>
+      la correction elle-même. Chaque trait = la <b>médiane du résidu par classe de PWV de 2 mm</b>
+      (classes d'au moins 8 heures ; bande = intervalle interquartile) ; la pente en légende est
+      l'estimateur robuste de <b>Theil-Sen</b> sur les heures individuelles, insensible aux queues
+      de distribution. Seuls les <b>trois états cohérents</b> (même hypothèse de raie des deux
+      côtés) sont tracés. Une <b>pente plate</b> signale l'hypothèse de spectre correcte : si la
+      correction de vapeur d'eau est du bon ordre, le résidu ne dépend plus de la quantité de
+      vapeur d'eau présente. Panneau statique — il compare des états fixes et ne suit pas les
+      commandes ci-dessus ; sa référence est l'état par défaut du site <b>pris dans son
+      appariement cohérent</b> (à Payerne : constantes v2.2+dark ET profil corrigé du dark mesuré
+      — la revue du 2026-08-16 a montré qu'une référence hybride gonflait chaque pente de
+      +0,4 à +0,8 %/mm).</p>
   </div>
 
   <h2>Constantes d'étalonnage dans le temps</h2>
@@ -1092,9 +1274,11 @@ def html(payloads):
     même pas définie quand la conversion de longueur d'onde ajoute son terme moléculaire additif,
     qui vit en unités étalonnées. Seul l'<b>ordre</b> des opérations change par rapport à la v2 : la
     v3 ré-échantillonne puis corrige, la v2 corrigeait puis ré-échantillonnait. Contrôle de non
-    régression sur Payerne, état par défaut (CHM15k v2.2 / CL31 nuage avec WV / CL61 nuage avec WV,
-    λ avancée, WV comparaison λ910,74, filtrage de bruit désactivé) : <b>N = 56 952 paires
-    identiques</b>, log r identique à 4 décimales, biais relatif médian
+    régression sur Payerne dans l'<b>état hérité de la v2</b> (CHM15k v2.2 / CL31 nuage λ909,7 /
+    CL61 nuage λ910,74, λ avancée, WV comparaison λ910,74, dark décoché, filtrage de bruit
+    désactivé — la page démarre désormais dans l'état de référence de l'opérateur, pas dans
+    celui-ci ; le contrôle le reconstruit programmatiquement, <code>check_v3.py</code>) :
+    <b>N = 56 952 paires identiques</b>, log r reproduit à ±0,0003 près, biais relatif médian
     <b>−11,54 % vs −11,55 %</b> (CL61 nuage), <b>+8,69 % vs +8,68 %</b> (CL61 Rayleigh v2.2) et
     <b>−0,31 % vs −0,47 %</b> (CL31, l'écart maximal : 0,16 point de pourcentage, sur l'instrument
     dont le signal est le plus proche de zéro dans la bande). Le stockage quantifié (uint16

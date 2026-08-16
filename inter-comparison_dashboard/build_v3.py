@@ -365,6 +365,10 @@ def build_site(site_key):
                 calib[ck] = rec
                 print(f"   {ck:34s} {rec['nights']:4d} nights  C_L[0]={c[0]:.4g}", flush=True)
 
+    # Warning prose: interpolate the numbers from the series just computed (see prose_tokens).
+    tok = prose_tokens(site_key, calib, t0, t1)
+    warns = [w.format_map(tok) for w in v3.get("warnings", [])]
+
     # --- dark baselines (measured; Payerne only) -----------------------------------------------
     dark = {}
     for ident in idents:
@@ -391,17 +395,19 @@ def build_site(site_key):
         z=[float(x) for x in Z_AGL], band=[int(np.where(BAND)[0][0]), int(np.where(BAND)[0][-1])],
         hours=[str(t)[:13] for t in hours.astype("datetime64[h]")],
         hour_day=hour_day, hour_month=hour_month, days=days, months=months,
-        instruments=v3["instruments"], default=v3["default"], iref=v3.get("iref", 0),
-        title=v3["title"], subtitle=v3["subtitle"], warnings=v3.get("warnings", []),
+        instruments=v3["instruments"], default=v3["default"],
+        default_dark=v3.get("default_dark", {}), iref=v3.get("iref", 0),
+        title=v3["title"], subtitle=v3["subtitle"], warnings=warns,
         streams=streams, corr=corr_out, corr_of={f"{a}|{b}": v for (a, b), v in corr_of.items()},
-        dark=dark, calib=calib,
+        dark=dark, dark_kind=V3.dark_kind(site_key), calib=calib,
         l2_applied=BD.l2_applied_constants(npz, t0, t1),
     )
     payload["hopkin"] = hopkin_payload(v3, s["wmo"], calib)
     payload["pcolor"] = pcolor_payload(v3, aligned, aligned_disp, union, union_day, corr, corr_of,
-                                       calib)
+                                       calib, dark)
     if v3.get("pwv"):
-        payload["pwv"] = pwv_payload(v3, aligned, have, hours, hour_day, corr, corr_of, calib)
+        payload["pwv"] = pwv_payload(v3, aligned, have, hours, hour_day, corr, corr_of, calib,
+                                     dark)
     out = OUT / f"v3_{site_key}.json"
     out.write_text(json.dumps(payload), encoding="utf-8")
     print(f"-> {out.name}  ({out.stat().st_size/1e6:.2f} MB)", flush=True)
@@ -430,7 +436,7 @@ def transform(rawblock, cval, darkb, c, wv, wl, hdayidx):
 
 
 # ---------------------------------------------------------------------------- curtains
-def pcolor_payload(v3, aligned, aligned_disp, union, union_day, corr, corr_of, calib):
+def pcolor_payload(v3, aligned, aligned_disp, union, union_day, corr, corr_of, calib, dark):
     """Static time-height curtains, one per instrument, in the page's DEFAULT state.
 
     Built from the UNPAIRED L1 axis (the strict pairing drops every hour any instrument is
@@ -453,8 +459,11 @@ def pcolor_payload(v3, aligned, aligned_disp, union, union_day, corr, corr_of, c
         else:
             cval = np.ones(union.size)
         c = corr[corr_of[("L1", ident)]]
-        S = transform(aligned[("L1", ident)], cval, None, c, True, "molecular", union_day)
-        D = transform(aligned_disp[("L1", ident)], cval, None, c, True, "molecular", union_day)
+        # the boot state's profile-side dark, so the curtain matches what the page shows on load
+        db = dark.get(ident) if v3.get("default_dark", {}).get(ident) else None
+        wvmode = "ctor" if variant in getattr(V3, "REFERENCE_VARIANTS", ()) else True
+        S = transform(aligned[("L1", ident)], cval, db, c, wvmode, "molecular", union_day)
+        D = transform(aligned_disp[("L1", ident)], cval, db, c, wvmode, "molecular", union_day)
         med = np.nanmedian(S, axis=0)
         n = np.sum(np.isfinite(S), axis=0)
         nprof = int(np.any(np.isfinite(S), axis=1).sum())
@@ -479,7 +488,7 @@ def pcolor_payload(v3, aligned, aligned_disp, union, union_day, corr, corr_of, c
 
 
 # ---------------------------------------------------------------------------- PWV panel
-def pwv_payload(v3, aligned, have, hours, hour_day, corr, corr_of, calib):
+def pwv_payload(v3, aligned, have, hours, hour_day, corr, corr_of, calib, dark):
     """Per-hour CL61-Rayleigh residual vs the reference, against the day's CAMS PWV, for the four
     (constants variant x WV-comparison) states — the WV design-mitigation test.  Unchanged in
     substance from v2; only the arithmetic route is new."""
@@ -494,6 +503,11 @@ def pwv_payload(v3, aligned, have, hours, hour_day, corr, corr_of, calib):
     Aref = aligned[("L1", ref_ident)][have]
     Acur = aligned[("L1", ident)][have]
     cref = np.asarray(ref_rec["c"], "f8")
+    # COHERENCE: when the site default reference is a dark-corrected run, its measured b(z) must
+    # be subtracted from the reference profile too — dark-run constants over an un-darked profile
+    # is exactly the hybrid half-state the page's DARK_TWIN machinery forbids (found by the
+    # 2026-08-16 adversarial review: the hybrid inflated every displayed slope by +0.4..+0.8 %/mm).
+    ref_db = dark.get(ref_ident) if ref_v in getattr(V3, "DARK_RUNS", ()) else None
     parts, fits = {}, {}
     for st in spec["states"]:
         variant, wv = st[0], st[1]
@@ -501,7 +515,7 @@ def pwv_payload(v3, aligned, have, hours, hour_day, corr, corr_of, calib):
         if not (rec and rec.get("ok")):
             continue
         ccur = np.asarray(rec["c"], "f8")
-        R = transform(Aref, cref, None, corr[corr_of[("L1", ref_ident)]], wv, "molecular", hd)
+        R = transform(Aref, cref, ref_db, corr[corr_of[("L1", ref_ident)]], wv, "molecular", hd)
         C = transform(Acur, ccur, None, corr[corr_of[("L1", ident)]], wv, "molecular", hd)
         a, b = C[:, band], R[:, band]
         m = np.isfinite(a) & np.isfinite(b) & (b > 0)
@@ -513,13 +527,75 @@ def pwv_payload(v3, aligned, have, hours, hour_day, corr, corr_of, calib):
         resid[st] = [None if not np.isfinite(v) else round(float(v), 3) for v in y]
         m = np.isfinite(x) & np.isfinite(y)
         if m.sum() >= 3:
-            slope, icept = np.polyfit(x[m], y[m], 1)
-            fits[st] = dict(slope=round(float(slope), 3), intercept=round(float(icept), 3),
-                            n=int(m.sum()))
-            print(f"   pwv {st:<18s} n={int(m.sum()):4d}  slope {slope:+.3f} %/mm", flush=True)
+            # Theil-Sen, the SAME statistic the page displays (an OLS here used to log the
+            # opposite state ranking to the published panel — outlier leverage)
+            xm, ym = x[m], y[m]
+            dx = xm[None, :] - xm[:, None]
+            iu = np.triu_indices(xm.size, 1)
+            pair = (ym[None, :] - ym[:, None])[iu][dx[iu] != 0] / dx[iu][dx[iu] != 0]
+            slope = float(np.median(pair))
+            icept = float(np.median(ym - slope * xm))
+            fits[st] = dict(slope=round(slope, 3), intercept=round(icept, 3), n=int(m.sum()))
+            print(f"   pwv {st:<18s} n={int(m.sum()):4d}  TS slope {slope:+.3f} %/mm", flush=True)
     return dict(pwv_mm=[None if not np.isfinite(v) else round(float(v), 3) for v in x],
                 resid=resid, fits=fits, ident=ident, ref=ref_ident,
                 band=[float(ZMIN), float(ZMAX)], states=spec["states"])
+
+
+# ---------------------------------------------------------------------------- prose tokens
+class _SafeTok(dict):
+    """format_map dict that leaves unknown {tokens} verbatim, so a warning without tokens (or a
+    token another site does not define) can never crash the build."""
+    def __missing__(self, key):
+        return "{" + key + "}"
+
+
+def _fmt_c(v):
+    """4.12e7 -> '4.1e7' (the compact scientific style the prose uses)."""
+    from math import floor, log10
+    if not np.isfinite(v) or v <= 0:
+        return "—"
+    e = int(floor(log10(v)))
+    return f"{v / 10**e:.1f}e{e}"
+
+
+def prose_tokens(site_key, calib, t0, t1):
+    """Numbers the warning prose interpolates, computed from the SAME series the page uses.
+
+    Any count or level that describes the current window lives here, not hard-coded in
+    variants_v3 — a re-run with new data re-derives the prose automatically (the stale
+    'une seule nuit Rayleigh' claim of 2026-08 was exactly this class of rot).
+    """
+    tok = {}
+
+    def nights(key, d0=None, d1=None):
+        rec = calib.get(key)
+        if not (rec and rec.get("ok")):
+            return "—"
+        ds = [p["d"] for p in rec["points"]]
+        if d0:
+            ds = [d for d in ds if d0 <= d <= d1]
+        return len(ds)
+
+    w0, w1 = str(np.datetime64(t0, "D")), str(np.datetime64(t1, "D"))
+    if site_key == "payerne":
+        for v, name in (("v2.0", "V20"), ("v2.2", "V22"), ("v2.2dark", "DARK")):
+            tok[f"A_{name}_WIN"] = nights(f"A|rayleigh|{v}", w0, w1)
+            tok[f"A_{name}_JA"] = nights(f"A|rayleigh|{v}", "2026-07-08", "2026-08-13")
+        rec = calib.get("B|cloud|cloudWV")
+        if rec and rec.get("ok"):
+            pts = [(p["d"], p["v"]) for p in rec["points"]]
+            for name, d0, d1 in (("SPRING", "2026-01-01", "2026-05-31"),
+                                 ("JUNE", "2026-06-01", "2026-06-30"),
+                                 ("SUMMER", "2026-07-08", "2026-08-31")):
+                v = [x for d, x in pts if d0 <= d <= d1]
+                tok[f"B_LVL_{name}"] = _fmt_c(float(np.median(v))) if v else "—"
+    if site_key == "lindenberg":
+        for key, name in (("C|cloud|cloudWV", "LIN_V22_END"),
+                          ("C|cloud|cloud_l55s008", "LIN_RERUN_END")):
+            rec = calib.get(key)
+            tok[name] = rec["points"][-1]["d"] if rec and rec.get("ok") else "—"
+    return _SafeTok(tok)
 
 
 # ---------------------------------------------------------------------------- Hopkin heatmap

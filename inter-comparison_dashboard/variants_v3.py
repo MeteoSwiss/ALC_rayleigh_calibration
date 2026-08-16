@@ -45,19 +45,42 @@ REFERENCE_SUFFIX = "l55s008"
 # Only the CL61 streams were re-run: the spectrum in question is the CL61's.
 LAM_TYPES = ("CL61",)
 
+# --------------------------------------------------------------------------- CL31 WV spectrum
+# The CL31 gets its own SMALL ladder (Payerne B only).  The operational model uses the measured
+# 909.7 nm / FWHM 6.0.  Two alternatives: the Vaisala datasheet nominal 910 +- 10 nm at 25 degC
+# (910.0 / FWHM 6.0 — also the central wavelength Wiegner & Gasteiger 2015 use), and Wiegner's
+# spectral width (910.0 / FWHM 3.4).  Expected effect is SMALL (LUT sensitivity: +0.5 % and
+# +3.6 % of the WV term) — that smallness is itself the message: unlike the CL61, the CL31's wide
+# line makes the correction insensitive to the exact spectrum assumption.
+CL31_LAM_RUNS = {
+    "cl31l910": DATA / "diag_v22_cl31l910",   # 910.0 nm, FWHM 6.0  (datasheet nominal)
+    "cl31wieg": DATA / "diag_v22_cl31wieg",   # 910.0 nm, FWHM 3.4  (Wiegner & Gasteiger 2015)
+}
+CL31_LAM_TYPES = ("CL31",)
+
+# The FULLY-corrected CL61 Rayleigh state: constructor spectrum AND the measured covered-telescope
+# dark subtracted INSIDE the calibration.  Payerne C only (the dark campaign is Payerne-only).
+# This is the reference state for the CL61 Rayleigh channel.
+L55S008DARK = DATA / "diag_v22_l55s008dark"
+
 # Ordered variant lists per method (the page renders them in this order).
 VARIANTS = {
     "rayleigh": ["v2.0", "v2.2", "v2.2dark", "v2.2sansWV",
-                 "v2.2_l55s008", "v2.2_l55w10", "v2.2_l55w01"],
+                 "v2.2_l55s008", "v2.2_l55s008dark", "v2.2_l55w10", "v2.2_l55w01"],
     "cloud":    ["cloudWV", "cloudNoWV",
-                 "cloud_l55s008", "cloud_l55w10", "cloud_l55w01"],
+                 "cloud_l55s008", "cloud_l55w10", "cloud_l55w01",
+                 "cloud_cl31l910", "cloud_cl31wieg"],
 }
+# Variants that only exist for one instrument type (never offered elsewhere, not even greyed):
+_CL61_ONLY = {v for m in VARIANTS.values() for v in m if "_l55" in v}
+_CL31_ONLY = {v for m in VARIANTS.values() for v in m if "_cl31" in v}
 VARIANT_LABEL = {
     "v2.0":         "v2.0 (opérationnel)",
     "v2.2":         "v2.2 — WV λ910,74 / FWHM 1,0 (modèle actuel)",
     "v2.2dark":     "v2.2 + fond soustrait (dark)",
     "v2.2sansWV":   "v2.2 — sans correction WV",
     "v2.2_l55s008": "v2.2 — WV λ910,55 σ0,08 (spectre constructeur) ★",
+    "v2.2_l55s008dark": "v2.2 — WV λ910,55 σ0,08 + fond soustrait (dark) ★",
     "v2.2_l55w10":  "v2.2 — WV λ910,55 / FWHM 1,0",
     "v2.2_l55w01":  "v2.2 — WV λ910,55 / FWHM 0,1",
     "cloudWV":      "nuage — WV λ910,74 / FWHM 1,0 (modèle actuel)",
@@ -65,6 +88,8 @@ VARIANT_LABEL = {
     "cloud_l55s008": "nuage — WV λ910,55 σ0,08 (spectre constructeur) ★",
     "cloud_l55w10":  "nuage — WV λ910,55 / FWHM 1,0",
     "cloud_l55w01":  "nuage — WV λ910,55 / FWHM 0,1",
+    "cloud_cl31l910": "nuage — WV λ910,0 / FWHM 6,0 (constructeur)",
+    "cloud_cl31wieg": "nuage — WV λ910,0 / FWHM 3,4 (Wiegner 2015)",
 }
 # A 1064 nm instrument has no water-vapour term at all, so naming its variants after a laser line
 # would be nonsense — the page swaps in these labels for the CHM15k rows.
@@ -81,7 +106,8 @@ VARIANT_LABEL_BY_TYPE = {
 }
 VARIANT_SHORT_BY_TYPE = {
     "CHM15k": {"v2.2": "v2.2"},
-    "CL31": {"v2.2": "v2.2 (λ909,7)", "cloudWV": "nuage (λ909,7)"},
+    "CL31": {"v2.2": "v2.2 (λ909,7)", "cloudWV": "nuage (λ909,7 F6,0)",
+             "cloud_cl31l910": "nuage λ910,0 F6,0", "cloud_cl31wieg": "nuage λ910,0 F3,4"},
     "CL51": {"v2.2": "v2.2 (λ910,0)", "cloudWV": "nuage (λ910,0)"},
 }
 # retro-compat (anciens noms utilises par le rendu)
@@ -99,21 +125,41 @@ def variants_for(itype, method):
     """
     full = VARIANTS.get(method, [])
     if itype == "CHM15k":                       # 1064 nm: no WV term exists in its constant
-        return [v for v in full if v not in ("v2.2sansWV",) and v.split("_")[-1] not in LAM_RUNS]
-    if itype not in LAM_TYPES:                  # 910 nm but not the re-run type (CL31, CL51)
-        return [v for v in full if v.split("_")[-1] not in LAM_RUNS]
-    return list(full)
+        return [v for v in full if v != "v2.2sansWV" and v not in _CL61_ONLY | _CL31_ONLY]
+    if itype == "CL31":
+        # Its own small ladder, in the operator's order:
+        # actuel (909,7/6,0 mesuré) -> constructeur (910,0/6,0) -> Wiegner (910,0/3,4) -> sans WV
+        if method == "cloud":
+            return ["cloudWV", "cloud_cl31l910", "cloud_cl31wieg", "cloudNoWV"]
+        return [v for v in full if v not in _CL61_ONLY]
+    if itype not in LAM_TYPES:                  # 910 nm but not a re-run type (CL51...)
+        return [v for v in full if v not in _CL61_ONLY | _CL31_ONLY]
+    return [v for v in full if v not in _CL31_ONLY]      # CL61: everything but the CL31 ladder
 
 
 # Profile-side measured-dark checkbox: the constants-side twin to switch to when it is ticked, so
 # a dark-corrected profile is never divided by a dark-free constant (mixing two signal definitions
 # measurably WORSENS the comparison).  Anything not listed has no dark-corrected run.
-DARK_TWIN = {"v2.0": "v2.2dark", "v2.2": "v2.2dark", "v2.2dark": "v2.2dark"}
+DARK_TWIN = {"v2.0": "v2.2dark", "v2.2": "v2.2dark", "v2.2dark": "v2.2dark",
+             "v2.2_l55s008": "v2.2_l55s008dark", "v2.2_l55s008dark": "v2.2_l55s008dark"}
+# The dark-run variants themselves (constants FROM a dark-corrected calibration): selecting one
+# auto-ticks the profile-side dark where the measured b(z) exists, so the pair stays coherent.
+DARK_RUNS = ("v2.2dark", "v2.2_l55s008dark")
+
+
+def dark_kind(site_key):
+    """Provenance of this site's dark-run constants: the MEASURED covered-telescope b(z) exists
+    only at Payerne; everywhere else 'v2.2dark' comes from the clear-night ESTIMATED dark
+    (demonstration-only) and the page labels must say so — one variant id, two sources."""
+    return "measured" if site_key == "payerne" else "estimated"
 DARK_NO_TWIN_WHY = ("aucun run d'étalonnage dark-corrigé pour cette variante : seul le PROFIL est "
                     "corrigé ici, la constante reste dark-free. État hybride — à lire comme un "
-                    "diagnostic, pas comme une comparaison cohérente. (Pour la méthode nuage "
-                    "l'effet est de toute façon négligeable : l'intégration 100–2400 m se fait là "
-                    "où dark/signal ≈ 1e-3.)")
+                    "diagnostic, pas comme une comparaison cohérente.")
+# For the CLOUD method the same profile-only state is NOT a warning: the cloud constant is
+# dark-immune (measured: CL31 +0.08 %, CL61 −0.01 %/km ~ 0.001 % — the 100–2400 m integration sits
+# where dark/signal ≈ 1e-3), so correcting only the profiles IS the coherent reading.
+DARK_CLOUD_OK_WHY = ("la constante nuage est immune au dark (+0,08 % mesuré) — seuls les profils "
+                     "sont corrigés, c'est l'état correct")
 DARK_NO_MEAS_WHY = ("pas de mesure capot pour cette unité (campagne télescope couvert à Payerne "
                     "uniquement)")
 DARK_HINT = "cohérence : profils et constantes corrigés ensemble"
@@ -121,13 +167,16 @@ DARK_HINT = "cohérence : profils et constantes corrigés ensemble"
 VARIANT_SHORT = {
     "v2.0": "v2.0", "v2.2": "v2.2 (λ910,74)", "v2.2dark": "v2.2+dark",
     "v2.2sansWV": "v2.2 sans WV", "v2.2_l55s008": "v2.2 λ910,55 σ0,08 ★",
+    "v2.2_l55s008dark": "λ910,55 σ0,08 + dark ★",
     "v2.2_l55w10": "v2.2 λ910,55 F1,0", "v2.2_l55w01": "v2.2 λ910,55 F0,1",
     "cloudWV": "nuage (λ910,74)", "cloudNoWV": "nuage sans WV",
     "cloud_l55s008": "nuage λ910,55 σ0,08 ★", "cloud_l55w10": "nuage λ910,55 F1,0",
     "cloud_l55w01": "nuage λ910,55 F0,1",
+    "cloud_cl31l910": "nuage λ910,0 F6,0", "cloud_cl31wieg": "nuage λ910,0 F3,4",
 }
 # Variants that carry the manufacturer spectrum — the page badges them as the reference hypothesis.
-REFERENCE_VARIANTS = ("v2.2_l55s008", "cloud_l55s008")
+# The fully-corrected state (spectrum + measured dark) leads: it is what a method flip picks first.
+REFERENCE_VARIANTS = ("v2.2_l55s008dark", "v2.2_l55s008", "cloud_l55s008")
 REFERENCE_NOTE = ("Spectre d'émission constructeur (Vaisala, comm. pers. citée dans la réponse au "
                   "relecteur RC1 du preprint Le & O'Connor) : lambda0 = 910,55 nm, sigma = 0,08 nm, "
                   "soit FWHM = 0,188 nm. Le modèle opérationnel (910,74 / FWHM 1,0) sur-corrige "
@@ -139,6 +188,7 @@ REFERENCE_NOTE = ("Spectre d'émission constructeur (Vaisala, comm. pers. citée
 CLOUD_DUMP_TAG = {
     "cloudWV": "nominal", "cloudNoWV": "nowv", "cloud_l55s008": "l55s008",
     "cloud_l55w10": "l55w10", "cloud_l55w01": "l55w01",
+    "cloud_cl31l910": "cl31l910", "cloud_cl31wieg": "cl31wieg",
 }
 
 
@@ -171,8 +221,35 @@ def source_for(site_key, ident, itype, method, variant, wmo):
     """-> ("nc"|"json"|"csv", arg) or a French string explaining the absence."""
     is1064 = itype == "CHM15k"
 
-    # --- the CL61 water-vapour-spectrum ladder --------------------------------------------------
+    # --- the fully-corrected CL61 Rayleigh state (constructor spectrum + measured dark) ---------
+    if variant == "v2.2_l55s008dark":
+        if is1064:
+            return _NO_WV_TO_REMOVE
+        if itype not in LAM_TYPES:
+            return (f"le rejeu du spectre laser ne couvre que les {', '.join(LAM_TYPES)} — "
+                    f"la raie du {itype} est différente et n'a pas été rejouée")
+        if site_key != "payerne":
+            return "dark mesuré = Payerne uniquement (campagne télescope couvert)"
+        if not _csv(L55S008DARK, wmo, ident).exists():
+            return (f"rejeu « l55s008dark » pas encore écrit pour ce flux "
+                    f"({L55S008DARK.name}/{wmo}_{ident})")
+        return ("csv", _csv(L55S008DARK, wmo, ident))
+
+    # --- the CL31 water-vapour-spectrum ladder (Payerne B) --------------------------------------
     suffix = variant.split("_")[-1] if "_" in variant else None
+    if suffix in CL31_LAM_RUNS:
+        if is1064:
+            return _NO_WV_TO_REMOVE
+        if itype not in CL31_LAM_TYPES:
+            return (f"rejeu spécifique au CL31 (raie 910,0 nm du datasheet) — sans objet pour "
+                    f"le {itype}")
+        root = CL31_LAM_RUNS[suffix]
+        if not _csv(root, wmo, ident).exists():
+            return (f"rejeu « {suffix} » pas encore écrit pour ce flux "
+                    f"({root.name}/{wmo}_{ident})")
+        return ("csv", _csv(root, wmo, ident))
+
+    # --- the CL61 water-vapour-spectrum ladder --------------------------------------------------
     if suffix in LAM_RUNS:
         if is1064:
             return _NO_WV_TO_REMOVE
@@ -230,20 +307,28 @@ _SPECTRUM_WARN = """<b>★ Spectre d'émission du CL61 — hypothèse de référ
     <b>deux côtés</b> est l'état physiquement cohérent. Les autres λ ne sont là que pour encadrer."""
 
 _PAY_WARN = [
-    """<b>CL31 : bloc optique remplacé le 2026-07-07 ~13:00.</b> Sa constante passe de ~3.1e7
-    (jan–mai) / 4.1e7 (juin) à 9.1e7 (juil–août). La fenêtre couvre la bascule <b>volontairement</b> :
-    choisir <b>juin 2026</b> pour l'état d'avant, <b>juillet</b>/<b>août</b> pour l'état d'après. Le
-    lissage est le filtre opérationnel (<code>monitoring.kalman</code>), qui absorbe la marche en
-    quelques jours ; le panneau L2, lui, porte le défaut fixe 1e8 sur toute la période.""",
-    """<b>La référence CHM15k est peu contrainte sur cette fenêtre</b> : une seule nuit Rayleigh
-    acceptée entre le 8 juillet et le 13 août, après deux mois de trou. Le filtre bouge donc à peine
-    et juillet/août tournent sur la valeur de fin bloquée — une part du résidu CL61 est dans la
-    référence, pas dans le CL61.""",
-    """<b>Nuages « avec WV » vs « sans WV » :</b> les constantes « avec WV » sont celles des
-    NetCDF v2.0/v2.2 publiés (le calcul nuage est identique entre ces deux versions), les
-    constantes « sans WV » viennent du rerun <code>diag_v22_nowv</code>. Le test <b>cohérent</b> =
-    variante « sans WV » avec la case « <b>WV comparaison</b> » <b>décochée</b> ; la vue historique
-    = « avec WV » + case <b>cochée</b>. Les états croisés restent des diagnostics.""",
+    # {tokens} are substituted at BUILD time from the current calibration series
+    # (build_v3.prose_tokens), so the numbers in this prose can never go stale again.
+    """<b>CL31 : bloc optique remplacé le 2026-07-07 ~13:00.</b> Sa constante par nuit passe de
+    ~{B_LVL_SPRING} (jan–mai, médiane) / {B_LVL_JUNE} (juin) à {B_LVL_SUMMER} (après le 8 juillet).
+    La fenêtre couvre la bascule <b>volontairement</b> : choisir <b>juin 2026</b> pour l'état
+    d'avant, <b>juillet</b>/<b>août</b> pour l'état d'après. Le lissage est le filtre opérationnel
+    (<code>monitoring.kalman</code>), qui absorbe la marche en quelques jours ; le panneau L2, lui,
+    porte le défaut fixe 1e8 sur toute la période.""",
+    """<b>Disponibilité de la référence CHM15k</b> sur la fenêtre appariée : v2.0 opérationnel
+    <b>{A_V20_WIN}</b> nuit(s) Rayleigh acceptée(s), dont <b>{A_V20_JA}</b> entre le 8 juillet et
+    le 13 août ; v2.2 <b>{A_V22_WIN}</b> (dont {A_V22_JA}) ; v2.2+dark <b>{A_DARK_WIN}</b>
+    (dont {A_DARK_JA}). Le trou estival du v2.0 est un artefact de ses portes strictes, résorbé par
+    les portes noise-aware de la v2.2 : sous v2.0 le filtre de Kalman tourne en juillet–août sur
+    une valeur bloquée (une part du résidu CL61 serait alors dans la référence), sous v2.2 et
+    v2.2+dark la référence est contrainte en continu.""",
+    """<b>Nuages « avec WV » vs « sans WV » :</b> les constantes « avec WV λ910,74 » sont celles
+    des NetCDF v2.0/v2.2 publiés (le calcul nuage est identique entre ces deux versions), les
+    constantes « sans WV » viennent du rerun <code>diag_v22_nowv</code> et les λ alternatives de
+    leurs rejeux respectifs. L'état <b>cohérent</b> apparie la même hypothèse des deux côtés via le
+    sélecteur « <b>Correction vapeur d'eau (comparaison)</b> » : variante « sans WV » × mode
+    « aucune », variante « λ910,74 » × mode « λ910,74 », variante « ★ λ910,55 σ0,08 » × mode
+    « λ910,55 σ0,08 ». Les états croisés restent des diagnostics.""",
     """<b>v2.2 + dark (Payerne)</b> : le fond électronique <b>mesuré</b> (télescope couvert) est
     soustrait du profil L1 <i>et</i> la constante vient du run dark-corrigé — les deux côtés ou
     aucun. Les stations d'Amsterdam et de Lindenberg utilisent un dark <b>estimé</b> depuis les
@@ -261,8 +346,10 @@ _AMS_WARN = [
 
 _LIN_WARN = [
     """<b>Fenêtre et constantes bornées :</b> le L1 journalier local du CL61 s'arrête le
-    30 juin 2026, la fenêtre appariée est donc juin uniquement. Son enregistrement v2.2 (run réseau)
-    s'arrête le 15 juin ; la série de Kalman est maintenue à sa dernière valeur ensuite.""",
+    30 juin 2026, la fenêtre appariée est donc juin uniquement. L'enregistrement <b>v2.2 (run
+    réseau)</b> s'arrête au <b>{LIN_V22_END}</b> — sa série de Kalman est maintenue à sa dernière
+    valeur ensuite — tandis que les rejeux locaux (sans WV et l'échelle λ, dont la variante ★ par
+    défaut) couvrent les nuits jusqu'au <b>{LIN_RERUN_END}</b>.""",
     _SPECTRUM_WARN,
 ]
 
@@ -273,8 +360,14 @@ SITE_V3 = {
             dict(ident="B", itype="CL31", label="CL31 (B)", color="#ff7f0e"),
             dict(ident="C", itype="CL61", label="CL61 (C)", color="#2ca02c"),
         ],
-        default={"A": ("rayleigh", "v2.2"), "B": ("cloud", "cloudWV"),
-                 "C": ("cloud", "cloudWV")},
+        # Operator-confirmed boot state (2026-08-16): the fully dark-corrected view — the CHM15k
+        # reference on its dark-corrected constants, both cloud channels with the profile-side
+        # dark subtracted (their constants are dark-immune), and the CL61 on the manufacturer
+        # spectrum.  The LEGACY state (v2.2 / cloudWV, no dark) remains the numerical
+        # non-regression anchor — check_v3.py sets it programmatically.
+        default={"A": ("rayleigh", "v2.2dark"), "B": ("cloud", "cloudWV"),
+                 "C": ("cloud", "cloud_l55s008")},
+        default_dark={"A": True, "B": True, "C": True},
         iref=0,
         # Each state = (constants variant, profile-side WV mode).  A COHERENT state uses the same
         # laser-line hypothesis on both sides; a crossed one mixes two definitions of the signal
@@ -316,7 +409,7 @@ SITE_V3 = {
             dict(ident="0", itype="CHM15k", label="CHM15k (0)", color="#1f77b4"),
             dict(ident="C", itype="CL61", label="CL61 (C)", color="#2ca02c"),
         ],
-        default={"0": ("rayleigh", "v2.2"), "C": ("cloud", "cloudWV")},
+        default={"0": ("rayleigh", "v2.2"), "C": ("cloud", "cloud_l55s008")},
         iref=0,
         title="Lindenberg — CHM15k face au CL61 : L1 + étalonnage v2.2",
         subtitle="""Rétrodiffusion atténuée sur les mêmes heures et la même grille d'altitude pour

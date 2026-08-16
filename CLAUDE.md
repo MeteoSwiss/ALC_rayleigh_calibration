@@ -129,6 +129,33 @@ never calibrated WV-free.
   Do **NOT** confuse with `subtract_background` (fitted intercept = atmosphere in disguise, keep 0).
 - Campaign reports index: `doc/reports/README.md` §2026-08.
 
+## CL61 water-vapour spectrum & the v3 dashboard (2026-08-16)
+
+- **The CL61 emission line is (910.55 nm, σ 0.08 → FWHM 0.188 nm)** — Le & O'Connor response to
+  referee RC1 (Vaisala pers. comm.), corroborated by the PUBLIC DA10 DIAL guide M212895EN-E
+  ("910.55 and 910.99 nm", offline channel "with low water vapor absorption") and Mariani 2021
+  (DA10 transmitter 0.19–0.21 nm). The old model (910.74/1.0, Qmini centroid bias + wrong width)
+  **over-corrects WV ×9** → it CREATED the CL61 cloud dC/dCBH slope (+9 %/km) and ~−12 % of level.
+  Fully-corrected CL61 (★ spectrum + measured dark) lands within ~2 % of the CHM15k reference.
+- Env switches (default unset = operational unchanged): **`ALC_WV_SPECTRUM`** JSON overrides the
+  laser spectrum for BOTH methods (e.g. `{"CL61": [910.55, 0.188]}`; single source of truth
+  `water_vapor.LASER_SPECTRUM`, cloud `set_defaults` reads it too); **`ALC_WV_DISABLE=1`** turns
+  the WV correction off. Runs per hypothesis: `diag_v22_l55s008` (★), `_l55w10`, `_l55w01`,
+  `_nowv`, `_l55s008dark` (★+dark, the CL61 Rayleigh reference), CL31 ladder `_cl31l910`/`_cl31wieg`.
+- Three CL61 wavelengths coexist ON PURPOSE: 910.74→WV correction table (update to 910.55/0.188
+  pending final arbitration), 910.0→molecular Rayleigh reference (0.33 % effect), 910.55→η tables.
+- **Dashboard v3** = `inter-comparison_dashboard/index.html` (one page, 3 sites, per-instrument
+  method/variant/dark controls, all-variants ladder table, per-config Hopkin, binned-PWV panel);
+  architecture + editing guide in `inter-comparison_dashboard/README.md`; **`variants_v3.py` is
+  the file to edit when a new run lands**. Anti-fossil rule: state-dependent numbers in page
+  prose are injected at build (`prose_tokens`), never hard-coded.
+- Cloud calibration is dark-immune (+0.08 % CL31, ~0.001 % CL61, measured) and its fixed
+  100–2400 m window makes a static dark CBH-flat by construction — never rerun cloud for dark.
+- L2 as distributed: CHM15k **and CL61** = operational Rayleigh v1.0 (the CL61's v1.0
+  calibration went live recently: constant 1.0 default on 48 d then 2.1257 from mid-2026-06 on
+  the paired window — the transition is visible in the L2 row tooltip); CL31 = UNCALIBRATED
+  (flat default 1e8 — the gap the cloud calibration fills).
+
 ## Working preferences (user hervo63)
 
 - **Ask before relocating/moving data**; when proposing to write somewhere, state *what* / *how much*
