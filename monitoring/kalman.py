@@ -74,7 +74,11 @@ def kalman_best_estimate(times, values, *, uncertainties=None, outlier_mode="rol
     tolerable as soon as availability is raised, because the added nights are systematically the
     less certain ones. The empirical scale (day-to-day scatter) is kept -- it captures error the
     formal uncertainty does not -- and only the RATIO between nights is taken from the reported
-    values, clipped to a factor 4 either way so one absurd uncertainty cannot dominate.
+    values, clipped to a factor 4 either way so one absurd uncertainty cannot dominate. The ratio
+    is formed from RELATIVE uncertainties (u divided by that night's own C_L): reported
+    uncertainties are absolute, so across a level step (an optical-module swap) the high side's u
+    scales with the level itself, and an absolute-u ratio would down-weight a whole era for its
+    magnitude rather than its quality.
 
     ``outlier_mode`` selects the IQR screen: "global" is the operational one (a single interquartile
     range over the whole series), "rolling" (default, unchanged) a local window.
@@ -92,6 +96,10 @@ def kalman_best_estimate(times, values, *, uncertainties=None, outlier_mode="rol
     times = [t for t, g in zip(times, good) if g]
     if unc is not None:
         unc = unc[good]
+        # Relative uncertainty from here on (see docstring): u/C_L of the same night, so the
+        # weight ratio compares QUALITY across a level step instead of tracking the level.
+        with np.errstate(divide="ignore", invalid="ignore"):
+            unc = np.where(values > 0, unc / values, np.nan)
     if values.size < 5:
         return empty
 
