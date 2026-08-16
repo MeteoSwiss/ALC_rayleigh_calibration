@@ -1,25 +1,26 @@
 # -*- coding: utf-8 -*-
-"""Payerne L1-vs-L2 dashboard — compute stage.
+"""L1-vs-L2 inter-comparison dashboard — compute stage (per SITE, see sites.py).
 
-Builds every combination of the three optional corrections for BOTH sources and dumps one JSON the
-static HTML page then toggles through client-side. Nothing is recomputed in the browser.
+Builds every combination of the three optional corrections for every available source and dumps one
+JSON the static HTML page then toggles through client-side. Nothing is recomputed in the browser.
 
-  LEFT  panel  "L1 + v2 calibration"  : L1 rcs_0 / C_L(t) * 1e6, C_L = the daily Kalman series from
-                                        the latest v2.0 calibration NetCDFs (presentation/l1_l2_calib.py)
-  RIGHT panel  "L2 as distributed"    : attenuated_backscatter_0 straight out of the L2 product
-                                        (CHM15k = v1.0 Rayleigh, CL31 = the 1e8 default, CL61 = Vaisala)
+  LEFT  panel  "L1 + calibration"     : L1 rcs_0 / C_L(t) * 1e6, C_L = the daily Kalman series of
+                                        the site's calibration variants (l1_l2_calib.py)
+  RIGHT panel  "L2 as distributed"    : attenuated_backscatter_0 straight out of the L2 product —
+                                        only for sites whose spec lists an "L2" source (Payerne)
 
 Optional corrections, applied IDENTICALLY to both panels so the panels stay comparable:
   * water vapour        - divide by the two-way WV transmission at the laser line (910 nm units only)
   * wavelength, simple  - single Angstrom exponent (alpha=1) to the 1064 nm reference
   * wavelength, advanced- component-separated molecular/aerosol conversion using the CAMS T/p profile
 
-Both panels are reduced to the SAME hourly grid and the SAME altitude grid, then restricted to the
-hours where all three instruments have data in both panels, so every curve and every difference on
-the page comes from one strictly paired sample.
+All panels are reduced to the SAME hourly grid and the SAME altitude grid, then restricted to the
+hours where every instrument has data in every source, so every curve and every difference on the
+page comes from one strictly paired sample. The canonical combo (first variant, WV on, molecular
+wavelength) additionally emits a coarsened time-height "pcolor" block for the per-channel curtains.
 
-Run:  python inter-comparison_dashboard/build_l1_l2_dashboard.py
-Out:  C:/DATA/Projects/202606_E-PROFILE_calibration/inter-comparison_dashboard/data.json
+Run:  python inter-comparison_dashboard/build_l1_l2_dashboard.py [payerne|amsterdam|lindenberg] [--reread]
+Out:  C:/DATA/Projects/202606_E-PROFILE_calibration/inter-comparison_dashboard/data_<site>.json
 """
 from __future__ import annotations
 import json
@@ -46,66 +47,81 @@ from validation.paper import run_paper_validation as RP
 from validation.paper.calib_benchmark import key_of
 import l1_l2_calib as CAL
 import l1_l2_io as IO
+import sites
 
-WMO = "0-20000-0-06610"
-STA = (46.8137, 6.9425, 491.0)
-# Archive read window (what goes in the stream cache). The daily L2 archive carries CHM15k/CL31 back
-# to January, but the CL61 daily concatenation only starts ~2026-06-11 (before that there is neither
-# a daily file nor a 5-minute granule), and a paired three-instrument comparison can only use hours
-# all three have.
-START, END = "20260601", "20260814"
-# Comparison window. Spans the CL31 optical-block replacement (2026-07-07 ~13:00) deliberately, so
-# its impact is visible: pick Jun 2026 in the period selector for the pre-swap state and Jul/Aug for
-# after. The operational Kalman follows the step (see l1_l2_calib), so the L1 panel stays valid
-# across it. Changing this does NOT need a cache re-read while it sits inside [START, END]; the
-# effective start is clamped to where CL61's daily L2 begins (2026-06-11).
-WIN_START, WIN_END = "20260601", "20260813"
 TARGET, ALPHA = 1064.0, 1.0
 ZMIN, ZMAX = RP.ZMIN, RP.ZMAX               # 500-3000 m AGL statistics band
 # Display grid. The instruments reach 15.3 km (CHM15k), 15.7 km (CL61) and 7.7 km (CL31), so the
 # grid runs to 15 km and each curve is truncated at its own noise floor instead of at a fixed height.
 ZTOP_PLOT = 15000.0                         # display range [m AGL]
 DZ = 30.0                                   # display altitude step [m] (the L2 native grid)
+# Pcolor payload coarsening: only up to 8 km, every 2nd display gate, one canonical combo.
+PCOLOR_ZTOP = 8000.0
+PCOLOR_ZSTEP = 2
 
-OUT = Path(r"C:/DATA/Projects/202606_E-PROFILE_calibration/inter-comparison_dashboard")            # data + rendered page live outside the repo
-CALIB_V2 = CAL.OUT                          # the Kalman CSVs written from the v2 NetCDFs
-
-# One channel per physical instrument. calib= picks which key_of() series the L1 panel loads.
-CHANNELS = [
-    dict(ident="A", itype="CHM15k", calib="rayleigh", label="CHM15k (A)", color="#1f77b4"),
-    dict(ident="B", itype="CL31",   calib="cloud",    label="CL31 (B)",   color="#ff7f0e"),
-    dict(ident="C", itype="CL61",   calib="cloud",    label="CL61 (C)",   color="#2ca02c"),
-    # The CL61 carries a Rayleigh calibration as well as the cloud one; it is a separate retrieval
-    # of the same constant, and the only CL61 channel a molecular-gate change can move.
-    dict(ident="C", itype="CL61",   calib="rayleigh", label="CL61 (C, Rayleigh)", color="#17becf",
-         chan="Cr"),
-]
-IREF = 0                                    # CHM15k is the 1064 nm reference everywhere
+OUT = sites.DATA_ROOT                       # data + rendered page live outside the repo
 
 WL_MODES = ["none", "angstrom", "molecular"]
-# Calibration variant is a third dimension: it changes the CONSTANT the L1 panel divides by, so it
-# cannot be applied after the hourly medians are taken (median(beta/c) != median(beta)/median(c)).
-# The L2 panel is independent of it and is recomputed identically for each variant -- wasteful, but
-# it keeps one combo key for the whole payload and the pool absorbs it.
-CALIB_VARIANTS = {"v2.0": CAL.OUT, "v2.2": CAL.OUT_V22, "v2.2dark": CAL.OUT_DARK}
 
-# Measured dark baseline b(z), rcs_0 units, from the covered-telescope campaign. The "v2.2dark"
-# variant subtracts it from the L1 profiles AND uses constants from the dark-corrected calibration
-# run -- both sides or neither: a corrected profile divided by an uncorrected constant (or vice
-# versa) mixes two signal definitions and WORSENS the comparison (measured 2026-08-15). Subtracting
-# after the hourly median is exact because the baseline is constant in time.
-DARK_NPZ = Path(os.environ.get(
-    "ALC_DASH_DARK_NPZ",
-    "C:/DATA/Projects/202606_E-PROFILE_calibration/rayleigh_availability/dark_profiles_payerne.npz"))
+# ---------------------------------------------------------------------------- per-site state
+# set_site() fills these from sites.py; the pool initializer re-applies it in every worker (the
+# workers re-import this module, which defaults to Payerne).
+SITE = None
+WMO = None
+STA = None
+CHANNELS = None
+IREF = 0
+SOURCES = ("L1", "L2")
+START = END = WIN_START = WIN_END = None
+CALIB_VARIANTS = {}
+COMBOS = []
+DARK_NPZ = None
+CACHE_NPZ = None
 _DARKP = {}
 
 
+def set_site(site_key):
+    """Point every module-level knob at ONE site from sites.py."""
+    global SITE, WMO, STA, CHANNELS, IREF, SOURCES, START, END, WIN_START, WIN_END
+    global CALIB_VARIANTS, COMBOS, DARK_NPZ, CACHE_NPZ
+    s = sites.get_site(site_key)
+    SITE = s
+    WMO = s["wmo"]
+    STA = (s["lat"], s["lon"], s["alt"])
+    CHANNELS = s["channels"]
+    IREF = s["iref"]
+    SOURCES = tuple(s["sources"])
+    START, END = s["start"], s["end"]
+    WIN_START, WIN_END = s["win_start"], s["win_end"]
+    # Calibration variant is a third dimension: it changes the CONSTANT the L1 panel divides by, so
+    # it cannot be applied after the hourly medians are taken (median(beta/c) != median(beta)/
+    # median(c)). The L2 panel is independent of it and is recomputed identically for each variant
+    # -- wasteful, but it keeps one combo key for the whole payload and the pool absorbs it.
+    CALIB_VARIANTS = {v: Path(s["calib_dirs"][v]) for v in s["variants"]}
+    if s.get("collapse_combos"):
+        # Every channel at 1064 nm: WV and both wavelength conversions are exact no-ops, so one
+        # combo per variant carries the whole page (the render stage hides those controls).
+        COMBOS = [(v, True, "molecular") for v in s["variants"]]
+    else:
+        COMBOS = [(v, wv, wl) for v in s["variants"] for wv in (False, True) for wl in WL_MODES]
+    DARK_NPZ = Path(os.environ.get("ALC_DASH_DARK_NPZ", s["dark_npz"])) \
+        if s.get("dark_npz") else None
+    CACHE_NPZ = OUT / f"_streams_{site_key}.npz"
+    _DARKP.clear()
+
+
+# Measured dark baseline b(z), rcs_0 units, from the covered-telescope campaign. A "dark" variant
+# (sites.py dark_variants) subtracts it from the L1 profiles AND uses constants from the
+# dark-corrected calibration run -- both sides or neither: a corrected profile divided by an
+# uncorrected constant (or vice versa) mixes two signal definitions and WORSENS the comparison
+# (measured 2026-08-15). Subtracting after the hourly median is exact because the baseline is
+# constant in time.
 def dark_for(ident, rng):
     """b(z) resampled on this channel's range grid (rcs_0 units), or None."""
     key = str(ident)
     if key not in _DARKP:
         prof = None
-        if DARK_NPZ.exists():
+        if DARK_NPZ is not None and DARK_NPZ.exists():
             try:
                 with np.load(DARK_NPZ) as z:
                     if f"{ident}_b_rcs" in z:
@@ -121,7 +137,9 @@ def dark_for(ident, rng):
     ok = np.isfinite(rd) & np.isfinite(bd)
     b = np.interp(np.asarray(rng, "f8"), rd[ok], bd[ok], left=np.nan, right=np.nan)
     return np.nan_to_num(b, nan=0.0)
-COMBOS = [(cal, wv, wl) for cal in CALIB_VARIANTS for wv in (False, True) for wl in WL_MODES]
+
+
+set_site("payerne")                          # default; main()/_init() re-point per run
 
 
 def combo_key(cal, wv, wl):
@@ -157,7 +175,7 @@ def process_channel(d, ch, source, wv, wl, cal="v2.0"):
     """One channel, one source, one correction combo -> the dict grid_and_stats() consumes."""
     beta = d["beta"].copy()
     med_corr = 1.0
-    if source == "L1" and cal == "v2.2dark":
+    if source == "L1" and cal in SITE.get("dark_variants", ()):
         b = dark_for(ch["ident"], np.asarray(d["alt"], "f8") - float(d["station_alt"]))
         if b is not None:
             beta = beta - b[None, :]
@@ -182,7 +200,7 @@ def process_channel(d, ch, source, wv, wl, cal="v2.0"):
 
 
 # --------------------------------------------------------------------------- one panel
-def _grid(items):
+def _grid(items, want_disp=False):
     """Hourly-median grid + common altitude grid for one panel.
 
     This is run_paper_validation.grid_and_stats trimmed to what the dashboard needs, with ONE
@@ -195,38 +213,45 @@ def _grid(items):
     SNR gate keeps only gates whose median is significantly non-zero, so where it IS active it
     conditions on positive noise and biases the retained median high and rising with altitude —
     which is precisely the CL31 L1-vs-L2 floor discrepancy it produced. Leaving it off for both is
-    also the project's validated choice for a bias comparison (noise filter 'none')."""
+    also the project's validated choice for a bias comparison (noise filter 'none').
+
+    want_disp additionally grids the qf-masked-only stream (clouds kept) — only the canonical
+    pcolor combo pays for it."""
     gridded = []
     for it in items:
         l1 = it["l1"]
         cbh = l1["cbh"]
         cbh_low = (np.nanmin(np.where((cbh > 0) & (cbh < 20000), cbh, np.nan), axis=1)
                    if cbh.ndim == 2 else cbh)
-        g, arrs = IC.retime_hourly(l1["time"], [it["beta_scr"], cbh_low],
-                                   min_cov_s=IC.MIN_AVG_S, snr_idx=())
-        gridded.append(dict(l1=l1, grid=g, scr=arrs[0]))
+        arrays = [it["beta_scr"], cbh_low] + ([it["beta_disp"]] if want_disp else [])
+        g, arrs = IC.retime_hourly(l1["time"], arrays, min_cov_s=IC.MIN_AVG_S, snr_idx=())
+        gridded.append(dict(l1=l1, grid=g, scr=arrs[0],
+                            disp=(arrs[2] if want_disp else None)))
 
     union = np.unique(np.concatenate([g["grid"] for g in gridded]))
     for g in gridded:
         idx = {t: i for i, t in enumerate(g["grid"])}
         pos = np.array([idx.get(t, -1) for t in union])
         g["scrU"] = RP._reindex(g["scr"], pos, union.size)
+        g["dispU"] = RP._reindex(g["disp"], pos, union.size) if want_disp else None
     # Deliberately NOT intercompare.build_common_grid: it takes the INTERSECTION of the channels'
     # vertical extents (z1 = min of the maxima), so CL31's 7.7 km ceiling would truncate CHM15k
     # (15.3 km) and CL61 (15.7 km) as well. Each channel is regridded from its OWN native altitude
     # straight onto the fixed display grid instead, so every instrument keeps its full range and the
     # short one simply carries NaN above its own top.
-    return union, [(g["scrU"], g["l1"]["alt"]) for g in gridded]
+    return union, [(g["scrU"], g["dispU"], g["l1"]["alt"]) for g in gridded]
 
 
-def build_panel(cache, source, wv, wl, cal="v2.0"):
+def build_panel(cache, source, wv, wl, cal="v2.0", want_disp=False):
     """One source + one correction combo, regridded onto the shared display grid.
-    Returns (time_sync, beta[nch] on the display grid, alt_asl)."""
+    Returns (time_sync, beta[nch] on the display grid, alt_asl, disp[nch] or None)."""
     items = [process_channel(cache[(source, ch["ident"])], ch, source, wv, wl, cal)
              for ch in CHANNELS]
-    tsync, streams = _grid(items)
+    tsync, streams = _grid(items, want_disp)
     alt = np.arange(0.0, ZTOP_PLOT + DZ, DZ) + STA[2]          # ASL display grid
-    return tsync, [IC.regrid(b, a, alt) for b, a in streams], alt
+    B = [IC.regrid(b, a, alt) for b, _, a in streams]
+    Bd = [IC.regrid(d_, a, alt) for _, d_, a in streams] if want_disp else None
+    return tsync, B, alt, Bd
 
 
 # --------------------------------------------------------------------------- statistics helpers
@@ -320,8 +345,9 @@ def _clean(a):
 _CACHE = None
 
 
-def _init(npz_path, t0, t1):
+def _init(site_key, npz_path, t0, t1):
     global _CACHE
+    set_site(site_key)
     _CACHE = load_cache(npz_path, t0, t1)
 
 
@@ -332,9 +358,9 @@ def _stats_for(B, sel, band, z_agl):
     noise-floor filter client-side so it can be switched off and the raw median inspected."""
     out = {}
     nh = int(sel.sum())
-    Bs = {s: [b[sel] for b in B[s]] for s in ("L1", "L2")}
+    Bs = {s: [b[sel] for b in B[s]] for s in SOURCES}
     keep = {}
-    for s in ("L1", "L2"):
+    for s in SOURCES:
         prof, stats, keep[s] = [], [], []
         for k in range(len(CHANNELS)):
             med, q1, q3, n = _median_iqr(Bs[s][k])
@@ -347,7 +373,7 @@ def _stats_for(B, sel, band, z_agl):
                           for kk, vv in IC._stats(Bs[s][k], Bs[s][IREF], band).items()})
         out[s] = dict(profiles=prof, stats=stats)
     # a difference is only meaningful where BOTH curves in it are still measurements
-    for s in ("L1", "L2"):
+    for s in SOURCES:
         out[s]["diff_vs_ref"] = [_clean(_rel_profile(Bs[s][k], Bs[s][IREF]))
                                  for k in range(len(CHANNELS))]
         out[s]["diff_keep"] = [[int(x) for x in (keep[s][k] & keep[s][IREF])]
@@ -355,34 +381,88 @@ def _stats_for(B, sel, band, z_agl):
         hists = [_rel_hist(Bs[s][k], Bs[s][IREF], band) for k in range(len(CHANNELS))]
         out[s]["hist"] = [h for h, _ in hists]
         out[s]["hist_med"] = [m for _, m in hists]
-    out["l1_vs_l2"] = [_clean(_rel_profile(Bs["L1"][k], Bs["L2"][k])) for k in range(len(CHANNELS))]
-    out["l1_vs_l2_keep"] = [[int(x) for x in (keep["L1"][k] & keep["L2"][k])]
-                            for k in range(len(CHANNELS))]
+    if "L2" in SOURCES:
+        out["l1_vs_l2"] = [_clean(_rel_profile(Bs["L1"][k], Bs["L2"][k]))
+                           for k in range(len(CHANNELS))]
+        out["l1_vs_l2_keep"] = [[int(x) for x in (keep["L1"][k] & keep["L2"][k])]
+                                for k in range(len(CHANNELS))]
     out["n_hours"] = nh
     return out
 
 
+# --------------------------------------------------------------------------- pcolor payload
+def _pcolor_z(M):
+    """One coarse (time x alt) block -> JSON rows PER ALTITUDE (plotly heatmap z[y][x]):
+    log10 of the value, 2 decimals, null where empty/non-positive."""
+    with np.errstate(all="ignore"):
+        L = np.log10(M)
+    L[~np.isfinite(L)] = np.nan
+    return [[None if not np.isfinite(v) else round(float(v), 2) for v in L[:, iz]]
+            for iz in range(L.shape[1])]
+
+
+def _pcolor_payload(hours, z_agl, scr, disp):
+    """Time-height block for the per-channel curtains — the CANONICAL combo only, coarsened so the
+    page stays small: every PCOLOR_ZSTEP-th display gate up to PCOLOR_ZTOP, hourly columns on a
+    CONTINUOUS axis (missing hours are null columns, so plotly draws uniform cells), log10 values
+    rounded to 2 decimals, and everything above the channel's own keep-mask ceiling nulled.
+    `disp` (the qf-masked-only stream, clouds kept) is emitted ONLY where the screened stream is
+    empty — it is drawn as a grey backdrop underneath, so anywhere else it would be invisible."""
+    zsel = np.where(z_agl <= PCOLOR_ZTOP)[0][::PCOLOR_ZSTEP]
+    h = hours.astype("datetime64[h]")
+    axis = np.arange(h.min(), h.max() + np.timedelta64(1, "h"), np.timedelta64(1, "h"))
+    pos = np.searchsorted(axis, h)
+    ch_out = []
+    for k in range(len(CHANNELS)):
+        S = np.full((axis.size, zsel.size), np.nan)
+        S[pos] = scr[k][:, zsel]
+        Dq = np.full((axis.size, zsel.size), np.nan)
+        Dq[pos] = disp[k][:, zsel]
+        # keep-mask ceiling from the full-window screened stream (same rule as the profile curves).
+        # nprof = the hours THIS channel actually has data, not the axis length: the unpaired axis
+        # includes every hour any instrument reports, and 20 % of that would wipe out a channel
+        # whose clear-sky availability is low (Lindenberg CL61: ~140 clear hours on a 721 h axis).
+        med, _, _, n = _median_iqr(scr[k])
+        nprof = int(np.any(np.isfinite(scr[k]), axis=1).sum())
+        kp = _keep_mask(med, n, z_agl, max(nprof, 1))
+        S[:, ~kp[zsel]] = np.nan
+        Dq[:, ~kp[zsel]] = np.nan
+        Dq[np.isfinite(S)] = np.nan
+        ch_out.append(dict(scr=_pcolor_z(S), disp=_pcolor_z(Dq)))
+    return dict(hours=[str(t) for t in axis],
+                alt=[float(z) for z in z_agl[zsel]], ch=ch_out)
+
+
 def _run(spec):
     cal, wv, wl = spec
+    # canonical combo = the page's default view; it alone carries the pcolor block
+    canonical = (cal == SITE["variants"][0] and wv and wl == "molecular")
     out = {}
     panels = {}
-    for source in ("L1", "L2"):
-        panels[source] = build_panel(_CACHE, source, wv, wl, cal)
-    # --- pair the two panels on the hours they share ------------------------------------------
-    tL1, tL2 = panels["L1"][0], panels["L2"][0]
-    common_t = np.intersect1d(tL1, tL2)
-    iL1 = np.searchsorted(tL1, common_t)
-    iL2 = np.searchsorted(tL2, common_t)
+    for source in SOURCES:
+        panels[source] = build_panel(_CACHE, source, wv, wl, cal,
+                                     want_disp=(canonical and source == "L1"))
+    # --- pair the panels on the hours every source shares -------------------------------------
+    common_t = panels[SOURCES[0]][0]
+    for s in SOURCES[1:]:
+        common_t = np.intersect1d(common_t, panels[s][0])
+    idx = {s: np.searchsorted(panels[s][0], common_t) for s in SOURCES}
     alt = panels["L1"][2]
     band = (alt - STA[2] >= ZMIN) & (alt - STA[2] <= ZMAX)
-    B = {"L1": [b[iL1] for b in panels["L1"][1]], "L2": [b[iL2] for b in panels["L2"][1]]}
-    # hours where every instrument has data in BOTH panels -> one strictly paired sample
+    B = {s: [b[idx[s]] for b in panels[s][1]] for s in SOURCES}
+    # hours where every instrument has data in EVERY source -> one strictly paired sample
     have = np.logical_and.reduce([np.any(np.isfinite(B[s][k][:, band]), axis=1)
-                                  for s in ("L1", "L2") for k in range(len(CHANNELS))])
-    for s in ("L1", "L2"):
+                                  for s in SOURCES for k in range(len(CHANNELS))])
+    for s in SOURCES:
         B[s] = [b[have] for b in B[s]]
     hours = common_t[have]
     z_agl = alt - STA[2]
+
+    # Pcolor from the UNPAIRED L1 panel: the strict pairing above drops every hour ANY instrument
+    # is cloud-screened, which would empty the grey backdrop and riddle the curtain with holes --
+    # as an overview the full per-channel hours are the informative view.
+    if canonical and panels["L1"][0].size:
+        out["pcolor"] = _pcolor_payload(panels["L1"][0], z_agl, panels["L1"][1], panels["L1"][3])
 
     # Every contiguous run of whole months in the window, so the page can offer a from/to selector.
     # The corrections + gridding above are independent of the subset, so a range costs only medians.
@@ -397,17 +477,21 @@ def _run(spec):
 
 
 # --------------------------------------------------------------------------- cache
-CACHE_NPZ = OUT / "_streams.npz"
 _SCALAR = ("station_alt", "lat", "lon", "wavelength", "itype", "wmo", "ident")
-_STREAMS = [(s, i) for s in ("L1", "L2")
-            for i in dict.fromkeys(ch["ident"] for ch in CHANNELS)]
 
 
-def build_stream_cache(path=CACHE_NPZ):
-    """Read all six streams ONCE from the daily archives (with the 5-minute fallback) and cache
-    them, so re-running the correction combos never touches the archive again."""
+def _streams():
+    """(source, ident) pairs the cache holds — sources from the site spec, idents de-duplicated
+    (the CL61 cloud/Rayleigh channels share one physical stream)."""
+    return [(s, i) for s in SOURCES for i in dict.fromkeys(ch["ident"] for ch in CHANNELS)]
+
+
+def build_stream_cache(path=None):
+    """Read all the site's streams ONCE from the daily archives (with the 5-minute fallback) and
+    cache them, so re-running the correction combos never touches the archive again."""
+    path = CACHE_NPZ if path is None else path
     flat = {}
-    for source, ident in _STREAMS:
+    for source, ident in _streams():
         rd = IO.read_l1 if source == "L1" else IO.read_l2
         d = rd(WMO, ident, START, END)
         if d is None:
@@ -438,11 +522,11 @@ def _read_cache(path):
 
 
 def load_cache(npz_path, t0, t1):
-    """L1 + L2 streams for A/B/C, clipped to [t0, t1] so both panels cover the same period."""
+    """The site's streams, clipped to [t0, t1] so every panel covers the same period."""
     raw = _read_cache(npz_path)
     cache = {}
     for ch in CHANNELS:
-        for source in ("L1", "L2"):
+        for source in SOURCES:
             d = dict(raw[f"{source}_{ch['ident']}"])
             t = np.asarray(d["time"])
             m = (t >= t0) & (t <= t1)
@@ -455,10 +539,10 @@ def load_cache(npz_path, t0, t1):
 
 
 def common_window(npz_path):
-    """The period both sources cover for all three instruments, clamped to [WIN_START, WIN_END]."""
+    """The period every source covers for all instruments, clamped to [WIN_START, WIN_END]."""
     raw = _read_cache(npz_path)
-    t0 = max(np.asarray(raw[f"{s}_{i}"]["time"]).min() for s, i in _STREAMS)
-    t1 = min(np.asarray(raw[f"{s}_{i}"]["time"]).max() for s, i in _STREAMS)
+    t0 = max(np.asarray(raw[f"{s}_{i}"]["time"]).min() for s, i in _streams())
+    t1 = min(np.asarray(raw[f"{s}_{i}"]["time"]).max() for s, i in _streams())
     t0 = max(t0, np.datetime64(datetime.strptime(WIN_START, "%Y%m%d")))
     t1 = min(t1, np.datetime64(datetime.strptime(WIN_END, "%Y%m%d")) + np.timedelta64(1, "D"))
     return t0, t1
@@ -467,7 +551,9 @@ def common_window(npz_path):
 # --------------------------------------------------------------------------- L2 applied constant
 def l2_applied_constants(npz_path, t0, t1):
     """Daily median of calibration_constant_0 from the L2 product — the constant the RIGHT panel
-    is effectively calibrated with, for the time-series charts."""
+    is effectively calibrated with, for the time-series charts. Empty for the L1-only sites."""
+    if "L2" not in SOURCES:
+        return {}
     raw = _read_cache(npz_path)
     out = {}
     for ch in CHANNELS:
@@ -486,49 +572,79 @@ def l2_applied_constants(npz_path, t0, t1):
     return out
 
 
-def main():
+def main(site_key=None):
+    if site_key is None:
+        args = [a for a in sys.argv[1:] if not a.startswith("--")]
+        site_key = args[0] if args else "payerne"
+    set_site(site_key)
     OUT.mkdir(parents=True, exist_ok=True)
+    # Adopt the pre-generalisation Payerne cache under its per-site name (one rename, no re-read).
+    legacy = OUT / "_streams.npz"
+    if site_key == "payerne" and not CACHE_NPZ.exists() and legacy.exists():
+        os.replace(legacy, CACHE_NPZ)
+        print(f"adopted legacy cache {legacy.name} -> {CACHE_NPZ.name}", flush=True)
     if not CACHE_NPZ.exists() or "--reread" in sys.argv[1:]:
-        print(f"reading L1 + L2 daily archives {START}..{END} ...", flush=True)
+        print(f"reading {'+'.join(SOURCES)} daily archives {START}..{END} ...", flush=True)
         build_stream_cache()
     npz = str(CACHE_NPZ)
     t0, t1 = common_window(npz)
     print(f"common window: {t0} .. {t1}", flush=True)
 
-    cal_all = CAL.main()                     # {'v2.0': {...}, 'v2.2': {...}, 'v2.2dark': {...}}
-    calib, calib22 = cal_all['v2.0'], cal_all['v2.2']
-    calib22dark = cal_all.get('v2.2dark', {})
+    # {variant: {chan: record}} — Payerne keeps its bespoke builder (NetCDFs + study outputs),
+    # the other sites smooth the network-runner CSVs (sites.py run_dirs).
+    if SITE.get("calib_builder") == "network":
+        cal_series = CAL.main_site(SITE)
+    else:
+        cal_series = CAL.main()
     l2c = l2_applied_constants(npz, t0, t1)
 
     workers = min(len(COMBOS), max(1, (os.cpu_count() or 8) - 2), 6)
-    print(f"computing {len(COMBOS)} correction combos x 2 sources over {workers} workers ...", flush=True)
-    combos, months = {}, []
-    with ProcessPoolExecutor(max_workers=workers, initializer=_init, initargs=(npz, t0, t1)) as ex:
+    print(f"computing {len(COMBOS)} correction combos x {len(SOURCES)} sources over "
+          f"{workers} workers ...", flush=True)
+    combos, months, pcolor = {}, [], None
+    others = [k for k in range(len(CHANNELS)) if k != IREF]
+    with ProcessPoolExecutor(max_workers=workers, initializer=_init,
+                             initargs=(site_key, npz, t0, t1)) as ex:
         for key, res in ex.map(_run, COMBOS):
+            if "pcolor" in res:
+                pcolor = res.pop("pcolor")
             combos[key] = res
             months = res["months"]
             full = res[range_key(0, len(months) - 1)]           # the whole window
             st = full["L1"]["stats"]
-            print("   %-16s N=%4d h   L1 vs CHM15k: %s" % (
-                key, full["n_hours"],
-                "  ".join("%s %+.1f%%" % (CHANNELS[k]["label"].split()[0], st[k]["medrelbias_pct"])
-                          for k in (1, 2))), flush=True)
+            print("   %-16s N=%4d h   L1 vs %s: %s" % (
+                key, full["n_hours"], CHANNELS[IREF]["label"].split()[0],
+                "  ".join("%s %s" % (CHANNELS[k]["label"].split()[0],
+                                     ("%+.1f%%" % st[k]["medrelbias_pct"])
+                                     if st[k]["medrelbias_pct"] is not None else "—")
+                          for k in others)), flush=True)
 
     alt_agl = (np.arange(0.0, ZTOP_PLOT + DZ, DZ)).tolist()
     payload = dict(
-        meta=dict(wmo=WMO, station="Payerne", lat=STA[0], lon=STA[1], alt=STA[2],
+        meta=dict(site=site_key, wmo=WMO, station=SITE["name"], lat=STA[0], lon=STA[1], alt=STA[2],
                   start=str(np.datetime64(t0, "D")), end=str(np.datetime64(t1, "D")),
                   zmin=ZMIN, zmax=ZMAX, target=TARGET, alpha=ALPHA,
-                  cams=os.environ.get("ALC_VAL_CAMS_04", "")),
+                  cams=os.environ.get("ALC_VAL_CAMS_04", ""),
+                  sources=list(SOURCES), variants=list(SITE["variants"]),
+                  variant_labels=SITE.get("variant_labels", {}),
+                  variant_short=SITE.get("variant_short", {}),
+                  collapse=bool(SITE.get("collapse_combos", False)),
+                  title=SITE["title"], subtitle=SITE["subtitle"],
+                  warnings=SITE.get("warnings", []),
+                  profiles_note=SITE.get("profiles_note")),
         alt_agl=alt_agl,
         channels=[dict(label=c["label"], itype=c["itype"], ident=c["ident"], color=c["color"],
                        calib=c["calib"], chan=c.get("chan", c["ident"])) for c in CHANNELS],
-        iref=IREF, months=months, combos=combos, calib=calib, calib22=calib22,
-        calib22dark=calib22dark, l2_applied=l2c,
+        iref=IREF, months=months, combos=combos, calib_series=cal_series, l2_applied=l2c,
         hist_edges=[round(float(x), 3) for x in HIST_EDGES],
+        pcolor=pcolor,
     )
-    (OUT / "data.json").write_text(json.dumps(payload), encoding="utf-8")
-    print(f"-> {OUT / 'data.json'} ({(OUT / 'data.json').stat().st_size/1e6:.1f} MB)")
+    out_json = OUT / f"data_{site_key}.json"
+    out_json.write_text(json.dumps(payload), encoding="utf-8")
+    print(f"-> {out_json} ({out_json.stat().st_size/1e6:.1f} MB)")
+    if site_key == "payerne":
+        # backward-compat copy under the historic name
+        (OUT / "data.json").write_text(json.dumps(payload), encoding="utf-8")
 
 
 if __name__ == "__main__":

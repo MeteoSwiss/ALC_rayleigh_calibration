@@ -259,6 +259,125 @@ def build_dark_channel(chan, outdir=OUT_DARK):
     )
 
 
+# --------------------------------------------------------------------------- network-run sites
+# Generic path for the non-Payerne sites (sites.py, calib_builder="network"): per-night constants
+# come straight from a network-runner output tree (calout_* format), one CSV per stream, and every
+# variant is just another runner tree -- adding "v2.2dark" for these sites is one sites.py entry.
+METHOD_LABEL = {"rayleigh": "Rayleigh", "cloud": "Liquid clouds"}
+
+
+def run_csv_nights(csv_path, method):
+    """Per-night constants of ONE method from a network-runner <key>_cal.csv
+    (columns date,method,flag,cal_value,uncertainty,...). flag 1/0.5 = success/degraded; the runner
+    writes it variously as '1', '1.0' or '0.5', so it is compared as a float, and (unlike the
+    Payerne NetCDF path) the degraded nights are kept -- the Kalman weighting by relative
+    uncertainty is what keeps them from steering the estimate."""
+    f = Path(csv_path)
+    if not f.exists():
+        return None
+    d, c, u = [], [], []
+    with open(f, newline="", encoding="utf-8") as fh:
+        for r in csv.DictReader(fh):
+            if r["method"] != method:
+                continue
+            try:
+                flag = float(r["flag"])
+                v = float(r["cal_value"])
+            except (TypeError, ValueError):
+                continue
+            if flag in (1.0, 0.5) and v > 0:
+                d.append(datetime.strptime(r["date"], "%Y%m%d"))
+                c.append(v)
+                u.append(float(r["uncertainty"]) if r["uncertainty"] else np.nan)
+    return (d, np.array(c), np.array(u)) if len(d) >= 5 else None
+
+
+def smooth_and_write(key, itype, calib, dates, C, Cstd, outdir, source, created,
+                     method_name=None):
+    """Smooth one night series with the operational filter, write <key>_L1.csv (the format
+    intercompare.load_calib_series reads) and return the points.json record. Shared by the
+    network-run site path; same filter, same columns as the Payerne builders above."""
+    outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    kt, ks, kstd = kalman_best_estimate(dates, C, uncertainties=Cstd)
+    if not len(kt):
+        print(f"  {key}: too few nights ({len(C)}) for the operational filter")
+        return None
+    daily = defaultdict(list)
+    for d, c in zip(dates, C):
+        daily[d.date()].append(float(c))
+    rows = []
+    for t, v, s in zip(kt, ks, kstd):
+        day = t.astype("datetime64[D]").astype(object)
+        obs = daily.get(day, [])
+        rows.append([str(day), (np.median(obs) if obs else ""),
+                     (np.std(obs) if len(obs) > 1 else (0.0 if obs else "")), v, s])
+    with open(outdir / f"{key}_L1.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["time", "C_daily", "C_daily_std", "C_kalman", "C_kalman_std"])
+        w.writerows(rows)
+    print(f"  {key} ({itype}, {calib}): {len(C)} nights "
+          f"{dates[0]:%Y-%m-%d}..{dates[-1]:%Y-%m-%d}  median C_L={np.median(C):.4g}  "
+          f"-> Kalman {len(kt)} days, last {ks[-1]:.4g}")
+    mname = method_name or METHOD_LABEL.get(calib, calib)
+    return dict(
+        ident=key.split("_")[1], itype=itype, calib=calib, key=key,
+        source=source, created=created,
+        points=[dict(date=d.strftime("%Y-%m-%d"), value=float(c),
+                     std=(float(s) if np.isfinite(s) else None), method=mname)
+                for d, c, s in zip(dates, C, Cstd)],
+        kalman=dict(date=[str(t)[:10] for t in kt], value=[float(v) for v in ks],
+                    std=[float(s) if np.isfinite(s) else 0.0 for s in kstd]),
+    )
+
+
+def main_site(site):
+    """Calibration series for a sites.py site whose variants come from network-runner CSV trees.
+    Writes each variant's smoothed series into site['calib_dirs'][variant] (+ points.json) and
+    returns {variant: {chan: record}} in the same shape main() returns for Payerne.
+
+    A channel a later variant's run does not cover (e.g. a Rayleigh-only dark run has no cloud
+    rows) is CARRIED OVER unchanged from the base variant, CSV included -- the Payerne pattern:
+    identical `created` means the render stage draws it once, not twice."""
+    import shutil
+    wmo = site["wmo"]
+    out_all = {}
+    base_variant = site["variants"][0]
+    for variant in site["variants"]:
+        run_dir = Path(site["run_dirs"][variant])
+        outdir = Path(site["calib_dirs"][variant])
+        print(f"== {site['name']}: {variant} from {run_dir} ==")
+        recs = {}
+        for ch in site["channels"]:
+            chan = ch.get("chan", ch["ident"])
+            key = f"{wmo}_{ch['ident']}_{ch['calib']}"
+            csvf = run_dir / f"{wmo}_{ch['ident']}" / f"{wmo}_{ch['ident']}_cal.csv"
+            nights = run_csv_nights(csvf, ch["calib"])
+            if nights is None:
+                r0 = out_all.get(base_variant, {}).get(chan)
+                src0 = Path(site["calib_dirs"][base_variant]) / f"{key}_L1.csv"
+                if variant != base_variant and r0 is not None and src0.exists():
+                    outdir.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src0, outdir / src0.name)
+                    recs[chan] = r0
+                    print(f"  {chan}: no {ch['calib']} rows in this run -- carried over from "
+                          f"{base_variant}")
+                else:
+                    print(f"  {chan}: no usable {ch['calib']} nights in {csvf} -- skipped")
+                continue
+            dates, C, Cstd = nights
+            rec = smooth_and_write(key, ch["itype"], ch["calib"], dates, C, Cstd, outdir,
+                                   source=f"{run_dir.name}/{wmo}_{ch['ident']}",
+                                   created=f"eprof_{variant} network run ({run_dir.name})")
+            if rec is not None:
+                recs[chan] = rec
+        if recs:
+            (outdir / "points.json").write_text(json.dumps(recs), encoding="utf-8")
+            print(f"-> {outdir}")
+        out_all[variant] = recs
+    return out_all
+
+
 def build_v22_channel(chan, outdir=OUT_V22):
     """One channel's v2.2 series from its own per-night constants."""
     nights = v22_nights(chan)
