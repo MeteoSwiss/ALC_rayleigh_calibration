@@ -387,19 +387,23 @@ function profileTraces(V, src) {
 function profileLayout(title) {
   const lay = JSON.parse(JSON.stringify(BASE));
   lay.title = { text:title, font:{size:13} };
+  /* Plotly v3 dropped the string shorthand for axis titles — they MUST be {text:...} objects or
+     they are silently not drawn (found 2026-08-16: every axis looked titled in the source and
+     none was on screen) */
   lay.xaxis = state.logx
-    ? { title:'β<sub>att</sub> [Mm⁻¹ sr⁻¹]', type:'log', range:[-2.3, 0.3], zeroline:false }
-    : { title:'β<sub>att</sub> [Mm⁻¹ sr⁻¹]', range:[0, 1.0], zeroline:false };
-  lay.yaxis = { title:'Altitude a.g.l. [m]', range:[0, ZTOP] };
+    ? { title:{text:'β<sub>att</sub> [Mm⁻¹ sr⁻¹]'}, type:'log', range:[-2.3, 0.3],
+        zeroline:false }
+    : { title:{text:'β<sub>att</sub> [Mm⁻¹ sr⁻¹]'}, range:[0, 1.0], zeroline:false };
+  lay.yaxis = { title:{text:'Altitude a.g.l. [m]'}, range:[0, ZTOP] };
   lay.shapes = [zoneShape()];
   return lay;
 }
 function diffLayout(title, xr) {
   const lay = JSON.parse(JSON.stringify(BASE));
   lay.title = { text:title, font:{size:13} };
-  lay.xaxis = { title:'différence relative [%]', range:xr, zeroline:true, zerolinewidth:1.4,
-                zerolinecolor:'#888' };
-  lay.yaxis = { title:'Altitude a.g.l. [m]', range:[0, ZTOP] };
+  lay.xaxis = { title:{text:'différence relative [%]'}, range:xr, zeroline:true,
+                zerolinewidth:1.4, zerolinecolor:'#888' };
+  lay.yaxis = { title:{text:'Altitude a.g.l. [m]'}, range:[0, ZTOP] };
   lay.shapes = [zoneShape()];
   return lay;
 }
@@ -469,9 +473,9 @@ function draw() {
   const hl = JSON.parse(JSON.stringify(BASE));
   hl.title = { text:'Différence vs ' + chLabel(kref) + ' — distribution sur ' +
                P.zmin.toFixed(0) + '–' + P.zmax.toFixed(0) + ' m', font:{size:13} };
-  hl.xaxis = { title:'différence relative [%]', range:[-100, 150], zeroline:true,
+  hl.xaxis = { title:{text:'différence relative [%]'}, range:[-100, 150], zeroline:true,
                zerolinewidth:1.4, zerolinecolor:'#888' };
-  hl.yaxis = { title:'part des échantillons [%]' };
+  hl.yaxis = { title:{text:'part des échantillons [%]'} };
   Plotly.react('p_hist', ht, hl, PCFG);
 
   /* L1 vs L2, same instrument */
@@ -605,18 +609,35 @@ function l2Provenance(inst) {
      1.00 (default) on 48 d then 2.1257 from mid-June 2026 = the v1.0 series going live.
      The appended observed values keep the tooltip honest if the files ever change. */
   const base = {
-    CHM15k: { pill:'calibration Rayleigh v1.0 (opérationnelle)',
+    CHM15k: { pill:'calibration Rayleigh v1.0 (opérationnelle)', short:'Rayleigh v1.0',
       tip:'Constante issue de la méthode Rayleigh opérationnelle E-PROF v1.0 (pré-v2).' },
-    CL31: { pill:'non calibré (constante par défaut)',
+    CL31: { pill:'non calibré (constante par défaut)', short:'constante par défaut',
       tip:'La chaîne opérationnelle n\'applique pas de calibration au CL31 — ' +
           'la constante par défaut explique l\'écart de cette ligne ; c\'est exactement le ' +
           'manque que l\'étalonnage nuage comble.' },
     CL61: { pill:'calibration Rayleigh v1.0 (opérationnelle, activée mi-2026)',
+      short:'Rayleigh v1.0',
       tip:'Le CL61 est désormais calibré en opérationnel par la méthode Rayleigh v1.0 — ' +
           'la bascule est visible dans les constantes observées : 1,00 (défaut) avant, puis ' +
           'la valeur v1.0 depuis la mi-juin 2026.' },
-  }[inst.itype] || { pill:'constante appliquée', tip:'' };
-  return { pill: base.pill, tip: base.tip + obs };
+  }[inst.itype] || { pill:'constante appliquée', short:'constante appliquée', tip:'' };
+  return { pill: base.pill, short: base.short, tip: base.tip + obs };
+}
+
+/* The L2 profile card's pill: per-site summary of who ships WHICH constant (one static label
+   used to claim 'constante du fournisseur' for everything — wrong since the CHM15k, then the
+   CL61, went operationally Rayleigh-v1.0-calibrated). */
+function fillL2Pill() {
+  const el = document.getElementById('l2prov_pill');
+  if (!el) return;
+  const groups = {};
+  S().instruments.forEach(i => {
+    const p = l2Provenance(i);
+    (groups[p.short] = groups[p.short] || []).push(i.itype);
+  });
+  el.textContent = Object.keys(groups)
+    .map(sh => sh + ' : ' + [...new Set(groups[sh])].join(', ')).join(' · ');
+  el.title = S().instruments.map(i => i.itype + ' — ' + l2Provenance(i).pill).join(' | ');
 }
 
 /* ---------- constants over time ---------- */
@@ -661,8 +682,8 @@ function drawCalib() {
     lay.title = { text:inst.itype + ' (' + inst.ident + ') — C_L, variantes « ' +
                   (sel.method === 'rayleigh' ? 'Rayleigh' : 'nuage') + ' »', font:{size:13} };
     /* the constant's unit is instrument-native (rcs_0 / beta_att; ~dimensionless for the CL61) */
-    lay.yaxis = { title:'C_L [unités rcs₀ de l’instrument]', exponentformat:'e' };
-    lay.xaxis = { title:'date (UTC)' };
+    lay.yaxis = { title:{text:'C_L [unités rcs₀ de l’instrument]'}, exponentformat:'e' };
+    lay.xaxis = { title:{text:'date (UTC)'} };
     lay.shapes = [{ type:'rect', xref:'x', yref:'paper', x0:P.months[state.r0] + '-01',
                     x1:monthEnd(P.months[state.r1]), y0:0, y1:1,
                     fillcolor:'rgba(31,119,180,0.10)', line:{width:0}, layer:'below' }];
@@ -697,8 +718,8 @@ function drawPcolor() {
     lay.title = { text:(inst ? inst.label : cc.ident) +
       ' — rétrodiffusion atténuée (couleur = flux ciel clair, gris = heures écartées)',
       font:{size:13} };
-    lay.yaxis = { title:'Altitude a.g.l. [m]' };
-    lay.xaxis = { title:'date (UTC)' };
+    lay.yaxis = { title:{text:'Altitude a.g.l. [m]'} };
+    lay.xaxis = { title:{text:'date (UTC)'} };
     lay.margin.b = 46;
     Plotly.react(el, traces, lay, PCFG);
   });
@@ -758,9 +779,9 @@ function drawHopkin() {
       text:'pente <b>' + (p.slope > 0 ? '+' : '') + p.slope.toFixed(1) + ' ± ' +
            p.se.toFixed(1) + ' %/km</b><br>' + p.n.toLocaleString('fr-FR') + ' profils, ' +
            p.ndays + ' jours' }];
-    lay.xaxis = { title:'constante par profil (1/C) / médiane de l\'unité [%]',
+    lay.xaxis = { title:{text:'constante par profil (1/C) / médiane de l\'unité [%]'},
                   range:[H.x[0], H.x[H.x.length - 1]] };
-    lay.yaxis = { title:'Hauteur de base de nuage [km]',
+    lay.yaxis = { title:{text:'Hauteur de base de nuage [km]'},
                   range:[H.y[0], H.y[H.y.length - 1]] };
     lay.shapes = [{ type:'line', xref:'x', yref:'paper', x0:100, x1:100, y0:0, y1:1,
                     line:{color:'#333', width:1, dash:'dash'} }];
@@ -847,8 +868,8 @@ function drawPwv() {
                       PWV_BIN.toFixed(0) + ' mm (CAMS)', font:{size:13} };
   lay.xaxis = { title:{ text:'PWV — Precipitable Water Vapour (eau précipitable intégrée) [mm]' },
                 zeroline:false, range:[Math.max(0, xmin), xmax] };
-  lay.yaxis = { title:'résidu relatif [%] (médiane ' + W.band[0].toFixed(0) + '–' +
-                W.band[1].toFixed(0) + ' m)', zeroline:true, zerolinewidth:1.4,
+  lay.yaxis = { title:{ text:'résidu relatif [%] (médiane ' + W.band[0].toFixed(0) + '–' +
+                W.band[1].toFixed(0) + ' m)' }, zeroline:true, zerolinewidth:1.4,
                 zerolinecolor:'#888' };
   if (yhi > ylo) lay.yaxis.range = [ylo - 4, yhi + 4];
   Plotly.react(el, traces, lay, PCFG);
@@ -950,6 +971,7 @@ function buildControls() {
     s.innerHTML = P.months.map((m, i) => `<option value="${i}">${MONTH_LABEL(m)}</option>`).join('');
     s.value = state[w];
   });
+  fillL2Pill();
   bindRow();
 }
 
@@ -1199,7 +1221,7 @@ s'applique qu'à l'aérosol">avancée (moléculaire + aérosol α=1)</button>
       Kalman</span></p><p class="panel-sub">rcs_0 / C<sub>L</sub>(t) × 10<sup>6</sup></p>
       <div id="p_l1"></div></div>
     <div class="card" id="l2card"><p class="panel-title">L2 tel que distribué
-      <span class="pill l2">constante du fournisseur</span></p>
+      <span class="pill l2" id="l2prov_pill">constante appliquée</span></p>
       <p class="panel-sub">attenuated_backscatter_0, sans ré-étalonnage</p>
       <div id="p_l2"></div></div>
   </div>
