@@ -157,6 +157,68 @@
     // The include sits above the method blocks, so at parse time the diag sections do not exist
     // yet -- this is why the panel<->viewer sync never attached before.
     watchViewer();
+
+  // ---- hourly housekeeping on zoom --------------------------------------------------------------
+  // The daily chart stays the default; when the operator zooms fig-hk below ~45 days the hourly
+  // sidecar is fetched ONCE and the visible traces swap to hourly arrays, restoring the stored
+  // daily arrays on zoom-out. Nothing loads for operators who never zoom.
+  (function hourlyHk() {
+    var gd = document.getElementById("fig-hk");
+    if (!gd || !gd.on) return;
+    var daily = null, hourly = null, mode = "daily", loading = false;
+    function spanDays(e) {
+      var r0 = e["xaxis.range[0]"], r1 = e["xaxis.range[1]"];
+      if (r0 === undefined || r1 === undefined) {
+        var rr = gd.layout && gd.layout.xaxis && gd.layout.xaxis.range;
+        if (!rr) return Infinity;
+        r0 = rr[0]; r1 = rr[1];
+      }
+      return (new Date(r1) - new Date(r0)) / 86400000;
+    }
+    function snapshotDaily() {
+      if (daily) return;
+      daily = (gd.data || []).map(function (tr) {
+        return { x: tr.x, x0: tr.x0, dx: tr.dx, y: tr.y };
+      });
+    }
+    function apply(which) {
+      if (which === mode) return;
+      if (which === "hourly" && hourly) {
+        snapshotDaily();
+        (gd.data || []).forEach(function (tr, i) {
+          var ys = hourly.series[tr.name];
+          if (!ys) return;
+          Plotly.restyle(gd, { x: [hourly.t], x0: [null], dx: [null], y: [ys] }, [i]);
+        });
+        mode = "hourly";
+      } else if (which === "daily" && daily) {
+        (gd.data || []).forEach(function (tr, i) {
+          var d0 = daily[i];
+          if (!d0) return;
+          Plotly.restyle(gd, { x: [d0.x || null], x0: [d0.x0 || null], dx: [d0.dx || null],
+                               y: [d0.y] }, [i]);
+        });
+        mode = "daily";
+      }
+    }
+    gd.on("plotly_relayout", function (e) {
+      var span = spanDays(e);
+      if (span < 45) {
+        if (hourly) { apply("hourly"); return; }
+        if (loading) return;
+        loading = true;
+        fetch("../data/" + KEY + "/hk_hourly.json", { cache: "no-cache" })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .catch(function () { return null; })
+          .then(function (j) {
+            loading = false;
+            if (j && j.t && j.t.length) { hourly = j; apply("hourly"); }
+          });
+      } else {
+        apply("daily");
+      }
+    });
+  })();
     // The availability card promises "click a day to load its diagnostic". With a diag viewer the
     // click reaches the panel through the viewer's date label; without one, nothing happened --
     // so the panel takes the click itself.

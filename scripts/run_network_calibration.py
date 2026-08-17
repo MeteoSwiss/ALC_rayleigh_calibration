@@ -540,6 +540,10 @@ def _preserve_existing_rows(csv_path, methods, start, end):
 # CHM15k uses status_laser / temperature_optical_module / temperature_detector, Vaisala CL31/51/61
 # use laser_energy / temperature_laser. Temperatures are stored in degC (the L1 files store K).
 HK_FIELDS = ["date", "laser", "window", "temp_optics", "temp_internal", "temp_detector"]
+#: Hourly sidecar (<key>_hk_hourly.csv): same fields keyed by hour. A SEPARATE file on purpose --
+#: the daily _hk.csv merge filters on the "date" string and its readers parse %Y%m%d, so mixing
+#: cadences in one file would corrupt both (the plan's original three reasons).
+HK_HOURLY_FIELDS = ["hour", "laser", "window", "temp_optics", "temp_internal", "temp_detector"]
 _HK_SOURCES = {
     "laser":         ("status_laser", "laser_energy"),                    # laser power / pulse energy (%)
     "window":        ("window_transmission",),                           # window transmission (%)
@@ -663,7 +667,7 @@ def _do_monitoring(s, start, end):
     import netCDF4  # lazy: only this leaf needs it
     from calibration.status.decode import summarize_day
     itype = s["type"]
-    hk_rows, status_rows = [], []
+    hk_rows, status_rows, hourly_rows = [], [], []
     for d in _days(start, end):
         fp = _l1_file(s["wmo"], s["ident"], d)
         if not fp.exists():
@@ -674,6 +678,7 @@ def _do_monitoring(s, start, end):
         try:
             nc = netCDF4.Dataset(str(fp))
             try:
+                hk_arrays = {}
                 for field, cands in _HK_SOURCES.items():
                     val = float("nan")
                     for nm in cands:
@@ -683,12 +688,34 @@ def _do_monitoring(s, start, end):
                             if np.isfinite(a).any():
                                 m = float(np.nanmean(a))
                                 val = (m - 273.15) if field in _HK_TEMP else m
+                                hk_arrays[field] = (a - 273.15) if field in _HK_TEMP else a
                             break
                     row[field] = "" if val != val else f"{val:.3f}"   # val!=val -> NaN
                     if val == val:
                         hk_vals[field] = val
                 # Decoded status + availability for the day
                 times = _read_time_epoch(nc)
+                # Hourly means from the arrays already in hand -- the whole point of the sidecar is
+                # that it costs no extra read. Only per-profile vectors (len == n_time) can be
+                # binned; scalar HK stays daily-only.
+                if times is not None and np.size(times):
+                    from calibration.status.decode import _hour_of
+                    hrs = np.fromiter((_hour_of(t) for t in np.asarray(times).ravel()),
+                                      dtype=int, count=np.size(times))
+                    for h in sorted(set(hrs.tolist())):
+                        hrow = {"hour": f"{row['date']}{h:02d}"}
+                        got = False
+                        for field, arr in hk_arrays.items():
+                            if np.size(arr) != hrs.size:
+                                continue
+                            v = float(np.nanmean(arr[hrs == h])) if np.isfinite(
+                                arr[hrs == h]).any() else float("nan")
+                            hrow[field] = "" if v != v else f"{v:.3f}"
+                            got = got or (v == v)
+                        if got:
+                            for f2 in HK_HOURLY_FIELDS:
+                                hrow.setdefault(f2, "")
+                            hourly_rows.append(hrow)
                 svals, cl61 = _read_status_values(nc, itype)
                 ds = summarize_day(times, itype, status_values=svals, cl61_status=cl61,
                                    hk=hk_vals or None)
@@ -710,7 +737,7 @@ def _do_monitoring(s, start, end):
             hk_rows.append(row)
         if srow is not None:
             status_rows.append(srow)
-    return hk_rows, status_rows
+    return hk_rows, status_rows, hourly_rows
 
 
 def _preserve_existing_hk(csv_path, start, end):
@@ -1085,7 +1112,7 @@ def _process_stream(payload):
     sdir.mkdir(parents=True, exist_ok=True)
 
     def _write_monitoring():
-        hk, status = _do_monitoring(s, start, end)
+        hk, status, hourly = _do_monitoring(s, start, end)
         if hk:
             hk += _preserve_existing_hk(sdir / f"{key}_hk.csv", start, end)
             hk.sort(key=lambda r: r["date"])
@@ -1094,6 +1121,21 @@ def _process_stream(payload):
             status += _preserve_existing_status(sdir / f"{key}_status.csv", start, end)
             status.sort(key=lambda r: r["date"])
             _write_csv_atomic(sdir / f"{key}_status.csv", STATUS_FIELDS, status)
+        if hourly:
+            hp = sdir / f"{key}_hk_hourly.csv"
+            keep = []
+            if hp.exists():                     # accumulate history outside the window, like _hk
+                sk, ek = start.strftime("%Y%m%d"), end.strftime("%Y%m%d")
+                try:
+                    with open(hp, newline="", encoding="utf-8") as f:
+                        for r2 in csv.DictReader(f):
+                            if not (sk <= str(r2.get("hour", ""))[:8] <= ek):
+                                keep.append({k: r2.get(k, "") for k in HK_HOURLY_FIELDS})
+                except (OSError, csv.Error):
+                    keep = []
+            hourly += keep
+            hourly.sort(key=lambda r: r["hour"])
+            _write_csv_atomic(hp, HK_HOURLY_FIELDS, hourly)
 
     # Backfill / refresh the monitoring CSVs only (skip everything else) -- cheap.
     if hk_only:

@@ -748,6 +748,39 @@ def _load_hk(fullcal_dir, key):
 
 
 # --- per-station page render (shared by the serial + parallel paths) ----------
+def _emit_hk_hourly(fullcal_dir, key: str, out_dir: Path) -> None:
+    """data/<key>/hk_hourly.json from the runner's hourly sidecar, keyed by the SAME trace names
+    the daily housekeeping chart uses (config.HK_PANEL labels) so the client can swap arrays into
+    the existing figure. Fetch-on-zoom: the page loads it only when the operator zooms below ~45
+    days, which is why it is a sidecar file and not part of the page."""
+    if not fullcal_dir:
+        return
+    src = Path(fullcal_dir) / key / f"{key}_hk_hourly.csv"
+    if not src.exists():
+        return
+    import csv as _csv
+    t, series = [], {label: [] for _, label, _, _ in config.HK_PANEL}
+    by_field = {f: label for f, label, _, _ in config.HK_PANEL}
+    try:
+        with open(src, newline="", encoding="utf-8") as f:
+            for r in _csv.DictReader(f):
+                h = str(r.get("hour", ""))
+                if len(h) != 10 or not h.isdigit():
+                    continue
+                t.append(f"{h[:4]}-{h[4:6]}-{h[6:8]} {h[8:]}:00")
+                for fld, label in by_field.items():
+                    v = r.get(fld, "")
+                    series[label].append(float(v) if v not in ("", None) else None)
+    except (OSError, ValueError):
+        return
+    if not t:
+        return
+    ddir = out_dir / "data" / key
+    ddir.mkdir(parents=True, exist_ok=True)
+    _write_if_changed(ddir / "hk_hourly.json",
+                      json.dumps({"t": t, "series": series}, separators=(",", ":")))
+
+
 def _daily_panel(out_dir: Path, key: str, methods: list) -> dict | None:
     """The interactive daily-calibration panel, when its payloads have been generated.
 
@@ -830,6 +863,7 @@ def _render_one_station(key, ctx) -> str:
                     "title": config.CAL_CLASS_LABELS[c],
                     "color": config.CAL_CLASS_COLORS[c]} for c in config.CAL_CLASS_ORDER]
     daily_panel = _daily_panel(ctx.out_dir, key, methods)
+    _emit_hk_hourly(ctx.fullcal_dir, key, ctx.out_dir)
     html = ctx.tmpl.render(base="../", logo=ctx.logo, key=key, meta=meta, cal_classes=cal_classes,
                            daily_panel=daily_panel, cl_tiles=cl_tiles,
                            cl_stats_json=json.dumps(cl_stats, ensure_ascii=False),

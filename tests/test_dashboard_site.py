@@ -476,3 +476,16 @@ def test_p3_interaction_and_accessibility():
     tpl = (REPO / "monitoring/templates/station.html").read_text(encoding="utf-8")
     assert "tablewrap" in tpl
     assert "No housekeeping has been recorded" in tpl
+
+
+def test_hourly_monitoring_exists_end_to_end():
+    """The promised half-2: hourly housekeeping. Producer writes <key>_hk_hourly.csv as a SEPARATE
+    sidecar (the daily merge filters on 'date' and parses %Y%m%d -- mixing cadences would corrupt
+    both); the site emits data/<key>/hk_hourly.json keyed by the daily chart's own trace names; the
+    client fetches it only on zoom below ~45 days and restores the daily arrays on zoom-out."""
+    runner = (REPO / "scripts/run_network_calibration.py").read_text(encoding="utf-8")
+    assert "HK_HOURLY_FIELDS" in runner and "_hk_hourly.csv" in runner
+    r = (REPO / "monitoring/render.py").read_text(encoding="utf-8")
+    assert "_emit_hk_hourly" in r and "hk_hourly.json" in r
+    dj = (REPO / "monitoring/static/dailypanel.js").read_text(encoding="utf-8")
+    assert "hk_hourly.json" in dj and "span < 45" in dj and 'apply("daily")' in dj
