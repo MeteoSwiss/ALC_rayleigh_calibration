@@ -80,7 +80,9 @@ def test_no_stale_wording_in_panel_fragments():
     m = _panel()
     blob = m.PANEL_JS + m.PANEL_CSS + m.PANEL_BODY
     for phrase in ("no figure drawn", "before anything could be plotted",
-                   "screened / not used", "where B accumulates"):
+                   "screened / not used", "where B accumulates",
+                   "open it to see why", "no usable measurement", "unflagged profiles",
+                   "Signal / range", "Calibrated signal"):
         assert phrase not in blob, f"stale wording resurfaced: {phrase!r}"
 
 
@@ -224,6 +226,8 @@ def test_no_template_or_wording_leftovers_in_built_pages():
     """Regression: served pages kept superseded wording because the build that carried the fix was
     never run against them. The forbidden list IS the changelog of past wording bugs."""
     forbidden = ("no figure drawn", "before anything could be plotted", "MOCKUP —",
+                 "open it to see why", "no usable measurement", "unflagged profiles",
+                 "no PNG involved", "Signal / range",
                  "{%", "{{ ")
     for page in _station_pages():
         html = page.read_text(encoding="utf-8", errors="replace")
@@ -239,3 +243,112 @@ def test_calendar_is_single_month():
         html = page.read_text(encoding="utf-8", errors="replace")
         if 'id="payload"' in html:
             assert "calnav" in html, f"{page.name}: month-navigation calendar missing"
+
+
+def test_cloudless_profiles_do_not_vote_on_the_rejection_reason():
+    """Regression: a cloudless day read 'flag -22 peak not sharp' / '-24 aerosol below cloud'
+    because the funnel runs on every profile's PSEUDO-peak (strongest aerosol/noise gate) and those
+    rejections out-voted the real ones. Cloudless profiles are normal sky: they tally under
+    no_cloud_rejected and never decide the flag; only cloudy profiles' reasons do."""
+    from types import SimpleNamespace
+    import numpy as np
+    from calibration.cloud._filters import apply_cloud_filters
+    from calibration.flags import dominant_cloud_reject_flag
+
+    rng = np.arange(0.0, 3100.0, 100.0)              # 31 gates, 100 m
+    n = 6
+    beta = np.full((rng.size, n), 1.0)               # flat "clear sky with aerosol" profiles
+    cbh = np.full(n, np.nan)
+    # profile 5: a genuine cloud at 1.5 km with heavy aerosol below -> must fail the RATIO filter
+    beta[:, 5] = 0.001
+    beta[1:11, 5] = 5.0                              # aerosol layer below cloud
+    beta[15, 5] = 100.0                              # sharp cloud peak
+    cbh[5] = 800.0
+    data = SimpleNamespace(range=rng, cbh=cbh)
+    cfg = SimpleNamespace(cal_minheight=100.0, cal_maxheight=2400.0, attenuation_factor=2.0,
+                          ratio_filter=0.1, cbh_minheight=100.0, cbh_maxheight=2400.0)
+    _, stats = apply_cloud_filters(np.ones(n), beta, data, cfg)
+    assert stats["no_cloud_rejected"] == 5, stats
+    assert stats["ratio_rejected"] == 1, stats
+    assert stats["above_rejected"] == stats["below_rejected"] == stats["cbh_rejected"] == 0, stats
+
+    flag, reason, _ = dominant_cloud_reject_flag(None, stats, None)
+    assert flag == -24.0 and reason == "ratio_rejected", (flag, reason)
+    # ... and with ONLY cloudless rejections, the day is simply "no liquid cloud"
+    flag2, reason2, _ = dominant_cloud_reject_flag(None, {"no_cloud_rejected": 5}, None)
+    assert flag2 == -1.0 and reason2 == "no liquid cloud", (flag2, reason2)
+
+
+@needs_site
+def test_availability_card_present_with_data():
+    """Regression: the Payerne CL31 page skipped the 'Data availability, cloud cover &
+    calibration' card entirely because its status.csv was missing — the section must always
+    render, and on this site every stream must carry real heatmap rows."""
+    for page in _station_pages():
+        html = page.read_text(encoding="utf-8", errors="replace")
+        assert "Data availability, cloud cover" in html, f"{page.name}: availability card missing"
+        assert 'id="fig-avail"' in html, f"{page.name}: availability figure missing"
+        assert '"heatmap"' in html, f"{page.name}: availability card has no heatmap data"
+        assert 'id="status-index"' in html, f"{page.name}: status index missing"
+
+
+@needs_site
+def test_bottom_products_present_and_ordered():
+    """The three operational products must close every page, in the order OmB -> Cloudnet
+    classification -> sensitivity, after the method blocks — present even when a product is
+    absent for the stream (a section that vanishes reads as a broken page)."""
+    for page in _station_pages():
+        html = page.read_text(encoding="utf-8", errors="replace")
+        i_omb = html.find('id="sec-omb"')
+        i_cls = html.find('id="sec-classification"')
+        i_sen = html.find('id="sec-sens"')
+        assert -1 not in (i_omb, i_cls, i_sen), f"{page.name}: a product section is missing"
+        assert i_omb < i_cls < i_sen, f"{page.name}: product sections out of order"
+        last_method = html.rfind('class="methodblock"')
+        assert i_omb > last_method, f"{page.name}: products are not at the bottom"
+        for sec, nxt in (("sec-omb", i_cls), ("sec-classification", i_sen), ("sec-sens", None)):
+            start = html.find(f'id="{sec}"')
+            chunk = html[start: nxt if nxt else len(html)]
+            assert ("data-src-all" in chunk or "diag-data" in chunk
+                    or 'class="muted"' in chunk), f"{page.name}: {sec} has neither data nor notice"
+
+
+def test_profile_views_are_raw_s_rcs_beta_in_that_order():
+    """The selector reads Raw S -> Raw RCS -> Att. backscatter (the order of derivation); the
+    default is beta when the night has it, Raw RCS otherwise. 'Signal / range^2' named the
+    operation, not the quantity -- dividing RCS by r^2 UNDOES the range correction."""
+    js = _panel().PANEL_JS
+    assert "const VIEW_ORDER = ['raws', 'rcs', 'beta'];" in js
+    assert "raws:'Raw S'" in js and "beta:'Att. backscatter'" in js
+    assert "have.includes('beta') ? 'beta' : (have.includes('rcs')" in js
+
+
+def test_ratio_tile_absent_on_single_method_streams():
+    """A red em-dash 'CLOUD / RAYLEIGH RATIO' tile on a one-method stream reads as a fault; the
+    tile must simply not exist there."""
+    import pandas as pd
+    from monitoring import metrics
+    g = pd.DataFrame({"success": [1, 1, 1], "cal_value": [1.0, 1.1, 0.9],
+                      "datetime": pd.to_datetime(["2026-08-01", "2026-08-02", "2026-08-03"])})
+    tiles = metrics.cl_headline_tiles({"cloud": g})
+    assert all("RATIO" not in t["label"] for t in tiles), tiles
+
+
+def test_ctrl_arrows_jump_to_valid_calibrations():
+    """Operator request: Ctrl+Left/Right must move to the previous/next night that produced a
+    constant. Registered in the capture phase so it wins over diag.js's step-every-day binding."""
+    js = (REPO / "monitoring/static/dailypanel.js").read_text(encoding="utf-8")
+    assert "e.ctrlKey || e.metaKey" in js and "constant !== null" in js
+    assert js.rstrip().count("}, true);") >= 1, "Ctrl handler must be a capture-phase listener"
+
+
+def test_calendar_rail_beside_the_card():
+    """Operator request: the calendar stands OUTSIDE the daily card, collapsible, with the date and
+    day arrows on the card's title row."""
+    m = _panel()
+    assert 'id="cal"' in m.PANEL_RAIL and 'id="cal"' not in m.PANEL_BODY
+    assert "dp-title" in m.PANEL_BODY.split("</h2>")[0], "title must open the toolbar row"
+    assert "cal-toggle" in m.PANEL_BODY and "dp-wrap" in m.PANEL_CSS
+    tpl = (REPO / "monitoring/templates/station.html").read_text(encoding="utf-8")
+    assert "dp-rail" in tpl and "daily_panel.rail" in tpl
+    assert "no PNG involved" not in tpl

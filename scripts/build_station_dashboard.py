@@ -140,6 +140,17 @@ def _payload_task(job: tuple) -> tuple:
     """
     key, ds, method, ddir = job
     try:
+        # Every worker gets its OWN work directory. They all inherited one ALC_FULLCAL_DIR, and
+        # each night MERGES into that tree's shared per-stream CSV -- 26 concurrent writers on one
+        # file. The visible symptom was sporadic flag -99 "Exception during calibration" payloads
+        # with this work path leaking into the operator-facing message. Idempotent per process:
+        # the first task in a worker redirects the env, later tasks find it already redirected.
+        base = os.environ.get("ALC_FULLCAL_DIR", "_dashboard_work")
+        mine = f"w{os.getpid()}"
+        if Path(base).name != mine:
+            wdir = Path(base) / mine
+            wdir.mkdir(parents=True, exist_ok=True)
+            os.environ["ALC_FULLCAL_DIR"] = str(wdir)
         d = datetime.strptime(ds, "%Y%m%d")
         payload, _ = PANEL.build_payload(key, [d], [method])
         p = (payload["days"].get(ds) or {}).get(method)

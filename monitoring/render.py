@@ -474,6 +474,38 @@ def _ombsens_keystats(fullcal_dir, period: str = "all") -> pd.DataFrame:
     return out
 
 
+#: One S3 listing per prefix per build; a failed request is cached as [] so an offline build costs
+#: at most one timeout per prefix, not one per station page.
+_BUCKET_LIST_CACHE: dict = {}
+
+
+def _bucket_keys(prefix: str) -> list:
+    """Object keys under *prefix* in the public image bucket ([] when unset/unreachable).
+
+    Consulted ONLY when a local gate found nothing: a locally built site over a partial tree (no
+    ombsens CSVs, no classification sidecars) can still reference the operational products, which
+    live in the bucket. The operational build has the local gate files and never issues a request.
+    """
+    if not config.IMG_BASE_URL:
+        return []
+    if prefix in _BUCKET_LIST_CACHE:
+        return _BUCKET_LIST_CACHE[prefix]
+    keys: list = []
+    try:
+        import urllib.parse
+        import urllib.request
+        import xml.etree.ElementTree as ET
+        url = (config.IMG_BASE_URL.rstrip("/")
+               + "?list-type=2&max-keys=1000&prefix=" + urllib.parse.quote(prefix))
+        with urllib.request.urlopen(url, timeout=8) as r:
+            tree = ET.fromstring(r.read())
+        keys = [el.text for el in tree.iter() if el.tag.endswith("Key") and el.text]
+    except Exception:                                                        # noqa: BLE001
+        keys = []
+    _BUCKET_LIST_CACHE[prefix] = keys
+    return keys
+
+
 def _stage_ombsens_pngs(fullcal_dir, key, out_dir: Path) -> dict:
     """Stage the per-station OmB / sensitivity diagnostic PNGs into the site (under ombsens/<key>/)
     the same way per-night diagnostics are staged (symlink by default, ALC_DIAG_LINK overrides), and
@@ -534,6 +566,20 @@ def _stage_ombsens_pngs(fullcal_dir, key, out_dir: Path) -> dict:
                         per[pk] = u
         if per:
             out[f"{kind}_periods"] = per
+    # Bucket fallback (see _bucket_keys): the operational products exist even when this tree
+    # carries neither the PNGs nor the gating CSVs.
+    for kind in ("omb", "sens"):
+        if kind in out:
+            continue
+        listing = _bucket_keys(f"ombsens/{key}/{key}_{kind}")
+        base_key = f"ombsens/{key}/{key}_{kind}.png"
+        if base_key in listing:
+            out[kind] = config.IMG_BASE_URL + base_key
+            pref = f"ombsens/{key}/{key}_{kind}_"
+            per = {k[len(pref):-4]: config.IMG_BASE_URL + k for k in listing
+                   if k.startswith(pref) and k.endswith(".png")}
+            if per:
+                out[f"{kind}_periods"] = per
     return out
 
 
@@ -717,7 +763,7 @@ def _daily_panel(out_dir: Path, key: str, methods: list) -> dict | None:
     boot = {"station": {"key": key}, "methods": methods,
             "dates": sorted(index), "days": {}, "index": index}
     meta = {"n_days": len(index), "gz_kb": 0, "per_unit_kb": 0, "curated": False, "lazy": True}
-    return {"body": PANEL.PANEL_BODY, "css": PANEL.PANEL_CSS,
+    return {"body": PANEL.PANEL_BODY, "rail": PANEL.PANEL_RAIL, "css": PANEL.PANEL_CSS,
             "js": PANEL.PANEL_JS.replace("__META__", json.dumps(meta)),
             "payload": json.dumps(boot, separators=(",", ":")),
             "n_days": len(index)}
@@ -736,6 +782,15 @@ def _render_one_station(key, ctx) -> str:
     # Cloudnet target classification curtains: a per-day gallery like the calibration diagnostics, but
     # not tied to a calibration method (it has no cal rows), so it renders as its own standalone card.
     class_diags = ctx.diag_by.get((key, "classification"), [])
+    if not class_diags:
+        # Same fallback as ombsens: the curtains are produced operationally and live in the bucket
+        # even when this tree has no classification/ sidecars to enumerate.
+        _pref = f"diag/{key}/classification_"
+        class_diags = sorted(
+            ({"date": k[len(_pref):-4], "rel": config.IMG_BASE_URL + k, "success": True}
+             for k in _bucket_keys(_pref)
+             if k.endswith(".png") and k[len(_pref):-4].isdigit()),
+            key=lambda r: r["date"])
     overlay, cl_tiles = None, []
     by_method = {m: cal[(cal["key"] == key) & (cal["method"] == m)] for m in methods}
     # The headline tiles are useful on a ONE-method stream too (median, spread, drift, last valid),

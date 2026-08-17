@@ -61,6 +61,10 @@ CLOUD_REJECT_FLAG = {
     "ratio_rejected": -24,
     "cbh_rejected": -25,
     "n_rejected": -26,
+    # Rejections of profiles WITHOUT a detected cloud base (the funnel still runs on
+    # their pseudo-peak; see calibration/cloud/_filters.py). Not a cloud-shape
+    # complaint -> attribution maps them to "no liquid cloud".
+    "no_cloud_rejected": -1,
 }
 
 
@@ -76,9 +80,13 @@ def dominant_cloud_reject_flag(*stat_dicts):
                     counts[k] = counts.get(k, 0) + int(v)
                 except (TypeError, ValueError):
                     continue
-    if sum(counts.values()) <= 0:
+    # Profiles without a detected cloud base are NORMAL SKY, not rejected candidates: they must
+    # not out-vote the genuinely cloudy profiles' rejection reasons. They decide the flag only when
+    # there is nothing else -- and then the day is simply "no liquid cloud".
+    real = {k: v for k, v in counts.items() if k != "no_cloud_rejected"}
+    if sum(real.values()) <= 0:
         return -1.0, "no liquid cloud", counts
-    reason = max(counts, key=counts.get)
+    reason = max(real, key=real.get)
     return float(CLOUD_REJECT_FLAG.get(reason, -1)), reason, counts
 
 #: Flags that count as a usable calibration.

@@ -191,7 +191,7 @@ def apply_cloud_filters(
     n_profiles = S.size
     S_filtered = S.copy()
     stats = {"above_rejected": 0, "below_rejected": 0,
-             "ratio_rejected": 0, "cbh_rejected": 0}
+             "ratio_rejected": 0, "cbh_rejected": 0, "no_cloud_rejected": 0}
 
     range_resol = float(data.range[1] - data.range[0])
     gate_300m = int(round(300.0 / range_resol))
@@ -205,6 +205,16 @@ def apply_cloud_filters(
         if np.isnan(S_filtered[i]):
             continue
         beta_profile = beta[:, i]
+
+        # ATTRIBUTION ONLY -- selection below is untouched (faithful MATLAB port). A profile with
+        # no detected cloud base still runs the whole funnel: filters 1-3 test the pseudo-peak (the
+        # strongest aerosol/noise gate) and filter 4 falls back to that pseudo-peak's HEIGHT. Its
+        # rejections say nothing about cloud shape, so counting them under above/below/ratio/cbh
+        # made cloudless profiles dominate the counters and the day was blamed on -22/-23/-24
+        # "peak/aerosol" reasons when the truth was "no cloud in most profiles". Those rejections
+        # are tallied under no_cloud_rejected, which the flag attribution maps to -1.
+        has_cloud = (data.cbh is not None and i < np.size(data.cbh)
+                     and np.isfinite(data.cbh[i]) and data.cbh[i] > 0)
 
         # peak within calibration range: zero out 1..lower_gate (MATLAB beta_roi(1:lower_gate)=0)
         beta_roi = beta_profile.copy()
@@ -227,7 +237,7 @@ def apply_cloud_filters(
             beta_above = beta_profile[idx_above]
             if not np.isnan(beta_above) and beta_above * config.attenuation_factor > max_beta:
                 S_filtered[i] = np.nan
-                stats["above_rejected"] += 1
+                stats["above_rejected" if has_cloud else "no_cloud_rejected"] += 1
                 continue
 
         # Filter 2: 300 m below
@@ -236,7 +246,7 @@ def apply_cloud_filters(
             beta_below = beta_profile[idx_below]
             if not np.isnan(beta_below) and beta_below * config.attenuation_factor > max_beta:
                 S_filtered[i] = np.nan
-                stats["below_rejected"] += 1
+                stats["below_rejected" if has_cloud else "no_cloud_rejected"] += 1
                 continue
 
         # Filter 3: aerosol contribution ratio
@@ -253,7 +263,7 @@ def apply_cloud_filters(
                     ratio = beta_below_cloud / beta_total
                     if ratio > config.ratio_filter:
                         S_filtered[i] = np.nan
-                        stats["ratio_rejected"] += 1
+                        stats["ratio_rejected" if has_cloud else "no_cloud_rejected"] += 1
                         continue
 
         # Filter 4: CBH range
@@ -263,7 +273,7 @@ def apply_cloud_filters(
             cbh = data.range[max_idx]
         if cbh < config.cbh_minheight or cbh > config.cbh_maxheight:
             S_filtered[i] = np.nan
-            stats["cbh_rejected"] += 1
+            stats["cbh_rejected" if has_cloud else "no_cloud_rejected"] += 1
             continue
 
     return S_filtered, stats

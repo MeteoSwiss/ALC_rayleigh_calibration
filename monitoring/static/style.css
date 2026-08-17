@@ -286,3 +286,5 @@ td a:hover { text-decoration: underline; }
 .tile .tl { font:11px/1.3 ui-monospace,Consolas,monospace; color:#66707a; letter-spacing:.03em; }
 .tile .tv { font-size:23px; font-weight:600; margin:3px 0 1px; font-variant-numeric:tabular-nums; }
 .tile .tn { font-size:11.5px; color:#66707a; }
+
+.ndot-unknown { background:#c3ceda; }

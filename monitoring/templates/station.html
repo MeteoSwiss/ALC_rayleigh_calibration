@@ -45,10 +45,10 @@
 </section>
 {% endif %}
 
-{% if availability %}
 <section class="card availcard">
   <h2>Data availability, cloud cover &amp; calibration
     <span class="muted">— per day; click a day to load its diagnostic below</span></h2>
+  {% if availability %}
   <div class="avail-legend">
     <b>Status</b>
     <span class="ak ak-pass"></span> Pass
@@ -65,9 +65,12 @@
     {% for c in cal_classes %}<span class="ak" style="background:{{ c.color }}" title="{{ c.title }}"></span> {{ c.label }}{% endfor %}
   </div>
   {{ availability | safe }}
+  {% else %}
+  <p class="muted">No instrument status has been recorded for this stream yet — the daily runner
+    writes <code>&lt;key&gt;_status.csv</code> on its next pass, and this card fills in.</p>
+  {% endif %}
 </section>
 {% if status_json %}<script type="application/json" id="status-index">{{ status_json | safe }}</script>{% endif %}
-{% endif %}
 
 {% if overlay or cl_tiles %}
 <section class="card">
@@ -103,11 +106,15 @@
    them keeps exactly the page it had before. It sits next to the per-day diagnostic images rather
    than replacing them: the images are the operational product, this reads the same nights as data. #}
 <style>{{ daily_panel.css | safe }}</style>
-<section class="card" id="daily">
-  <h2>Daily calibration <span class="muted">— drawn in the browser from
-    {{ daily_panel.n_days }} days of per-night data; no PNG involved</span></h2>
-  {{ daily_panel.body | safe }}
-</section>
+{# The calendar is NAVIGATION: it stands beside the card (#cal-toggle collapses it; narrow screens
+   start collapsed), and the card's title row comes from the panel so the date and day arrows sit
+   next to the title. #}
+<div class="dp-wrap">
+  <aside class="dp-rail">{{ daily_panel.rail | safe }}</aside>
+  <section class="card" id="daily">
+    {{ daily_panel.body | safe }}
+  </section>
+</div>
 <script id="payload" type="application/json">{{ daily_panel.payload | safe }}</script>
 <script>{{ daily_panel.js | safe }}</script>
 <script src="{{ base }}assets/dailypanel.js?v={{ asset_v }}"></script>
@@ -169,10 +176,35 @@
 </section>
 {% endfor %}
 
-{% if class_diags %}
-<section class="block">
+
+
+{% if monitoring %}
+<section class="card">
+  <h2>Instrument monitoring <span class="muted">— daily averages: laser power, window transmission, temperatures</span></h2>
+  {{ monitoring | safe }}
+</section>
+{% endif %}
+
+{# The three operational products close every station page, in this order, ALWAYS. A stream whose
+   product is missing says so in place -- a section that silently vanishes reads as a broken page,
+   not as an absent product. #}
+<section class="card" id="sec-omb">
+  <h2>Observation &#8722; Background (CAMS) <span class="muted">— calibrated backscatter vs CAMS model over the selected window</span></h2>
+  {% if ombsens and ombsens.omb %}
+  <a href="{{ ombsens.omb }}" target="_blank" rel="noopener"><img class="diag-img" data-period-img
+       src="{{ ombsens.omb }}" data-src-all="{{ ombsens.omb }}"
+       {%- if ombsens.omb_periods %}{% for pk, url in ombsens.omb_periods.items() %} data-src-{{ pk }}="{{ url }}"{% endfor %}{% endif %}
+       alt="Observation minus background (CAMS) diagnostic" style="max-width:100%;height:auto;"></a>
+  {% else %}
+  <p class="muted">Not produced for this stream — the OmB comparison is written by the operational
+    run (<code>--omb</code>) and appears here once its CSV exists.</p>
+  {% endif %}
+</section>
+
+<section class="block" id="sec-classification">
   <h2>Cloudnet target classification
     <span class="muted">— {{ class_diags | length }} day{{ 's' if class_diags | length != 1 else '' }} · aerosol / cloud / drizzle / ice / supercooled (ceiloclass, driven by CAMS T)</span></h2>
+  {% if class_diags %}
   <section class="diag card" id="diag-classification" data-key="{{ key }}" data-method="classification"
            data-itype="{{ meta.itype }}" tabindex="0">
     <h3>Classification — <span class="diag-date muted">latest</span>
@@ -188,34 +220,21 @@
     </div>
     <script type="application/json" class="diag-data">{{ class_diags | tojson }}</script>
   </section>
+  {% else %}
+  <p class="muted">No Cloudnet target-classification curtains for this stream.</p>
+  {% endif %}
 </section>
-{% endif %}
 
-
-{% if monitoring %}
-<section class="card">
-  <h2>Instrument monitoring <span class="muted">— daily averages: laser power, window transmission, temperatures</span></h2>
-  {{ monitoring | safe }}
-</section>
-{% endif %}
-
-{% if ombsens and ombsens.omb %}
-<section class="card">
-  <h2>Observation &#8722; Background (CAMS) <span class="muted">— calibrated backscatter vs CAMS model over the selected window</span></h2>
-  <a href="{{ ombsens.omb }}" target="_blank" rel="noopener"><img class="diag-img" data-period-img
-       src="{{ ombsens.omb }}" data-src-all="{{ ombsens.omb }}"
-       {%- if ombsens.omb_periods %}{% for pk, url in ombsens.omb_periods.items() %} data-src-{{ pk }}="{{ url }}"{% endfor %}{% endif %}
-       alt="Observation minus background (CAMS) diagnostic" style="max-width:100%;height:auto;"></a>
-</section>
-{% endif %}
-
-{% if ombsens and ombsens.sens %}
-<section class="card">
+<section class="card" id="sec-sens">
   <h2>Instrument sensitivity / detection limit <span class="muted">— ICAO detection altitude &amp; nighttime noise floor</span></h2>
+  {% if ombsens and ombsens.sens %}
   <a href="{{ ombsens.sens }}" target="_blank" rel="noopener"><img class="diag-img" data-period-img
        src="{{ ombsens.sens }}" data-src-all="{{ ombsens.sens }}"
        {%- if ombsens.sens_periods %}{% for pk, url in ombsens.sens_periods.items() %} data-src-{{ pk }}="{{ url }}"{% endfor %}{% endif %}
        alt="Instrument sensitivity / detection limit diagnostic" style="max-width:100%;height:auto;"></a>
+  {% else %}
+  <p class="muted">Not produced for this stream — the sensitivity product is written by the
+    operational run (<code>--sens</code>) and appears here once its CSV exists.</p>
+  {% endif %}
 </section>
-{% endif %}
 {% endblock %}

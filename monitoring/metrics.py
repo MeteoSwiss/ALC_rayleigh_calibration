@@ -187,11 +187,12 @@ def cl_headline_tiles(by_method: dict) -> list:
          "note": f"{len(g)} calibrated nights", "color": TILE_OK},
         {"label": "SPREAD (P10-P90)", "value": "—" if spread is None else f"{spread:.0f}%",
          "note": f"{p10:.4g} … {p90:.4g}", "color": _grade(spread, 10, 20)},
-        {"label": "CLOUD / RAYLEIGH RATIO", "value": "—" if ratio is None else f"{ratio:.3g}x",
-         "note": ("only one method on this stream" if ratio is None else
-                  ("the two retrievals agree" if abs(ratio - 1) < 0.05 else
-                   "a systematic offset points at the water-vapour correction, not the instrument")),
-         "color": TILE_BAD if ratio is None else _grade(ratio - 1.0, 0.05, 0.15)},
+        # No tile at all on a one-method stream: a red em-dash reads as "something is wrong",
+        # when the truth is simply that the comparison does not exist here.
+        *([{"label": "CLOUD / RAYLEIGH RATIO", "value": f"{ratio:.3g}x",
+            "note": ("the two retrievals agree" if abs(ratio - 1) < 0.05 else
+                     "a systematic offset points at the water-vapour correction, not the instrument"),
+            "color": _grade(ratio - 1.0, 0.05, 0.15)}] if ratio is not None else []),
         {"label": "15-DAY DRIFT", "value": "—" if drift is None else f"{drift:+.1f}%",
          "note": "vs the preceding 45 d" if drift is not None else "not enough history",
          "color": _grade(drift, 5, 10)},

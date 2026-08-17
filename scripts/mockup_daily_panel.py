@@ -104,24 +104,23 @@ def _install_capture() -> None:
 
 
 # ============================================================================= profile builders
-def _views(rcs, sig, beta, mol_sig, mol_beta) -> dict:
-    """The three profile views, in the PNG's own units.
+def _views(rcs, raws, beta, mol_raws, mol_beta) -> dict:
+    """The three profile views: Raw S, Raw RCS, attenuated backscatter (when the night has one).
 
-    ``rcs`` is instrument-native and has no molecular counterpart (nothing to compare an
-    uncalibrated signal to) -- that absence is meaningful and is preserved rather than papered over
-    with a rescaled curve.
+    Raw S is the detector signal, NOT range-corrected: dividing RCS by r^2 UNDOES the range
+    correction, so the old axis label "Signal / range^2" named the operation instead of the
+    quantity and read as if a second correction had been applied. raws/mol_raws arrive in the
+    instrument's own units (a.u.); beta arrives physical and displays in Mm-1 sr-1.
     """
     out = {}
+    if raws is not None and np.isfinite(raws).any():
+        out["raws"] = {"x": _f32(raws), "label": "Signal (not range-corrected) (a.u.)",
+                       "logx": True,
+                       "mol": _f32(mol_raws) if mol_raws is not None else None}
     if rcs is not None and np.isfinite(rcs).any():
         out["rcs"] = {"x": _f32(rcs), "label": "Raw RCS (a.u.)", "logx": False, "mol": None}
-    if sig is not None and np.isfinite(sig).any():
-        out["sig"] = {"x": _f32(sig * SCALE), "label": "Signal (Mm⁻¹)", "logx": True,
-                      "mol": _f32(mol_sig * SCALE) if mol_sig is not None else None}
     if beta is not None and np.isfinite(beta).any():
-        # LOG by default, and this is a deliberate departure from the PNG, whose beta_att panel is
-        # linear (plotting.py:900-908) while its cloud counterpart is log. beta_att spans orders of
-        # magnitude between the molecular tail and a cloud, so linear collapses everything below the
-        # peak into the axis; the operator can still flip it. The cloud figure had it right.
+        # LOG by default: beta_att spans decades between the molecular tail and any cloud.
         out["beta"] = {"x": _f32(beta * SCALE), "label": "β_att (Mm⁻¹ sr⁻¹)", "logx": True,
                        "mol": _f32(mol_beta * SCALE) if mol_beta is not None else None}
     return out
@@ -140,10 +139,21 @@ def _profile_rayleigh(kw: dict) -> dict:
     # altitude so the band lands on the same gates as the curtain's fitted layer.
     z0 = (float(kw.get("fit_altitude_start", 0.0) or 0.0) - alt) * 1e-3
     z1 = (float(kw.get("fit_altitude_end", 0.0) or 0.0) - alt) * 1e-3
+    rcs_mean = np.asarray(kw.get("rcs_mean", []), float)
+    with np.errstate(all="ignore"):
+        raws = np.where(rng > 0, rcs_mean / np.where(rng > 0, rng ** 2, np.nan), np.nan)             if rcs_mean.size == rng.size else None
+    # The molecular reference lifted into raw-signal units by the fitted constant: S = sig_n * C_L
+    # and the fit says sig_n ~ p_mol, so p_mol * C_L is the molecular shape on the Raw S axis.
+    cl = kw.get("cl_median")
+    mol_raws = (p_mol * float(cl)) if (p_mol.size and cl and np.isfinite(float(cl))
+                                       and float(cl) > 0) else None
+    views = _views(rcs_mean, raws, beta, mol_raws, b_mol)
+    if "raws" in views and mol_raws is not None:
+        views["raws"]["mol_name"] = "molecular × C_L (fit)"
     out = {
         "y": _f32(z_km), "y_label": "Range (km AGL)",
         "y_max": float(min(z1 + 3.0, float(z_km.max()) if z_km.size else z1 + 3.0)),
-        "views": _views(np.asarray(kw.get("rcs_mean", []), float), sig, beta, p_mol, b_mol),
+        "views": views,
         "cal_band": [z0, z1], "cal_band_label": "Rayleigh fit window",
     }
     # These curves are ALREADY unflagged-only: rcs_mean is the aggregate of rcs_use =
@@ -177,7 +187,7 @@ def _profile_rayleigh_fail(kw: dict) -> dict:
     # path uses is available in these kwargs (cbh + z_low_cloud), so apply it here too.
     n_all = int(m.shape[0])
     keep = np.ones(n_all, bool)
-    note = "mean of all %d profiles (no screen available)" % n_all
+    note = "night mean of all %d profiles" % n_all
     cbh, z_cut = kw.get("cbh"), kw.get("z_low_cloud")
     if cbh is not None and z_cut is not None and np.isfinite(float(z_cut)):
         a = np.asarray(cbh, float)
@@ -187,19 +197,23 @@ def _profile_rayleigh_fail(kw: dict) -> dict:
         cand = ~(np.isfinite(a) & (a < float(z_cut)))
         if cand.any():                      # an all-cloud night has nothing to screen down to
             keep = cand
-            note = "mean of %d/%d unflagged profiles" % (int(keep.sum()), n_all)
+            # NOT "unflagged": this display screen only removes LOW cloud (< z_cut), while the
+            # night's rejection can come from cloud IN or BELOW the molecular window -- a
+            # different, stricter test. Saying "1177 unflagged profiles" under a "not a clear
+            # night" verdict read as a contradiction; the label now names the screen it applies.
+            note = ("night mean of %d/%d profiles (display screen: cloud below %.0f m removed; "
+                    "the rejection above applies to the whole night)"
+                    % (int(keep.sum()), n_all, float(z_cut)))
         else:
-            note = "mean of all %d profiles (every one is low-cloud flagged)" % n_all
+            note = "night mean of all %d profiles (every one carries low cloud)" % n_all
     with np.errstate(all="ignore"):
         rcs_mean = np.nanmean(m[keep], axis=0)
         sig = rcs_mean / (rng ** 2)
     finite = np.isfinite(sig)
     if not finite.any():
         return {}
-    # NOT "calibrated signal": nothing was calibrated on this night. The selector shows this
-    # view's own name so the label cannot promise a constant that does not exist.
-    views = {"sig": {"x": _f32(np.where(finite, sig, np.nan)), "label": "Signal / range² (a.u.)",
-                     "logx": True, "mol": None, "name": "Signal (uncalibrated)"},
+    views = {"raws": {"x": _f32(np.where(finite, sig, np.nan)),
+                      "label": "Signal (not range-corrected) (a.u.)", "logx": True, "mol": None},
              "rcs": {"x": _f32(rcs_mean), "label": "Raw RCS (a.u.)", "logx": False, "mol": None}}
     pm = kw.get("p_mol")
     if pm is not None:
@@ -209,8 +223,8 @@ def _profile_rayleigh_fail(kw: dict) -> dict:
         band = (rng >= r0) & (rng <= r1) & finite & np.isfinite(pm)
         if band.any() and np.nanmedian(pm[band]) > 0:
             scale = float(np.nanmedian(sig[band]) / np.nanmedian(pm[band]))
-            views["sig"]["mol"] = _f32(pm * scale)
-            views["sig"]["mol_name"] = "molecular (shape-matched, not calibrated)"
+            views["raws"]["mol"] = _f32(pm * scale)
+            views["raws"]["mol_name"] = "molecular (shape-matched, not calibrated)"
     win = kw.get("molecular_window")
     band_km = None
     if win is not None and np.all(np.isfinite(np.asarray(win, float))):
@@ -235,15 +249,16 @@ def _profile_cloud(data, res, sel: np.ndarray, cal_lo: float, cal_hi: float) -> 
     use = sel if sel.any() else np.ones(beta_2d.shape[1], bool)
     with np.errstate(all="ignore"):
         prof = np.nanmean(beta_2d[:, use], axis=1)
-        sig = np.where(rng > 0, prof / np.where(rng > 0, rng ** 2, np.nan), np.nan)
     cc = getattr(data, "calibration_constant_applied", None)
     rcs = prof * float(cc) if (cc and np.isfinite(cc)) else None
+    base_p = rcs if rcs is not None else prof
+    with np.errstate(all="ignore"):
+        raws = np.where(rng > 0, base_p / np.where(rng > 0, rng ** 2, np.nan), np.nan)
     y_max = float(min(cal_hi * 1e-3 + 1.0, float(rng.max()) * 1e-3))
     cbh = np.asarray(getattr(data, "cbh", []), float)
     med_cbh = (float(np.nanmedian(cbh[sel])) if (sel.any() and cbh.size == beta_2d.shape[1]
                                                  and np.isfinite(cbh[sel]).any()) else float("nan"))
-    views = _views(rcs, sig, prof, None, None)   # beta already defaults to log, as this method's
-                                                 # own figure does (plotting.py:176)
+    views = _views(rcs, raws, prof, None, None)
     out = {"y": _f32(rng * 1e-3), "y_label": "Range (km AGL)", "y_max": y_max,
            "views": views,
            "cal_band": [cal_lo * 1e-3, cal_hi * 1e-3],
@@ -817,9 +832,13 @@ PANEL_CSS = r"""
  .top { display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; padding:12px 18px 0; }
  .top h1 { font-size:19px; margin:0; }
  .sub { color:var(--dim); font-size:13px; }
- .layout { display:grid; grid-template-columns:214px 1fr; gap:16px; padding:12px 18px 26px;
-           align-items:start; }
- .rail { position:sticky; top:10px; }
+ /* Host-page grid: the calendar rail stands OUTSIDE the daily card, to its left. The rail is
+    collapsible (#cal-toggle) and starts collapsed on narrow screens -- the media query only sets
+    the DEFAULT; the button always wins. */
+ .dp-wrap { display:grid; grid-template-columns:232px minmax(0,1fr); gap:14px; align-items:start; }
+ .dp-wrap.rail-hidden { grid-template-columns:minmax(0,1fr); }
+ .dp-wrap.rail-hidden .dp-rail { display:none; }
+ .dp-rail { position:sticky; top:10px; }
  .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:9px; }
  .card + .card { margin-top:12px; }
  .toolbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
@@ -872,6 +891,8 @@ PANEL_CSS = r"""
  .ctrls label { font-size:11.5px; color:var(--dim); }
  .note { font-size:11.5px; color:var(--dim); }
  .notebar { margin:4px 2px 2px; border-top:1px solid #eef2f6; padding-top:6px; }
+ .dp-title { font-size:13px; margin:0 10px 0 0; text-transform:uppercase; letter-spacing:.04em;
+       color:var(--dim); }
  .hd { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--dim);
        margin-right:4px; }
  .axlbl { display:inline-flex; align-items:center; gap:5px; font-size:11px; color:var(--dim); }
@@ -907,9 +928,11 @@ in your browser from data captured from <b>real</b> calibrations; no PNG exists.
 
 <div class="top"><h1 id="stitle"></h1><span class="sub" id="ssub"></span></div>"""
 
-PANEL_BODY = r"""<div class="layout">
- <div class="rail">
-  <div class="card">
+#: The calendar + flags rail, published separately so the host page can place it BESIDE the
+#: daily-calibration card rather than inside it (operator request: the calendar is navigation,
+#: not content). The dp-wrap grid in the host holds the two side by side; #cal-toggle collapses
+#: the rail, and narrow screens start collapsed.
+PANEL_RAIL = r"""<div class="card">
    <h2>Calendar</h2>
    <div id="cal"></div>
    <div class="legend" id="legend"></div>
@@ -917,11 +940,12 @@ PANEL_BODY = r"""<div class="layout">
   <div class="card">
    <h2>Flags this day</h2>
    <div id="flags"></div>
-  </div>
- </div>
+  </div>"""
 
- <div>
+PANEL_BODY = r"""<div>
   <div class="toolbar">
+   <h2 class="dp-title">Daily calibration</h2>
+   <button id="cal-toggle" title="Show / hide the calendar rail">🗓 calendar</button>
    <button id="prev">← previous</button>
    <span class="datelbl" id="datelbl"></span>
    <button id="next">next →</button>
@@ -952,10 +976,7 @@ PANEL_BODY = r"""<div class="layout">
 
   <div id="why"></div>
   <div class="diagrow" id="diag"></div>
- </div>
-</div>
-
-"""
+ </div>"""
 
 PANEL_JS = r"""
 const D = JSON.parse(document.getElementById('payload').textContent);
@@ -1011,8 +1032,11 @@ let userView = null;         // set ONLY by an explicit click on the selector
 // them). An explicit click on the linear/log switch pins it until the view changes again.
 let curLogX = null;
 
-const VIEW_NAMES = { rcs:'Raw RCS', sig:'Calibrated signal', beta:'Attenuated backscatter' };
-const VIEW_ORDER = ['rcs', 'sig', 'beta'];
+// Raw S first (the detector's own signal), then its range-corrected form, then the physical
+// product -- the order of derivation. beta is the DEFAULT when the night produced it; a night
+// that did not calibrate cannot form beta_att, so it falls back to Raw RCS.
+const VIEW_NAMES = { raws:'Raw S', rcs:'Raw RCS', beta:'Att. backscatter' };
+const VIEW_ORDER = ['raws', 'rcs', 'beta'];
 
 // One reading rule for every window-search panel: GREEN IS THE GOOD END. R² rises towards 1 (good)
 // so it runs white->green; |intercept| is best at 0 so it runs green->white. The slope is the odd
@@ -1050,15 +1074,11 @@ const CAL_COL = {
   both:     { bg:'#17a2b8', fg:'#ffffff', lbl:'calibrated — Rayleigh <b>and</b> cloud' },
   rayleigh: { bg:'#1f77b4', fg:'#ffffff', lbl:'calibrated — Rayleigh only' },
   cloud:    { bg:'#2ca02c', fg:'#ffffff', lbl:'calibrated — cloud only' },
-  fig:      { bg:'#d98c00', fg:'#ffffff', lbl:'rejected — open it to see why',
-              tip:'The night did not calibrate, but a diagnostic was produced: select the day to '
-                + 'see the curtain, the profile and the reason.' },
-  // Not the same as amber. These nights stop before any diagnostic is made at all -- typically
-  // flag -4 (no usable water-vapour correction, e.g. missing CAMS) or -10. There is nothing to
-  // draw, so the panel shows only the flag and the message.
-  none:     { bg:'#b00020', fg:'#ffffff', lbl:'rejected — no usable measurement',
-              tip:'Rejected with nothing to show: the L1 for this night could not be read or held '
-                + 'no usable profiles. Every other rejected night can be opened.' },
+  // ONE rejected class. Since the curtain is built from the L1 whether or not a fit ran, nearly
+  // every rejected night is openable, and the old amber/red split (had-a-figure vs not) described
+  // the PNG pipeline's internals, not anything the operator chooses by.
+  fig:      { bg:'#d98c00', fg:'#ffffff', lbl:'rejected',
+              tip:'The night did not calibrate — open it to see the curtain and the reason.' },
 };
 function dayColour(d) {
   const present = D.methods.map(m => summaryOf(d, m)).filter(Boolean);
@@ -1075,7 +1095,7 @@ function buildLegend() {
   const rows = D.methods.length > 1
     ? [CAL_COL.both, CAL_COL.rayleigh, CAL_COL.cloud]
     : [{ bg:CAL_COL.both.bg, lbl:'calibrated' }];
-  rows.push(CAL_COL.fig, CAL_COL.none, { bg:'#f2f4f7', lbl:'no data' });
+  rows.push(CAL_COL.fig, { bg:'#f2f4f7', lbl:'no data' });
   document.getElementById('legend').innerHTML = rows.map(r =>
     `<span title="${(r.tip || r.lbl).replace(/"/g, '&quot;')}">` +
     `<span class="sw" style="background:${r.bg};border:1px solid #dbe3ea"></span>${r.lbl}</span>`
@@ -1174,7 +1194,7 @@ function buildViewSwitch(views) {
   // because a rejected night has no constant and so cannot form it -- without this the selector
   // would stay stuck on the fallback view after the operator moved back to a calibrated night.
   curView = (userView && have.includes(userView)) ? userView
-          : (have.includes('beta') ? 'beta' : (have[have.length - 1] || 'beta'));
+          : (have.includes('beta') ? 'beta' : (have.includes('rcs') ? 'rcs' : (have[0] || 'beta')));
   have.forEach(v => {
     const b = document.createElement('button');
     b.textContent = views[v].name || VIEW_NAMES[v];
@@ -1209,7 +1229,7 @@ function curtainZ(c, view) {
   let off = 0, byGate = false;
   if (view === 'rcs')  off = (c.base === 'rcs') ? 0 : (lc === null ? 0 : lc);
   if (view === 'beta') off = (c.base === 'rcs') ? (lc === null ? 0 : -lc) : 0;
-  if (view === 'sig') { off = (c.base === 'rcs') ? (lc === null ? 0 : -lc) : 0; byGate = true; }
+  if (view === 'raws') { off = (c.base === 'rcs') ? 0 : (lc === null ? 0 : lc); byGate = true; }
   let lo = c.lo + off, hi = c.hi + off;    // keep the PNG's own 5-95 percentile limits
   const sample = [];
   for (let j = 0; j < zz.length; j++) {
@@ -1234,7 +1254,7 @@ function curtainZ(c, view) {
   return { z: zz, lo: lo, hi: hi };
 }
 
-const Z_LABEL = { rcs:'RCS', sig:'signal', beta:'β_att' };
+const Z_LABEL = { raws:'signal', rcs:'RCS', beta:'β_att' };
 
 function drawPanel(p) {
   const host = document.getElementById('panel');
@@ -1242,6 +1262,10 @@ function drawPanel(p) {
   buildViewSwitch(pr && pr.views);
   if (!c || !c.b64) {
     host.innerHTML = '<p class="empty">no time–height data for this night</p>'; return; }
+  // A lazy day first renders the placeholder above, then the fetched payload triggers a re-render.
+  // Plotly.newPlot draws AROUND foreign children rather than removing them, so the placeholder
+  // survived underneath the finished panel ("no time-height data" below a drawn curtain).
+  if (host.querySelector(':scope > p.empty')) host.innerHTML = '';
   const views = (pr && pr.views) || {};
   const v = views[curView];
   const useLog = curLogX === null ? !!(v && v.logx) : curLogX;
@@ -1589,6 +1613,23 @@ document.addEventListener('keydown', e => {
   if (e.key === 'm') { const a = D.methods.filter(m => summaryOf(curDate, m));
     if (a.length > 1) { curMethod = a[(a.indexOf(curMethod)+1) % a.length]; render(); } }
 });
+// ---- calendar rail toggle: operator preference persists; narrow screens start collapsed ----
+(function () {
+  const wrap = document.querySelector('.dp-wrap'), btn = document.getElementById('cal-toggle');
+  if (!wrap || !btn) return;
+  const KEY = 'alc-dp-rail';
+  const stored = localStorage.getItem(KEY);
+  const narrow = window.matchMedia && window.matchMedia('(max-width: 1100px)').matches;
+  if (stored === 'hidden' || (stored === null && narrow)) wrap.classList.add('rail-hidden');
+  const paint = () => { btn.classList.toggle('on', !wrap.classList.contains('rail-hidden')); };
+  btn.addEventListener('click', () => {
+    wrap.classList.toggle('rail-hidden');
+    localStorage.setItem(KEY, wrap.classList.contains('rail-hidden') ? 'hidden' : 'shown');
+    paint();
+    window.dispatchEvent(new Event('resize'));   // Plotly reflows into the freed width
+  });
+  paint();
+})();
 buildLegend();
 buildCal();
 render();
@@ -1598,7 +1639,8 @@ HTML = ("""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>Daily calibration panel — mockup</title>
 <script>__PLOTLY__</script>
 <style>""" + PANEL_CSS + """</style></head><body>
-""" + PANEL_HDR + "\n" + PANEL_BODY + """
+""" + PANEL_HDR + """
+<div class="dp-wrap"><aside class="dp-rail">""" + PANEL_RAIL + """</aside>""" + PANEL_BODY + """</div>""" + """
 <script id="payload" type="application/json">__PAYLOAD__</script>
 <script>""" + PANEL_JS + """</script></body></html>""")
 

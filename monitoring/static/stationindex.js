@@ -59,7 +59,10 @@
   // is drawn as "stale" rather than as today's health.
   var STALE_DAYS = 7;
   function statusDot(rec) {
-    if (!rec || !rec.q) return "";
+    // Always emit the dot: it is the first flex child of every search/nav row, so omitting it
+    // shifted the whole row's layout for stations without a recorded status (the LED must sit in
+    // the same place on all three Payerne rows). Unknown status = grey, with a saying title.
+    if (!rec || !rec.q) return '<span class="ndot ndot-unknown" title="no status recorded"></span>';
     var cls = rec.q, title = rec.q;
     if (rec.qd && /^\d{8}$/.test(rec.qd)) {
       var d = Date.UTC(+rec.qd.slice(0, 4), +rec.qd.slice(4, 6) - 1, +rec.qd.slice(6, 8));

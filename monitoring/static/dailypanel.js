@@ -104,6 +104,37 @@
 
   watchViewer();
 
+  // Ctrl+Left / Ctrl+Right jump to the previous / next night that PRODUCED A CONSTANT, straight
+  // from the embedded index. Capture phase, so it wins over diag.js's own Ctrl binding (step every
+  // imaged day): one key must not mean two things depending on handler order.
+  document.addEventListener("keydown", function (e) {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    var t = e.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) return;
+    var dir = e.key === "ArrowRight" ? 1 : -1;
+    var valid = (D.dates || []).filter(function (ds) {
+      return (D.methods || []).some(function (m) {
+        var s2 = (D.index[ds] || {})[m];
+        return s2 && s2.constant !== null && s2.constant !== undefined;
+      });
+    });
+    if (!valid.length) return;
+    var i = valid.indexOf(curDate), target;
+    if (i < 0) {
+      var side = valid.filter(function (d2) { return dir > 0 ? d2 > curDate : d2 < curDate; });
+      if (!side.length) return;
+      target = dir > 0 ? side[0] : side[side.length - 1];
+    } else {
+      var k = i + dir;
+      if (k < 0 || k >= valid.length) return;
+      target = valid[k];
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    goDay(target);
+  }, true);
+
   // ---- boot: the most recent night that actually produced a constant ---------------------------
   var withCal = (D.dates || []).filter(function (ds) {
     return (D.methods || []).some(function (m) {
