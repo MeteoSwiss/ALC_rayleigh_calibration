@@ -66,22 +66,46 @@ def _quant_u8(m: np.ndarray, lo: float, hi: float) -> np.ndarray:
     return q
 
 
-def _curtain(mat, rng_m, st_target_t=400, st_target_r=260, vmin=None, vmax=None) -> dict:
-    """(n_time, n_range) -> quantised, strided curtain block. Colour limits are the 5th/95th
-    percentile of the FINITE log10 values, computed on the FULL field like the PNG does -- they
-    must travel, because recomputing them from a cropped/strided field shifts the colours."""
+#: Curtain grid, chosen to match what the PNG itself resolves. plot_rayleigh_diagnostics_compact
+#: strides the mesh to <=800x800 (plotting.py:1095-1096), so at this grid the client-side version
+#: shows EXACTLY what the image shows and loses nothing relative to today's product. Measured on a
+#: real CL31 night (5759x1024): 265 KB gzipped vs a 2542 KB PNG -- still 10x cheaper. Going finer is
+#: pointless (the PNG cannot show it) and full native resolution is 4186 KB gzipped, i.e. LARGER
+#: than the image it replaces, which is why "ship everything and let the browser zoom" is not an
+#: option. True zoom-in beyond the PNG would need an opt-in second fetch of a full-resolution
+#: payload for the one night being interrogated.
+PNG_GRID_T = 800
+PNG_GRID_R = 800
+
+
+def _curtain(mat, rng_m, st_target_t=PNG_GRID_T, st_target_r=PNG_GRID_R,
+             vmin=None, vmax=None, crop_km=None) -> dict:
+    """(n_time, n_range) -> quantised, strided curtain block.
+
+    Colour limits are the 5th/95th percentile of the FINITE log10 values computed on the FULL field,
+    exactly as the PNG does, and they travel with the block: recomputing them from a cropped or
+    strided field would shift every colour.
+
+    *crop_km* drops range gates the panel never displays (the cloud diagnostic fixes its y-axis at
+    ~3.4 km while its pcolormesh is full-resolution, so most gates are off-screen). Cropping happens
+    AFTER the percentiles are taken, so the colours still match the PNG.
+    """
     m = np.asarray(mat, dtype=float)
-    st_t = max(1, int(np.ceil(m.shape[0] / st_target_t)))
-    st_r = max(1, int(np.ceil(m.shape[1] / st_target_r)))
+    rng = np.asarray(rng_m, dtype=float)
     with np.errstate(all="ignore"):
         full = np.log10(np.where(m > 0, m, np.nan))
     fin = full[np.isfinite(full)]
     lo = vmin if vmin is not None else (float(np.percentile(fin, 5)) if fin.size else 0.0)
     hi = vmax if vmax is not None else (float(np.percentile(fin, 95)) if fin.size else 6.0)
+    if crop_km is not None:
+        keep = rng <= float(crop_km) * 1e3
+        if keep.any():
+            full, rng = full[:, keep], rng[keep]
+    st_t = max(1, int(np.ceil(full.shape[0] / st_target_t)))
+    st_r = max(1, int(np.ceil(full.shape[1] / st_target_r)))
     sub = full[::st_t, ::st_r]
     return {"b64": _b64(_quant_u8(sub.T, lo, hi)), "shape": list(sub.T.shape), "lo": lo, "hi": hi,
-            "range_km": _f32(np.asarray(rng_m, dtype=float)[::st_r] * 1e-3),
-            "st_t": st_t, "st_r": st_r}
+            "range_km": _f32(rng[::st_r] * 1e-3), "st_t": st_t, "st_r": st_r}
 
 
 def _runs(mask: np.ndarray) -> list:
@@ -286,11 +310,14 @@ def _payload_cloud(data, res, title: str) -> dict:
     cal_med = g("cal_median", float("nan"))
     s_theo = (float(np.nanmedian(S_con[sel])) / cal_med) if (sel.any() and cal_med) else 18.8
 
-    cur = _curtain(beta.T, rng)                  # _curtain wants (n_time, n_range)
+    # This panel's y axis is fixed at min(cal_hi/1000 + 1, top gate) ~ 3.4 km, so every gate above
+    # that is drawn by matplotlib and then clipped away. Cropping there is free fidelity.
+    y_max_km = float(min(cal_hi * 1e-3 + 1.0, float(rng.max()) * 1e-3))
+    cur = _curtain(beta.T, rng, crop_km=y_max_km)   # _curtain wants (n_time, n_range)
     st_t = cur["st_t"]
     cur["hours"] = _jsonable(hrs[::st_t])
     out["curtain"] = cur
-    out["y_max_km"] = float(min(cal_hi * 1e-3 + 1.0, float(rng.max()) * 1e-3))
+    out["y_max_km"] = y_max_km
     out["gate_km"] = [cal_lo * 1e-3, cal_hi * 1e-3]
 
     cbh = np.asarray(getattr(data, "cbh", []), float)
