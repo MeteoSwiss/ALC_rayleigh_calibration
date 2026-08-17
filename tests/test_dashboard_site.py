@@ -461,3 +461,18 @@ def test_qc_flagging_works_from_the_panel():
     assert "isDialogOpen" in js, "typing in the QC dialog must not navigate the panel"
     body = _panel().PANEL_BODY
     assert 'id="dp-flag"' in body, "the panel toolbar must carry the flag button"
+
+
+def test_p3_interaction_and_accessibility():
+    """P3: the selected night is linkable (#d= fragment, replaceState -- no history spam); the
+    availability card's promised click works even without a diag viewer; calendar day cells are
+    real buttons with aria-current; wide tables scroll inside their card; the monitoring section
+    never silently vanishes."""
+    dj = (REPO / "monitoring/static/dailypanel.js").read_text(encoding="utf-8")
+    assert "history.replaceState" in dj and "#d=" in dj
+    assert "plotly_click" in dj and "fig-avail" in dj
+    js = _panel().PANEL_JS
+    assert "document.createElement('button')" in js and "aria-current" in js
+    tpl = (REPO / "monitoring/templates/station.html").read_text(encoding="utf-8")
+    assert "tablewrap" in tpl
+    assert "No housekeeping has been recorded" in tpl

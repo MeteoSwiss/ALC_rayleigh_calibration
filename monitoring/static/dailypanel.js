@@ -86,6 +86,9 @@
 
   function goDay(ds) {
     if (!ds || !/^\d{8}$/.test(ds)) return;
+    // Linkable nights: the selected day rides the URL fragment, so back/forward and copied links
+    // land on the same night. replaceState -- stepping through days must not spam history.
+    try { history.replaceState(null, "", "#d=" + ds); } catch (e) { /* file:// */ }
     if (D.index && !D.index[ds]) {
       var w = document.getElementById("panel-warn");
       if (w) w.textContent = "";
@@ -154,6 +157,23 @@
     // The include sits above the method blocks, so at parse time the diag sections do not exist
     // yet -- this is why the panel<->viewer sync never attached before.
     watchViewer();
+    // The availability card promises "click a day to load its diagnostic". With a diag viewer the
+    // click reaches the panel through the viewer's date label; without one, nothing happened --
+    // so the panel takes the click itself.
+    var avail = document.getElementById("fig-avail");
+    if (avail && avail.on
+        && !document.querySelector('section.diag[data-method="rayleigh"], '
+                                   + 'section.diag[data-method="cloud"]')) {
+      avail.on("plotly_click", function (ev) {
+        var pt = ev && ev.points && ev.points[0];
+        if (!pt || pt.x === undefined) return;
+        var dt = new Date(pt.x);
+        if (isNaN(+dt)) return;
+        var ds = dt.toISOString().slice(0, 10).replace(/-/g, "");
+        goDay(ds);
+      });
+    }
+
     // Plain arrows: diag.js owns them when a CALIBRATION viewer exists; otherwise they would do
     // nothing at all, so the panel steps its own indexed days.
     if (!document.querySelector('section.diag[data-method="rayleigh"], '
@@ -222,5 +242,7 @@
   });
   var start = (withCal.length ? withCal : (D.dates || []))[
     (withCal.length ? withCal : (D.dates || [])).length - 1];
+  var frag = (location.hash.match(/[#&]d=(\d{8})/) || [])[1];
+  if (frag && D.index && D.index[frag]) start = frag;
   if (start) onReady(function () { goDay(start); });
 })();

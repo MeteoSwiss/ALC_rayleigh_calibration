@@ -867,6 +867,9 @@ PANEL_CSS = r"""
  .dp-wrap h2 { font-size:13px; margin:2px 0 8px; text-transform:uppercase; letter-spacing:.04em;
       color:var(--dp-dim); }
  .dp-wrap .cal { display:grid; grid-template-columns:repeat(7,1fr); gap:3px; }
+ .dp-wrap .cal button.d { font:inherit; padding:0; margin:0; line-height:1; cursor:default; }
+ .dp-wrap .cal button.d.has { cursor:pointer; }
+ .dp-wrap .whycard { overflow-x:auto; }
  .dp-wrap .cal .dow { font-size:10px; color:var(--dp-dim); text-align:center; }
  .dp-wrap .cal .d { aspect-ratio:1; border-radius:5px; border:1px solid var(--dp-line); font-size:11px;
            display:flex; align-items:center; justify-content:center; cursor:default;
@@ -1155,9 +1158,12 @@ function buildCal() {
   const ndays = new Date(y, m, 0).getDate();
   for (let dd = 1; dd <= ndays; dd++) {
     const ds = `${y}${String(m).padStart(2,'0')}${String(dd).padStart(2,'0')}`;
-    const cell = document.createElement('div');
+    // A real <button>: div cells were mouse-only -- unreachable by keyboard or screen reader.
+    const cell = document.createElement('button');
+    cell.type = 'button';
     cell.className = 'd'; cell.textContent = dd;
     const col = dayColour(ds);
+    cell.disabled = !col;
     if (col) {
       cell.classList.add('has');
       cell.style.background = col.bg;
@@ -1197,8 +1203,11 @@ function markCal() {
       return;
     }
   }
-  document.querySelectorAll('.cal .d').forEach(e =>
-    e.classList.toggle('cur', e.dataset.ds === curDate));
+  document.querySelectorAll('.cal .d').forEach(e => {
+    const cur = e.dataset.ds === curDate;
+    e.classList.toggle('cur', cur);
+    if (cur) e.setAttribute('aria-current', 'date'); else e.removeAttribute('aria-current');
+  });
 }
 
 // ---------------------------------------------------------------- switches

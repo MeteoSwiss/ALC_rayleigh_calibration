@@ -158,6 +158,7 @@
   </div>
   <h3 class="muted">All {{ b.label }} calibrations ({{ b.recent | length }}) —
     <span class="muted">click a date to load its diagnostic, click a flag for its meaning</span></h3>
+  <div class="tablewrap">
   <table class="stationtable paginated" data-page-size="15">
     <thead><tr><th>Date</th><th>Flag</th><th>C_L</th><th>Uncertainty</th><th>Extra</th><th>Message</th></tr></thead>
     <tbody>
@@ -175,17 +176,18 @@
     {% endfor %}
     </tbody>
   </table>
+  </div>
 </section>
 {% endfor %}
 
 
 
-{% if monitoring %}
 <section class="card">
   <h2>Instrument monitoring <span class="muted">— daily averages: laser power, window transmission, temperatures</span></h2>
-  {{ monitoring | safe }}
+  {% if monitoring %}{{ monitoring | safe }}
+  {% else %}<p class="muted">No housekeeping has been recorded for this stream yet — the daily
+    runner writes <code>&lt;key&gt;_hk.csv</code> on its next pass.</p>{% endif %}
 </section>
-{% endif %}
 
 {# The three operational products close every station page, in this order, ALWAYS. A stream whose
    product is missing says so in place -- a section that silently vanishes reads as a broken page,

@@ -293,3 +293,5 @@ td a:hover { text-decoration: underline; }
 h1.oneline { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; margin:10px 0 8px;
              font-size:19px; }
 h1.oneline .stmeta { font-size:13px; font-weight:400; color:var(--muted,#66707a); }
+
+.tablewrap { overflow-x: auto; }
