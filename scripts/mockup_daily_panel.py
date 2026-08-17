@@ -58,8 +58,21 @@ SCALE = 1e6                # Mm^-1, exactly the PNG's own axis scaling
 
 
 # ================================================================== capture of the real renders
+_CAPTURE_INSTALLED = False
+
+
 def _install_capture() -> None:
-    """Wrap the three production plotting functions and keep their arguments."""
+    """Wrap the three production plotting functions and keep their arguments.
+
+    IDEMPOTENT, and that matters: build_payload() calls this every time, so a batch run that builds
+    900 payloads used to wrap the already-wrapped functions 900 times over. Every plot call then
+    descended 900 nested wrappers and appended 900 entries to CAPTURED -- the results stayed correct
+    (the reader takes the last entry) but the cost grew linearly through the run.
+    """
+    global _CAPTURE_INSTALLED
+    if _CAPTURE_INSTALLED:
+        return
+    _CAPTURE_INSTALLED = True
     import calibration.plotting as P
     import calibration.rayleigh.calibration as RC
 

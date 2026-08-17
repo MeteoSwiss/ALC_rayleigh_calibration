@@ -34,6 +34,7 @@ import os
 import sqlite3
 import sys
 import time
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -130,32 +131,58 @@ def _kal_frame(cal_dir: Path, key: str) -> pd.DataFrame:
 
 
 # ================================================================================== daily payloads
-def _write_payloads(key: str, itype: str, days: list, out: Path, force: bool) -> dict:
+def _payload_task(job: tuple) -> tuple:
+    """One (day, method) in a worker process: calibrate, write the JSON, report.
+
+    Top-level and pickle-friendly because Windows spawns rather than forks. Each job writes its OWN
+    file, so the workers share nothing and need no lock; the parent only reads the directory
+    afterwards. Exceptions are returned, never raised, so one bad night cannot abort the batch.
+    """
+    key, ds, method, ddir = job
+    try:
+        d = datetime.strptime(ds, "%Y%m%d")
+        payload, _ = PANEL.build_payload(key, [d], [method])
+        p = (payload["days"].get(ds) or {}).get(method)
+        if p is None or p.get("kind") == "error":
+            return ds, method, False, (p or {}).get("message", "no diagnostic")
+        Path(ddir, f"{ds}_{method}.json").write_text(json.dumps(p, separators=(",", ":")),
+                                                     encoding="utf-8")
+        return ds, method, True, p.get("kind", "")
+    except Exception as exc:                                                 # noqa: BLE001
+        return ds, method, False, f"{type(exc).__name__}: {exc}"
+
+
+def _write_payloads(key: str, itype: str, days: list, out: Path, force: bool,
+                    workers: int) -> dict:
     """Run every (day, method) and write one JSON each. Returns the per-day index.
 
     The index is what the page embeds: enough to colour a calendar and step the arrows, and small
     enough that six months of it is a few kB.
+
+    Runs in a PROCESS pool: each night is an independent read of its own L1 file, so this is
+    embarrassingly parallel and there is no reason to leave 31 of 32 cores idle. Processes rather
+    than threads because the work is NumPy-heavy Python, and the per-process cost of importing the
+    calibration stack is paid once per worker, not once per night.
     """
     methods = _methods_for(itype)
     ddir = out / "data" / key
     ddir.mkdir(parents=True, exist_ok=True)
-    index, t0 = {}, time.perf_counter()
-    todo = [(d, m) for d in days for m in methods
+    t0 = time.perf_counter()
+    jobs = [(key, d.strftime("%Y%m%d"), m, str(ddir)) for d in days for m in methods
             if force or not (ddir / f"{d.strftime('%Y%m%d')}_{m}.json").exists()]
-    print(f"  {key}: {len(days)} days x {len(methods)} method(s) -> {len(todo)} to compute",
-          flush=True)
-    for n, (d, m) in enumerate(todo, 1):
-        ds = d.strftime("%Y%m%d")
-        payload, _ = PANEL.build_payload(key, [d], [m])
-        p = (payload["days"].get(ds) or {}).get(m)
-        if p is None or p.get("kind") == "error":
-            continue
-        (ddir / f"{ds}_{m}.json").write_text(json.dumps(p, separators=(",", ":")),
-                                             encoding="utf-8")
-        if n % 25 == 0 or n == len(todo):
-            el = time.perf_counter() - t0
-            print(f"    {n}/{len(todo)}  {el/60:.1f} min  ({el/max(n,1):.1f} s/day)", flush=True)
+    print(f"  {key}: {len(days)} days x {len(methods)} method(s) -> {len(jobs)} to compute "
+          f"on {workers} workers", flush=True)
+    if jobs:
+        done = 0
+        with ProcessPoolExecutor(max_workers=workers) as ex:
+            for ds, m, ok, note in ex.map(_payload_task, jobs, chunksize=1):
+                done += 1
+                if done % 25 == 0 or done == len(jobs):
+                    el = time.perf_counter() - t0
+                    print(f"    {done}/{len(jobs)}  {el/60:.1f} min  "
+                          f"({el/max(done,1):.2f} s/night wall, {len(jobs)-done} left)", flush=True)
     # Rebuild the index from what is on disk, so a resumed run indexes earlier days too.
+    index = {}
     for d in days:
         ds = d.strftime("%Y%m%d")
         for m in methods:
@@ -617,6 +644,9 @@ def main() -> None:
     ap.add_argument("--payloads", action="store_true", help="compute the per-day JSON payloads")
     ap.add_argument("--force", action="store_true", help="recompute payloads that already exist")
     ap.add_argument("--work", type=Path, default=Path("./_dashboard_work"))
+    # 32 cores here; leave a couple for the OS and for the Plotly/HTML step. Memory is
+    # not the binding constraint (a night peaks well under 1 GB against 128 GB).
+    ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 4) - 4))
     args = ap.parse_args()
     args.status_dir = args.status_dir or args.cal_dir
 
@@ -668,7 +698,8 @@ def main() -> None:
         print(f"\n=== {key} ({rec.get('itype')})", flush=True)
         idx_path = args.out / "data" / key / "_index.json"
         if args.payloads:
-            index = _write_payloads(key, rec.get("itype") or "", days, args.out, args.force)
+            index = _write_payloads(key, rec.get("itype") or "", days, args.out,
+                                    args.force, args.workers)
             idx_path.parent.mkdir(parents=True, exist_ok=True)
             idx_path.write_text(json.dumps(index, separators=(",", ":")), encoding="utf-8")
         else:
