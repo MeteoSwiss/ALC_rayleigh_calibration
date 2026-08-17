@@ -736,9 +736,12 @@ def _render_one_station(key, ctx) -> str:
     # Cloudnet target classification curtains: a per-day gallery like the calibration diagnostics, but
     # not tied to a calibration method (it has no cal rows), so it renders as its own standalone card.
     class_diags = ctx.diag_by.get((key, "classification"), [])
-    overlay = None
+    overlay, cl_tiles = None, []
+    by_method = {m: cal[(cal["key"] == key) & (cal["method"] == m)] for m in methods}
+    # The headline tiles are useful on a ONE-method stream too (median, spread, drift, last valid),
+    # so they are not gated on the two-method overlay the way the comparison figure is.
+    cl_tiles = metrics.cl_headline_tiles(by_method)
     if len(methods) >= 2:
-        by_method = {m: cal[(cal["key"] == key) & (cal["method"] == m)] for m in methods}
         overlay = charts.fig_to_div(charts.cl_overlay(by_method), "fig-overlay")
     i = ctx.nav_idx.get(key)
     prev_station = f"{ctx.all_keys[i - 1]}.html" if (i is not None and i > 0) else ""
@@ -765,7 +768,7 @@ def _render_one_station(key, ctx) -> str:
                     "color": config.CAL_CLASS_COLORS[c]} for c in config.CAL_CLASS_ORDER]
     daily_panel = _daily_panel(ctx.out_dir, key, methods)
     html = ctx.tmpl.render(base="../", logo=ctx.logo, key=key, meta=meta, cal_classes=cal_classes,
-                           daily_panel=daily_panel,
+                           daily_panel=daily_panel, cl_tiles=cl_tiles,
                            blocks=blocks, overlay=overlay, search_json=ctx.search_json,
                            countries=getattr(ctx, "countries", []), types=getattr(ctx, "types", []),
                            prev_station=prev_station, next_station=next_station,

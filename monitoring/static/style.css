@@ -278,3 +278,11 @@ td a:hover { text-decoration: underline; }
 .diag-status.q-warning { border-left-color: #f4c430; background: #fff9e6; }
 .diag-status.q-error { border-left-color: #e03131; background: #fdecec; }
 .diag-status.q-nodata { border-left-color: #cbd2d9; color: var(--muted); }
+
+/* --- C_L headline tiles (station page, beside the two-method overlay) ------------------------- */
+.tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:10px;
+         margin-top:11px; }
+.tile { border:1px solid var(--line,#dbe3ea); border-radius:9px; padding:9px 12px; background:#fff; }
+.tile .tl { font:11px/1.3 ui-monospace,Consolas,monospace; color:#66707a; letter-spacing:.03em; }
+.tile .tv { font-size:23px; font-weight:600; margin:3px 0 1px; font-variant-numeric:tabular-nums; }
+.tile .tn { font-size:11.5px; color:#66707a; }

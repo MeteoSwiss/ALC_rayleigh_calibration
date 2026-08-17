@@ -501,21 +501,49 @@ def aux_timeseries(g_m: pd.DataFrame, method: str) -> go.Figure:
 
 
 def cl_overlay(by_method: dict) -> go.Figure:
-    """Overlay the lidar constant C_L of each method (CL61) on one axis -- a direct cross-check.
+    """Both retrievals of C_L on ONE axis, with the per-night uncertainty and the median band.
 
-    Both methods estimate the SAME C_L (Wiegner), so the Rayleigh and cloud points should
-    agree; no normalization, the absolute C_L is the useful comparison.
+    The two methods estimate the SAME Wiegner constant, so the comparison is absolute -- no
+    normalisation. Bare markers made a drift or a step hard to see, so this adds three things that
+    carry the reading: the per-night uncertainty as error bars, the median with a +/-10 % band (a
+    stable instrument sits inside it), and a shaded 15-day window at the right so the drift quoted
+    in the headline tiles can be seen rather than taken on trust.
     """
     fig = go.Figure()
+    ref, all_ok = None, []
     for method, g_m in by_method.items():
         ok = g_m[g_m["success"] == 1].sort_values("datetime")
         if not len(ok):
             continue
-        fig.add_trace(go.Scatter(x=ok["datetime"], y=ok["cal_value"], mode="markers",
-                                 name=config.method_label(method),
-                                 marker=dict(size=5, color=config.METHOD_COLORS.get(method, "#888"),
-                                             opacity=0.8),
-                                 hovertemplate="%{x|%Y-%m-%d}<br>C_L=%{y:.3e}<extra></extra>"))
+        all_ok.append((method, ok))
+        # The reference for the median band is the method with the most calibrated nights: its
+        # median is the better-determined one (cloud typically runs on far more nights).
+        if ref is None or len(ok) > len(ref[1]):
+            ref = (method, ok)
+    for method, ok in all_ok:
+        col = config.METHOD_COLORS.get(method, "#888")
+        unc = ok["uncertainty"] if "uncertainty" in ok.columns else None
+        fig.add_trace(go.Scatter(
+            x=ok["datetime"], y=ok["cal_value"], mode="markers",
+            name=config.method_label(method),
+            marker=dict(size=5, color=col, opacity=0.85),
+            error_y=(dict(type="data", array=unc.fillna(0.0), visible=True, color=col,
+                          thickness=0.9, width=0) if unc is not None else None),
+            hovertemplate="%{x|%Y-%m-%d}<br>C_L=%{y:.4g}<extra></extra>"))
+    if ref is not None:
+        med = float(ref[1]["cal_value"].median())
+        if np.isfinite(med) and med:
+            fig.add_hrect(y0=med * 0.9, y1=med * 1.1, fillcolor="rgba(70,130,140,0.10)",
+                          line_width=0, layer="below")
+            fig.add_hline(y=med, line=dict(color="#2a6b73", width=1.2))
+            fig.add_trace(go.Scatter(x=[None], y=[None], mode="markers",
+                                     name="±10 % of median",
+                                     marker=dict(size=9, symbol="square",
+                                                 color="rgba(70,130,140,0.25)")))
+        last = ref[1]["datetime"].max()
+        fig.add_vrect(x0=last - pd.Timedelta(days=15), x1=last,
+                      fillcolor="rgba(240,173,78,0.16)", line_width=0, layer="below")
+        fig.add_vline(x=last, line=dict(color="#d9534f", width=1.2))
     fig.update_layout(**_LAYOUT, title="Rayleigh vs cloud — lidar constant C_L",
                       yaxis_title="C_L", legend=dict(orientation="h", y=1.14))
     fig.update_yaxes(exponentformat="e")

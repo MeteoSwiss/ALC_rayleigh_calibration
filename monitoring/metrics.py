@@ -140,3 +140,61 @@ def watchlist(cal: pd.DataFrame, st: pd.DataFrame) -> pd.DataFrame:
     df = pd.DataFrame(alerts).sort_values(["issue", "priority"], ascending=[True, False]).reset_index(drop=True)
     df["country"] = df["key"].map(lambda k: str(country_by_key.get(k, "") or ""))
     return df
+
+
+#: Tile grading thresholds (absolute value of the metric, in its own unit). Display heuristics for
+#: an operator's eye, NOT acceptance criteria -- the flags decide whether a night calibrates.
+TILE_OK, TILE_WARN, TILE_BAD = "#1a7431", "#b7791f", "#b00020"
+
+
+def _grade(v, good, warn):
+    if v is None or not np.isfinite(v):
+        return TILE_BAD
+    a = abs(v)
+    return TILE_OK if a < good else (TILE_WARN if a < warn else TILE_BAD)
+
+
+def cl_headline_tiles(by_method: dict) -> list:
+    """The five numbers that say whether a station's calibration is healthy right now.
+
+    Median C_L, its p10-p90 spread, the cloud/Rayleigh ratio, the 15-day drift and how long since
+    the last valid night. Colour-coded so a bad one is visible without reading the figure above it;
+    the ratio in particular is the CL61 water-vapour diagnostic -- a systematic offset between two
+    retrievals of the SAME constant points at the correction, not at the instrument.
+    """
+    ok = {m: g[g["success"] == 1].sort_values("datetime") for m, g in by_method.items()}
+    ok = {m: g for m, g in ok.items() if len(g)}
+    if not ok:
+        return []
+    ref = "cloud" if "cloud" in ok else max(ok, key=lambda m: len(ok[m]))
+    g = ok[ref]
+    med = float(g["cal_value"].median())
+    p10, p90 = (float(g["cal_value"].quantile(q)) for q in (0.10, 0.90))
+    spread = 100.0 * (p90 - p10) / med if med else None
+    last = g["datetime"].max()
+    win = last - pd.Timedelta(days=15)
+    recent = g[g["datetime"] >= win]["cal_value"]
+    prior = g[(g["datetime"] < win) & (g["datetime"] >= win - pd.Timedelta(days=45))]["cal_value"]
+    drift = (100.0 * (recent.median() / prior.median() - 1.0)
+             if len(recent) and len(prior) and prior.median() else None)
+    ratio = None
+    if "cloud" in ok and "rayleigh" in ok:
+        mr = float(ok["rayleigh"]["cal_value"].median())
+        ratio = float(ok["cloud"]["cal_value"].median()) / mr if mr else None
+    age = int((pd.Timestamp.utcnow().tz_localize(None).normalize() - last.normalize()).days)
+    return [
+        {"label": f"MEDIAN {config.method_label(ref).upper()} C_L", "value": f"{med:.4g}",
+         "note": f"{len(g)} calibrated nights", "color": TILE_OK},
+        {"label": "SPREAD (P10-P90)", "value": "—" if spread is None else f"{spread:.0f}%",
+         "note": f"{p10:.4g} … {p90:.4g}", "color": _grade(spread, 10, 20)},
+        {"label": "CLOUD / RAYLEIGH RATIO", "value": "—" if ratio is None else f"{ratio:.3g}x",
+         "note": ("only one method on this stream" if ratio is None else
+                  ("the two retrievals agree" if abs(ratio - 1) < 0.05 else
+                   "a systematic offset points at the water-vapour correction, not the instrument")),
+         "color": TILE_BAD if ratio is None else _grade(ratio - 1.0, 0.05, 0.15)},
+        {"label": "15-DAY DRIFT", "value": "—" if drift is None else f"{drift:+.1f}%",
+         "note": "vs the preceding 45 d" if drift is not None else "not enough history",
+         "color": _grade(drift, 5, 10)},
+        {"label": "LAST VALID", "value": "today" if age <= 0 else f"{age} d ago",
+         "note": last.strftime("%Y-%m-%d"), "color": _grade(age, 3, 8)},
+    ]

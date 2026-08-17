@@ -69,8 +69,21 @@
 {% if status_json %}<script type="application/json" id="status-index">{{ status_json | safe }}</script>{% endif %}
 {% endif %}
 
-{% if overlay %}
-<section class="card">{{ overlay | safe }}</section>
+{% if overlay or cl_tiles %}
+<section class="card">
+  {% if overlay %}{{ overlay | safe }}
+  <p class="muted">Both retrievals on one axis — a systematic offset between them points at the
+    water-vapour correction, not the instrument.</p>{% endif %}
+  {% if cl_tiles %}
+  <div class="tiles">
+    {% for t in cl_tiles %}
+    <div class="tile"><div class="tl">{{ t.label }}</div>
+      <div class="tv" style="color:{{ t.color }}">{{ t.value }}</div>
+      <div class="tn">{{ t.note }}</div></div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
 {% endif %}
 
 {% for b in blocks %}

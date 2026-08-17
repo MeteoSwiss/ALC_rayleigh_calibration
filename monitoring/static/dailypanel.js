@@ -22,13 +22,38 @@
 
   function url(ds, m) { return "../data/" + KEY + "/" + ds + "_" + m + ".json"; }
 
+  // A page opened by double-click runs on file://, where fetch() of a sibling JSON is blocked as a
+  // cross-origin request. The panel then draws nothing at all, which looks exactly like a broken
+  // build. Say so instead of failing silently -- this is the most likely way anyone first opens it.
+  var warned = false;
+  function warn(why) {
+    if (warned) return;
+    warned = true;
+    var host = document.getElementById("panel");
+    if (!host) return;
+    var fileUrl = location.protocol === "file:";
+    host.innerHTML =
+      '<div style="border:1px solid #f5c2c7;background:#fdecef;border-left:5px solid #b00020;' +
+      'border-radius:8px;padding:12px 14px;margin:8px 0">' +
+      '<b>The daily panel could not load its data.</b><div style="margin-top:5px;font-size:13px">' +
+      (fileUrl
+        ? "This page is open from the filesystem (<code>file://</code>), and browsers block a page " +
+          "from reading sibling files that way. Serve the folder over HTTP and open it from there — " +
+          'e.g. <code>python -m http.server 8000</code> in the dashboard directory, then ' +
+          "<code>http://localhost:8000/stations/</code>. Every other panel on this page works " +
+          "offline; only this one needs the per-day files."
+        : "Could not fetch <code>" + why + "</code>. The per-day payloads may not have been " +
+          "generated for this station yet.") +
+      "</div></div>";
+  }
+
   function ensureDay(ds, m) {
     var ck = ds + "_" + m;
     if (CACHE[ck] !== undefined) return Promise.resolve(CACHE[ck]);
     pending++;
     return fetch(url(ds, m), { cache: "no-cache" })
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .catch(function () { return null; })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error(r.status)); })
+      .catch(function () { warn(url(ds, m)); return null; })
       .then(function (p) {
         CACHE[ck] = p;
         if (p) { D.days[ds] = D.days[ds] || {}; D.days[ds][m] = p; }
