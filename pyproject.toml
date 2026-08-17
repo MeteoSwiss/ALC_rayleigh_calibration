@@ -102,3 +102,6 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 # Coverage is opt-in (run `pytest --cov=calibration`) so the suite runs without pytest-cov.
 addopts = "-v"
+# The dashboard browser tier drives a real Chromium and needs a built site; it skips itself when
+# either is missing, and `-m "not browser"` excludes it outright.
+markers = ["browser: headless-browser dashboard tests (need playwright + ALC_SITE_DIR)"]

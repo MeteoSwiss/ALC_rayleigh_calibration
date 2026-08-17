@@ -781,6 +781,38 @@ def _emit_hk_hourly(fullcal_dir, key: str, out_dir: Path) -> None:
                       json.dumps({"t": t, "series": series}, separators=(",", ":")))
 
 
+def _hopkin_panel(out_dir: Path, key: str) -> str | None:
+    """Pool the per-scene (cloud base, C) pairs the cloud payloads carry into the panel's grid.
+
+    Reads what is already on disk -- data/<key>/<date>_cloud.json -- so the card appears for exactly
+    the nights the daily panel can show, and disappears cleanly for a station whose payloads predate
+    the capture (older payloads simply have no "scenes" key).
+    """
+    ddir = out_dir / "data" / key
+    if not ddir.is_dir():
+        return None
+    cbh, cs, day = [], [], []
+    for f in sorted(ddir.glob("*_cloud.json")):
+        try:
+            j = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        sc = j.get("scenes") or {}
+        a, b = sc.get("cbh") or [], sc.get("c") or []
+        if not a or len(a) != len(b):
+            continue
+        d = f.name.split("_")[0]
+        cbh.extend(a)
+        cs.extend(b)
+        day.extend([d] * len(a))
+    if len(cbh) < 30:
+        return None
+    cells = charts.cloud_cbh_cells({"cbh": cbh, "c": cs, "day": day})
+    if cells is None:
+        return None
+    return json.dumps(cells, separators=(",", ":"))
+
+
 def _daily_panel(out_dir: Path, key: str, methods: list) -> dict | None:
     """The interactive daily-calibration panel, when its payloads have been generated.
 
@@ -867,9 +899,11 @@ def _render_one_station(key, ctx) -> str:
                     "title": config.CAL_CLASS_LABELS[c],
                     "color": config.CAL_CLASS_COLORS[c]} for c in config.CAL_CLASS_ORDER]
     daily_panel = _daily_panel(ctx.out_dir, key, methods)
+    hopkin = _hopkin_panel(ctx.out_dir, key) if "cloud" in methods else None
     _emit_hk_hourly(ctx.fullcal_dir, key, ctx.out_dir)
     html = ctx.tmpl.render(base="../", logo=ctx.logo, key=key, meta=meta, cal_classes=cal_classes,
-                           daily_panel=daily_panel, cl_tiles=cl_tiles,
+                           daily_panel=daily_panel,
+                           hopkin=hopkin, cl_tiles=cl_tiles,
                            cl_stats_json=json.dumps(cl_stats, ensure_ascii=False),
                            blocks=blocks, overlay=overlay, search_json=ctx.search_json,
                            countries=getattr(ctx, "countries", []), types=getattr(ctx, "types", []),

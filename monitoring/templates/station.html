@@ -100,6 +100,11 @@
 </section>
 {% endfor %}
 
+{# Pooled C-vs-cloud-base density. It is DATA, not a rendered figure: the panel draws it as the
+   third card of the cloud diagnostics row, beside the coefficient histogram it is the 2-D version
+   of. Emitted BEFORE the panel script so it is in the DOM when the first night renders. #}
+{% if hopkin %}<script id="hopkin-data" type="application/json">{{ hopkin | safe }}</script>{% endif %}
+
 {% if daily_panel %}
 {# Interactive daily calibration. Renders ONLY when its per-day payloads exist, so a station without
    them keeps exactly the page it had before. It sits next to the per-day diagnostic images rather

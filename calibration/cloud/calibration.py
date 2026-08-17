@@ -615,6 +615,8 @@ class CloudCalResults:
     time: NDArray = field(default_factory=lambda: np.array([]))
     cbh: NDArray = field(default_factory=lambda: np.array([]))
     all_coefficients: NDArray = field(default_factory=lambda: np.array([]))
+    #: Accepted-scene coefficients, paired element-wise with cbh/time/lidar_ratios (see below).
+    valid_coefficients: NDArray = field(default_factory=lambda: np.array([]))
     altitude_warning: bool = False
     trans2_wv: Optional[NDArray] = None
     config: Optional[CloudCalConfig] = None
@@ -830,6 +832,11 @@ def liquid_cloud_calibration_from_data(data: CeiloData, config: CloudCalConfig) 
     res.time = data.time[valid_idx]
     res.cbh = data.cbh[valid_idx]
     res.all_coefficients = calibration_coefficients
+    # The coefficients of the ACCEPTED scenes only, i.e. paired element-wise with res.cbh / res.time
+    # / res.lidar_ratios. all_coefficients above spans every profile of the day (NaN where no scene
+    # was usable), so it is roughly 30x longer and does NOT pair with cbh -- consumers that want
+    # "C for this cloud base" need this array, not that one.
+    res.valid_coefficients = calibration_coefficients[valid_idx]
     res.config = config
     res.filter_stats = filter_stats
     res.cloud_stats = cloud_stats

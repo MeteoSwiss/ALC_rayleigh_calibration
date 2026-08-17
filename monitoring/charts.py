@@ -803,3 +803,192 @@ def sparkline_svg(values, width: int = 110, height: int = 26, color: str = "#1f7
            for i, y in enumerate(v)]
     return (f'<svg class="spark" width="{width}" height="{height}" viewBox="0 0 {width} {height}">'
             f'<polyline fill="none" stroke="{color}" stroke-width="1.2" points="{" ".join(pts)}"/></svg>')
+
+
+# ---------------------------------------------------------------- cloud: C vs cloud-base height ---
+#: Heatmap grid, same convention as the research Hopkin panels: x = C as a PERCENTAGE of the
+#: station median (the absolute C is instrument-dependent and would make every station a different
+#: axis), y = cloud base in km AGL. Altitude on Y, always.
+HOPKIN_X = np.arange(40.0, 160.01, 2.5)
+HOPKIN_Y = np.arange(0.0, 3.0001, 0.1)
+HOPKIN_BAND = 0.3          # m AGL band height for the overlaid mean +- sd profile
+
+
+def _cluster_ols(x, y, day):
+    """OLS slope of y on x with standard error clustered BY DAY.
+
+    Scenes from one night are not independent -- the same cloud field is sampled many times -- so a
+    naive OLS standard error is optimistic by roughly sqrt(scenes per night). Clustering on the day
+    label is what the research Hopkin analysis used, and it is what makes "is the slope different
+    from zero" an honest question here.
+    """
+    x = np.asarray(x, "f8")
+    y = np.asarray(y, "f8")
+    day = np.asarray(day)
+    n = x.size
+    if n < 10:
+        return float("nan"), float("nan"), 0
+    X = np.column_stack([np.ones(n), x])
+    try:
+        beta, *_ = np.linalg.lstsq(X, y, rcond=None)
+        XtX_inv = np.linalg.inv(X.T @ X)
+    except np.linalg.LinAlgError:
+        return float("nan"), float("nan"), 0
+    resid = y - X @ beta
+    meat = np.zeros((2, 2))
+    days = np.unique(day)
+    for d in days:
+        m = day == d
+        u = X[m].T @ resid[m]
+        meat += np.outer(u, u)
+    cov = XtX_inv @ meat @ XtX_inv
+    se = float(np.sqrt(max(cov[1, 1], 0.0)))
+    return float(beta[1]), se, int(days.size)
+
+
+def cloud_cbh_cells(scenes: dict) -> dict | None:
+    """Per-day sparse occupancy of the C-vs-cloud-base grid, for a client that re-pools on demand.
+
+    ``{"x": centres, "y": centres, "nx", "ny", "days": {"YYYYMMDD": [cell, count, ...]}}`` with
+    ``cell = iy * nx + ix``. Shipping per-day counts rather than one finished grid is what lets the
+    period selector re-pool the card: any date window is an exact sum of the days it contains.
+
+    The percentage axis is normalised on the ALL-TIME median, deliberately: if each window
+    renormalised on its own median, a drift in the constant would silently recentre the picture and
+    a genuinely shifted period would look identical to a stable one.
+    """
+    cbh = np.asarray(scenes.get("cbh", []), "f8") / 1000.0      # -> km AGL
+    cs = np.asarray(scenes.get("c", []), "f8")
+    day = np.asarray(scenes.get("day", []), dtype=str)
+    ok = np.isfinite(cbh) & np.isfinite(cs) & (cs > 0)
+    if day.size != cs.size:
+        return None
+    cbh, cs, day = cbh[ok], cs[ok], day[ok]
+    if cbh.size < 30:
+        return None
+    pct = 100.0 * cs / np.median(cs)
+    nx, ny = len(HOPKIN_X) - 1, len(HOPKIN_Y) - 1
+    ix = np.digitize(pct, HOPKIN_X) - 1
+    iy = np.digitize(cbh, HOPKIN_Y) - 1
+    keep = (ix >= 0) & (ix < nx) & (iy >= 0) & (iy < ny)
+    ix, iy, day = ix[keep], iy[keep], day[keep]
+    if ix.size == 0:
+        return None
+    cell = iy * nx + ix
+    days: dict[str, list[int]] = {}
+    for d in np.unique(day):
+        m = day == d
+        vals, counts = np.unique(cell[m], return_counts=True)
+        flat: list[int] = []
+        for v, n in zip(vals.tolist(), counts.tolist()):
+            flat.append(int(v))
+            flat.append(int(n))
+        days[str(d)] = flat
+    return {
+        "x": [round(float(v), 3) for v in 0.5 * (HOPKIN_X[:-1] + HOPKIN_X[1:])],
+        "y": [round(float(v), 3) for v in 0.5 * (HOPKIN_Y[:-1] + HOPKIN_Y[1:])],
+        "nx": int(nx), "ny": int(ny), "band": float(HOPKIN_BAND), "days": days,
+    }
+
+
+def cloud_cbh_grid(scenes: dict) -> dict | None:
+    """Pooled C-vs-cloud-base density as plain data, for the browser to draw.
+
+    Returns the 2-D histogram on the fixed HOPKIN_X/HOPKIN_Y grid plus the per-band mean profile and
+    the day-clustered slope. Sending the grid (~1.4 kB) rather than the scenes keeps the page small
+    however many nights the station has, and keeps the binning identical to the research panels.
+    """
+    cbh = np.asarray(scenes.get("cbh", []), "f8") / 1000.0      # -> km AGL
+    cs = np.asarray(scenes.get("c", []), "f8")
+    day = np.asarray(scenes.get("day", []))
+    ok = np.isfinite(cbh) & np.isfinite(cs) & (cs > 0)
+    if day.size != cs.size:
+        day = np.zeros(cs.size)
+    cbh, cs, day = cbh[ok], cs[ok], day[ok]
+    if cbh.size < 30:
+        return None
+    pct = 100.0 * cs / np.median(cs)
+    inwin = (pct >= HOPKIN_X[0]) & (pct <= HOPKIN_X[-1]) & (cbh <= HOPKIN_Y[-1])
+    slope, se, ndays = _cluster_ols(cbh[inwin], 100.0 * np.log(cs[inwin]), day[inwin])
+    H, _, _ = np.histogram2d(pct, cbh, bins=[HOPKIN_X, HOPKIN_Y])
+    edges = np.arange(HOPKIN_Y[0], HOPKIN_Y[-1] + 1e-9, HOPKIN_BAND)
+    bands = []
+    for lo, hi in zip(edges[:-1], edges[1:]):
+        v = pct[inwin & (cbh >= lo) & (cbh < hi)]
+        if v.size >= 5:
+            bands.append([round(float((lo + hi) / 2), 3), round(float(v.mean()), 2),
+                          round(float(v.std()), 2), int(v.size)])
+    return {
+        "x": [round(float(v), 3) for v in 0.5 * (HOPKIN_X[:-1] + HOPKIN_X[1:])],
+        "y": [round(float(v), 3) for v in 0.5 * (HOPKIN_Y[:-1] + HOPKIN_Y[1:])],
+        "z": [[int(v) for v in H[:, j]] for j in range(H.shape[1])],      # z[y][x]
+        "bands": bands, "n": int(cbh.size), "ndays": int(ndays),
+        "slope": None if not np.isfinite(slope) else round(float(slope), 2),
+        "se": None if not np.isfinite(se) else round(float(se), 2),
+    }
+
+
+def cloud_cbh_heatmap(scenes: dict, div_height: int = 430) -> "go.Figure | None":
+    """Hopkin-style density of the per-scene O'Connor coefficient against cloud-base height.
+
+    ``scenes`` = {"cbh": [m], "c": [-], "day": [YYYYMMDD]} pooled over the station's nights. A
+    calibration that is free of a cloud-base dependence shows a VERTICAL ridge at 100 %; a tilted
+    ridge is the dC/dCBH signature (multiple scattering / water-vapour mis-correction), which is why
+    the fitted slope is quoted with a day-clustered standard error rather than left to the eye.
+    """
+    cbh = np.asarray(scenes.get("cbh", []), "f8") / 1000.0      # -> km AGL
+    cs = np.asarray(scenes.get("c", []), "f8")
+    day = np.asarray(scenes.get("day", []))
+    ok = np.isfinite(cbh) & np.isfinite(cs) & (cs > 0)
+    if day.size != cs.size:
+        day = np.zeros(cs.size)
+    cbh, cs, day = cbh[ok], cs[ok], day[ok]
+    if cbh.size < 30:
+        return None
+    pct = 100.0 * cs / np.median(cs)
+    # Slope in %/km comes from log C (a multiplicative bias per km is what the physics predicts),
+    # fitted on the scenes INSIDE the drawn window so the number matches what the operator sees.
+    inwin = (pct >= HOPKIN_X[0]) & (pct <= HOPKIN_X[-1]) & (cbh <= HOPKIN_Y[-1])
+    slope, se, ndays = _cluster_ols(cbh[inwin], 100.0 * np.log(cs[inwin]), day[inwin])
+
+    H, _, _ = np.histogram2d(pct, cbh, bins=[HOPKIN_X, HOPKIN_Y])
+    xc = 0.5 * (HOPKIN_X[:-1] + HOPKIN_X[1:])
+    yc = 0.5 * (HOPKIN_Y[:-1] + HOPKIN_Y[1:])
+    z = H.T                                                     # z[y][x]
+    z = np.where(z == 0, np.nan, z)                             # empty cells stay page-coloured
+
+    traces = [go.Heatmap(x=xc, y=yc, z=z, colorscale="Greens", hoverongaps=False,
+                         colorbar=dict(title="scenes", thickness=12, len=0.85),
+                         hovertemplate="C %{x:.0f} %<br>base %{y:.2f} km<br>%{z:.0f} scenes"
+                                       "<extra></extra>", name="density")]
+    # Band means: the quantitative read of the same picture, on top of the density.
+    edges = np.arange(HOPKIN_Y[0], HOPKIN_Y[-1] + 1e-9, HOPKIN_BAND)
+    bx, by, bsd = [], [], []
+    for lo, hi in zip(edges[:-1], edges[1:]):
+        v = pct[inwin & (cbh >= lo) & (cbh < hi)]
+        if v.size >= 5:
+            bx.append(float(v.mean()))
+            by.append(float((lo + hi) / 2))
+            bsd.append(float(v.std()))
+    if bx:
+        traces.append(go.Scatter(
+            x=bx, y=by, mode="lines+markers", name="band mean ± sd",
+            line=dict(color="#c0392b", width=2), marker=dict(size=7, color="#c0392b"),
+            error_x=dict(type="data", array=bsd, color="rgba(192,57,43,0.45)", thickness=1.4,
+                         width=0),
+            hovertemplate="base %{y:.2f} km<br>mean C %{x:.1f} %<extra></extra>"))
+
+    fig = go.Figure(traces)
+    fig.add_vline(x=100.0, line=dict(color="#444", width=1, dash="dash"))
+    txt = f"{int(cbh.size)} scenes · {ndays} nights"
+    if np.isfinite(slope):
+        txt += f" · slope {slope:+.1f} ± {se:.1f} %/km"
+    fig.add_annotation(x=0.5, y=1.045, xref="paper", yref="paper", showarrow=False,
+                       text=txt, font=dict(size=11, color="#555"))
+    fig.update_layout(**{**_LAYOUT, "height": div_height,
+                         "margin": dict(l=64, r=20, t=48, b=44),
+                         "legend": dict(orientation="h", y=-0.16, x=0.5, xanchor="center")})
+    fig.update_xaxes(title_text="per-scene C, % of station median", range=[HOPKIN_X[0],
+                                                                          HOPKIN_X[-1]])
+    fig.update_yaxes(title_text="cloud base (km AGL)", range=[HOPKIN_Y[0], HOPKIN_Y[-1]])
+    return fig

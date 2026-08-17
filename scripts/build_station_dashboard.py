@@ -233,6 +233,7 @@ def _write_payloads(key: str, itype: str, days: list, out: Path, force: bool,
                     pass
                 continue
             index.setdefault(ds, {})[m] = {
+                "nodata": p.get("kind") == "nodata",
                 "flag": p.get("flag"), "constant": p.get("constant"),
                 "message": p.get("message"),
                 "flag_label": p.get("flag_label"),

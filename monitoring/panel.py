@@ -657,7 +657,34 @@ def _pack_cloud(data, res) -> dict:
     }
     prof = _profile_cloud(data, res, sel, cal_lo, cal_hi)
     _share_y(cur, prof)          # already agree for cloud (both AGL, both capped at cal_hi + 1 km)
-    return {"kind": "cloud", "curtain": cur, "profile": prof, "diag": diag}
+    out = {"kind": "cloud", "curtain": cur, "profile": prof, "diag": diag}
+    # Per-scene (cloud base, C) pairs -- the ingredients of the station-level Hopkin card, from
+    # res.cbh and res.valid_coefficients, which the cloud core stores side by side precisely so they
+    # pair element-wise; a length mismatch means a code change broke that pairing and the card is
+    # dropped rather than drawn from mis-aligned arrays. Pooling happens at render time
+    # (render._hopkin_panel) so no extra file is produced and no calibration is rerun.
+    scenes = _cloud_scenes(res)
+    if scenes:
+        out["scenes"] = scenes
+    return out
+
+
+def _cloud_scenes(res) -> dict | None:
+    """{"cbh": [m], "c": [-]} for the accepted scenes of one night, or None."""
+    try:
+        cbh = np.asarray(getattr(res, "cbh", []), dtype="f8").ravel()
+        # valid_coefficients pairs with cbh; all_coefficients spans EVERY profile of the day and
+        # is ~30x longer, so it must not be used here (it silently mis-pairs base with coefficient).
+        cs = np.asarray(getattr(res, "valid_coefficients", []), dtype="f8").ravel()
+    except (TypeError, ValueError):
+        return None
+    if cbh.size == 0 or cbh.size != cs.size:
+        return None
+    ok = np.isfinite(cbh) & np.isfinite(cs) & (cs > 0) & (cbh > 0)
+    if not ok.any():
+        return None
+    return {"cbh": [round(float(v), 1) for v in cbh[ok]],
+            "c": [round(float(v), 5) for v in cs[ok]]}
 
 
 # ============================================================================================ run
@@ -699,6 +726,16 @@ def _run_one(rnc, stream: dict, d: datetime, method: str) -> dict:
             break
     plots = [c for c in CAPTURED if c["kind"] != "window"]
     wins = [c for c in CAPTURED if c["kind"] == "window"]
+    if not plots and not meta:
+        # No row AND no figure: the runner skips days whose L1 file does not exist, so nothing was
+        # ever attempted here. That is NO DATA -- calling it a rejection ("no diagnostic figure is
+        # produced for this rejection", flag "undefined") asserted a verdict nobody reached.
+        try:
+            have_l1 = rnc._l1_file(stream["wmo"], stream["ident"], d).exists()
+        except Exception:                                                    # noqa: BLE001
+            have_l1 = False
+        if not have_l1:
+            return {"kind": "nodata", "message": "No measurement file for this day"}
     if not plots:
         # Some rejections (-4, -10) draw no figure at all -- an artefact of the PNG pipeline, not a
         # property of the night: the measured field exists whether or not a fit was attempted. So
@@ -1092,6 +1129,7 @@ const summaryOf = (d, m) => dayOf(d, m) || ((D.index || {})[d] || {})[m] || null
 // yields none. See the sentinel note in _run_one.
 const isOK = p => !!(p && p.constant != null);
 const hasFig = p => !!(p && (p.has_fig || (p.curtain && p.curtain.b64)));
+const isNoData = p => !!(p && (p.kind === 'nodata' || p.nodata));
 // THREE greens: which method calibrated is the thing an operator scans the calendar for, and a
 // single green hid it. Deepest = both methods; the two single-method greens are separated by
 // lightness, not hue, so the "both is more" reading survives. The pale one takes dark text --
@@ -1113,6 +1151,9 @@ function dayColour(d) {
   const present = D.methods.map(m => summaryOf(d, m)).filter(Boolean);
   if (!present.length) return null;
   const okm = D.methods.filter(m => isOK(summaryOf(d, m)));
+  // Every method reporting "no measurement" is NOT a rejection -- it is the grey no-data state the
+  // legend has always advertised and nothing ever used.
+  if (!okm.length && present.every(isNoData)) return null;
   if (!okm.length) return CAL_COL.fig;
   // "both" means every method CONFIGURED for this station, so a Rayleigh-only instrument (a CHM15k
   // never gets a cloud calibration -- it saturates in liquid cloud) still reads as a full success
@@ -1182,6 +1223,7 @@ function buildCal() {
       }).join(', ');
       cell.addEventListener('click', () => {
         if (window.__onMissingDay && !dayOf(ds, curMethod)) window.__onMissingDay(ds, curMethod);
+        console.info('[ALC] calendar day ->', ds);
         curDate = ds; render();
         // On narrow screens the rail is an overlay covering the plots: picking a day is the end of
         // the interaction, so it closes (without persisting -- the stored preference is untouched).
@@ -1232,7 +1274,10 @@ function buildMethodSwitch() {
     const b = document.createElement('button');
     b.textContent = m === 'cloud' ? 'Cloud (O\u2019Connor)' : 'Rayleigh';
     b.className = m === curMethod ? 'on' : '';
-    b.addEventListener('click', () => { curMethod = m; render(); });
+    b.addEventListener('click', () => {
+      console.info('[ALC] panel method ->', m);
+      curMethod = m; render();
+    });
     host.appendChild(b);
   });
 }
@@ -1250,7 +1295,10 @@ function buildViewSwitch(views) {
     const b = document.createElement('button');
     b.textContent = views[v].name || VIEW_NAMES[v];
     b.className = v === curView ? 'on' : '';
-    b.addEventListener('click', () => { userView = v; curLogX = null; render(); });
+    b.addEventListener('click', () => {
+      console.info('[ALC] panel view ->', v, '(' + (views[v].name || VIEW_NAMES[v]) + ')');
+      userView = v; curLogX = null; render();
+    });
     host.appendChild(b);
   });
   // `views` is null until the day's payload lands (the lazy dashboard renders the shell first), so
@@ -1260,7 +1308,10 @@ function buildViewSwitch(views) {
     b.className = ((b.dataset.x === 'log') === eff) ? 'on' : '');
 }
 document.querySelectorAll('#xswitch button').forEach(b =>
-  b.addEventListener('click', () => { curLogX = b.dataset.x === 'log'; render(); }));
+  b.addEventListener('click', () => {
+    console.info('[ALC] panel x scale ->', b.dataset.x);
+    curLogX = b.dataset.x === 'log'; render();
+  }));
 
 // ------------------------------------------------- curtain + profile, ONE figure, SHARED y axis
 // The view selector drives BOTH panels. That is possible without shipping three curtains because
@@ -1312,7 +1363,14 @@ function drawPanel(p) {
   const c = p && p.curtain, pr = p && p.profile;
   buildViewSwitch(pr && pr.views);
   if (!c || !c.b64) {
-    host.innerHTML = '<p class="empty">no time–height data for this night</p>'; return; }
+    // Clear the provenance line too: it described the PREVIOUS day and stayed under the empty
+    // panel, attributing another night's grid and profile count to this one.
+    const el0 = document.getElementById('curtitle');
+    if (el0) el0.textContent = '';
+    host.innerHTML = '<p class="empty">'
+      + (p && p.kind === 'nodata' ? 'no measurement for this day'
+                                  : 'no time–height data for this night') + '</p>';
+    return; }
   // A lazy day first renders the placeholder above, then the fetched payload triggers a re-render.
   // Plotly.newPlot draws AROUND foreign children rather than removing them, so the placeholder
   // survived underneath the finished panel ("no time-height data" below a drawn curtain).
@@ -1492,6 +1550,142 @@ C_L        = C_applied / C             (Wiegner, comparable with the Rayleigh co
 function card(title, id) {
   return `<div class="card"><h2>${title}</h2><div id="${id}"></div></div>`;
 }
+// ---- pooled C vs cloud base -------------------------------------------------------------------
+// The ONLY card on the page built from many nights, so the period selector must RE-POOL it rather
+// than relayout an axis. window.__hopkinWindow is set by rangesync.js before it redraws.
+window.__hopkinWindow = window.__hopkinWindow || {a:null, b:null};
+
+function poolCBH(HK, a, b) {
+  const nx = HK.nx, ny = HK.ny;
+  const z = [];
+  for (let j = 0; j < ny; j++) z.push(new Array(nx).fill(0));
+  const days = [];
+  let total = 0;
+  Object.keys(HK.days).forEach(function (d) {
+    if ((a && d < a) || (b && d > b)) return;
+    const arr = HK.days[d];
+    days.push(arr);
+    for (let i = 0; i < arr.length; i += 2) {
+      const c = arr[i], n = arr[i + 1];
+      z[(c / nx) | 0][c % nx] += n;
+      total += n;
+    }
+  });
+  return { z: z, days: days, n: total };
+}
+
+function statsCBH(HK, pooled) {
+  // Weighted OLS of 100*ln(C) on cloud base, standard error CLUSTERED BY NIGHT: scenes from one
+  // night sample the same cloud field, so an unclustered error is optimistic by ~sqrt(scenes/night).
+  const nx = HK.nx;
+  let S0 = 0, S1 = 0, S2 = 0, T0 = 0, T1 = 0;
+  const pts = [];
+  pooled.days.forEach(function (arr, di) {
+    for (let i = 0; i < arr.length; i += 2) {
+      const c = arr[i], n = arr[i + 1];
+      const x = HK.y[(c / nx) | 0];                    // cloud base, km
+      const y = 100 * Math.log(HK.x[c % nx] / 100);    // 100*ln(C / median)
+      pts.push([di, x, y, n]);
+      S0 += n; S1 += n * x; S2 += n * x * x; T0 += n * y; T1 += n * x * y;
+    }
+  });
+  const det = S0 * S2 - S1 * S1;
+  if (!pts.length || Math.abs(det) < 1e-12 || pooled.days.length < 2) return {slope:null, se:null};
+  const b1 = (S0 * T1 - S1 * T0) / det, b0 = (T0 - b1 * S1) / S0;
+  const iXX = [[S2 / det, -S1 / det], [-S1 / det, S0 / det]];
+  const u = {};
+  pts.forEach(function (q) {
+    const r = q[3] * (q[2] - b0 - b1 * q[1]);
+    if (!u[q[0]]) u[q[0]] = [0, 0];
+    u[q[0]][0] += r; u[q[0]][1] += r * q[1];
+  });
+  let m00 = 0, m01 = 0, m11 = 0;
+  Object.keys(u).forEach(function (k) {
+    m00 += u[k][0] * u[k][0]; m01 += u[k][0] * u[k][1]; m11 += u[k][1] * u[k][1];
+  });
+  const a10 = iXX[1][0] * m00 + iXX[1][1] * m01, a11 = iXX[1][0] * m01 + iXX[1][1] * m11;
+  const v = a10 * iXX[0][1] + a11 * iXX[1][1];
+  return { slope: b1, se: v > 0 ? Math.sqrt(v) : null };
+}
+
+function drawCBH(HK) {
+  const w = window.__hopkinWindow || {a:null, b:null};
+  const pooled = poolCBH(HK, w.a, w.b);
+  const host = document.getElementById('d_cbh');
+  if (!host) return;
+  if (!pooled.n) {
+    // PURGE before replacing the contents: Plotly leaves .data/._fullData on the element, so a
+    // plain innerHTML swap leaves the previous density readable on the div - the card looks empty
+    // while anything inspecting it still sees the old scenes.
+    try { if (window.Plotly && host.data) Plotly.purge(host); } catch (err) {}
+    host.innerHTML = '<p class="empty">No cloud scene in the selected period.</p>';
+    console.info('[ALC] cloud-base card pooled 0 scenes · window',
+                 (w.a || 'start') + '..' + (w.b || 'end'));
+    return;
+  }
+  const st = statsCBH(HK, pooled);
+  console.info('[ALC] cloud-base card pooled', pooled.n, 'scenes over', pooled.days.length,
+               'nights · window', (w.a || 'start') + '..' + (w.b || 'end'));
+  const nx = HK.nx, band = HK.band || 0.3;
+  const dy = HK.y.length > 1 ? (HK.y[1] - HK.y[0]) : 0.1;
+  const per = Math.max(1, Math.round(band / dy));
+  const bx = [], by = [], bsd = [];
+  for (let j0 = 0; j0 < HK.y.length; j0 += per) {
+    let sw = 0, sx = 0, sxx = 0;
+    for (let j = j0; j < Math.min(j0 + per, HK.y.length); j++) {
+      for (let i = 0; i < nx; i++) {
+        const n = pooled.z[j][i];
+        if (!n) continue;
+        sw += n; sx += n * HK.x[i]; sxx += n * HK.x[i] * HK.x[i];
+      }
+    }
+    if (sw >= 5) {
+      const m = sx / sw;
+      bx.push(m);
+      by.push(HK.y[Math.min(j0 + Math.floor(per / 2), HK.y.length - 1)]);
+      bsd.push(Math.sqrt(Math.max(sxx / sw - m * m, 0)));
+    }
+  }
+  const tr = [{ type:'heatmap', x:HK.x, y:HK.y,
+                z: pooled.z.map(function (row) {
+                     return row.map(function (v) { return v === 0 ? null : v; }); }),
+                colorscale:'Greens', showscale:false, hoverongaps:false,
+                hovertemplate:'C %{x:.0f} %<br>base %{y:.2f} km<br>%{z:.0f} scenes<extra></extra>' }];
+  if (bx.length) {
+    tr.push({ x:bx, y:by, mode:'lines+markers', name:'band mean',
+              error_x:{ type:'data', array:bsd, width:0, thickness:1.2,
+                        color:'rgba(192,57,43,0.45)' },
+              line:{color:'#c0392b', width:2}, marker:{size:6, color:'#c0392b'},
+              hovertemplate:'base %{y:.2f} km<br>mean C %{x:.1f} %<extra></extra>' });
+  }
+  const sub = pooled.n + ' scenes \\u00b7 ' + pooled.days.length + ' nights'
+            + (st.slope === null ? '' : ' \\u00b7 slope ' + (st.slope > 0 ? '+' : '')
+               + st.slope.toFixed(1)
+               + (st.se === null ? '' : ' \\u00b1 ' + st.se.toFixed(1)) + ' %/km');
+  Plotly.newPlot('d_cbh', tr, Object.assign({}, LAY, { height:270, showlegend:false,
+    shapes:[{ type:'line', yref:'paper', y0:0, y1:1, x0:100, x1:100,
+              line:{color:'#444', width:1, dash:'dash'} }],
+    annotations:[{ x:0.5, y:1.06, xref:'paper', yref:'paper', showarrow:false, text:sub,
+                   font:{size:10, color:'#666'} }],
+    xaxis:{title:{text:'C, % of all-time median'}, range:[HK.x[0], HK.x[HK.x.length-1]]},
+    yaxis:{title:{text:'cloud base (km AGL)'}, range:[HK.y[0], HK.y[HK.y.length-1]]} }), CFG);
+}
+
+// Called by rangesync.js on every period change; redraws only when the card is on screen.
+window.__hopkinSetWindow = function (a, b) {
+  window.__hopkinWindow = { a: a || null, b: b || null };
+  const e = document.getElementById('hopkin-data');
+  if (!e) { console.info('[ALC] cloud-base card: no pooled data on this page'); return; }
+  if (!document.getElementById('d_cbh')) {
+    // The card only exists while a CLOUD night is open -- the window is remembered and applied
+    // the next time the cloud diagnostics row is built.
+    console.info('[ALC] cloud-base card: not on screen (open a cloud night); window stored');
+    return;
+  }
+  try { drawCBH(JSON.parse(e.textContent)); }
+  catch (err) { console.warn('[ALC] cloud-base card failed to redraw:', err); }
+};
+
 function drawDiag(p) {
   const host = document.getElementById('diag');
   host.innerHTML = '';
@@ -1557,8 +1751,14 @@ function drawDiag(p) {
   } else if (p.kind === 'cloud') {
     const d = p.diag;
     // No 'Summary' card: its contents are now the "Why this cloud calibration?" description above.
+    // The C-vs-cloud-base density is POOLED over every night of the period, so it is labelled as
+    // such: it sits next to the per-night histogram because it is the same quantity resolved by
+    // cloud base, and the two are meant to be read together.
+    const HK = (function () { const e = document.getElementById('hopkin-data');
+      try { return e ? JSON.parse(e.textContent) : null; } catch (err) { return null; } })();
     host.innerHTML = card('Apparent vs consistent lidar ratio','d_S')
-      + card('Coefficient distribution','d_hist');
+      + card('Coefficient distribution','d_hist')
+      + (HK ? card('C vs cloud base — all nights','d_cbh') : '');
     const dt = d.x && typeof d.x[0] === 'string';
     Plotly.newPlot('d_S', [
       { x:d.x, y:d.S_app, mode:'markers', name:'apparent S',
@@ -1583,6 +1783,7 @@ function drawDiag(p) {
         opacity:0.75, nbinsx:Math.min(30, Math.max(5, Math.floor(d.coeffs.length/2))) }],
       Object.assign({}, LAY, { height:270, shapes:hs, showlegend:false,
         xaxis:{title:{text:'coefficient C (per profile)'}}, yaxis:{title:{text:'count'}} }), CFG);
+    if (HK) drawCBH(HK);
   } else if (p.kind === 'rayleigh_fail') {
     host.innerHTML = '<div class="card" style="grid-column:1/-1"><p class="empty">' +
       'The window search never ran — the night was rejected before a fit was attempted, so there ' +
@@ -1597,7 +1798,9 @@ function drawMsg(p) {
   if (!p) { host.innerHTML = ''; return; }
   const ok = isOK(p);
   const bits = [];
-  if (p.kind === 'none')
+  if (p.kind === 'nodata')
+    bits.push('<b>No measurement for this day.</b>');
+  else if (p.kind === 'none')
     bits.push('<b>No diagnostic figure is produced for this rejection.</b>');
   else if (p.kind === 'rayleigh_fail')
     bits.push('<b>NOT CALIBRATED — ' + (p.reason || 'rejected') + '</b>');
@@ -1649,9 +1852,12 @@ function render() {
   markCal();
 }
 document.getElementById('prev').addEventListener('click', () => {
-  const i = D.dates.indexOf(curDate); if (i > 0) { curDate = D.dates[i-1]; render(); } });
+  const i = D.dates.indexOf(curDate);
+  if (i > 0) { console.info('[ALC] prev day ->', D.dates[i-1]); curDate = D.dates[i-1]; render(); } });
 document.getElementById('next').addEventListener('click', () => {
-  const i = D.dates.indexOf(curDate); if (i < D.dates.length-1) { curDate = D.dates[i+1]; render(); } });
+  const i = D.dates.indexOf(curDate);
+  if (i < D.dates.length-1) { console.info('[ALC] next day ->', D.dates[i+1]);
+                              curDate = D.dates[i+1]; render(); } });
 document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;
   // Embedded in the production page the HOST owns the keyboard (diag.js + dailypanel.js); this

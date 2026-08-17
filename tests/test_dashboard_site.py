@@ -200,7 +200,7 @@ def test_payload_index_matches_files_on_disk():
                                      .read_text(encoding="utf-8"))
                 assert payload.get("kind") != "error", f"{key} {ds} {meth}: error payload"
                 if not summ.get("has_fig"):
-                    assert payload.get("kind") == "none",                         f"{key} {ds} {meth}: no figure but kind={payload.get('kind')}"
+                    assert payload.get("kind") in ("none", "nodata"),                         f"{key} {ds} {meth}: no figure but kind={payload.get('kind')}"
 
 
 @needs_site
@@ -245,7 +245,7 @@ def test_sampled_payloads_decode():
                 for meth in index[ds]:
                     payload = json.loads((idx_file.parent / f"{ds}_{meth}.json")
                                          .read_text(encoding="utf-8"))
-                    assert payload.get("kind") == "none",                         f"{idx_file.parent.name} {ds} {meth}: figure-less but kind != none"
+                    assert payload.get("kind") in ("none", "nodata"),                         f"{idx_file.parent.name} {ds} {meth}: figure-less but kind != none/nodata"
 
 
 @needs_site
@@ -447,8 +447,17 @@ def test_period_selector_reaches_every_series_and_spares_the_panel():
     could narrow but never widen again (only the dual-axis housekeeping panel obeyed). And the
     period must never touch the daily panel's one-night figures."""
     js = (REPO / "monitoring/static/rangesync.js").read_text(encoding="utf-8")
-    assert "hasY2" in js and 'gd.layout.yaxis2' in js, "yaxis2 writes must be guarded"
-    assert js.count("yaxis2.autorange") >= 2 and 'if (hasY2)' in js
+    # The window and the Y rescale must be SEPARATE relayout calls. Plotly.relayout is atomic, so
+    # bundling them let one un-writable Y axis (the availability heatmap's reversed category axis,
+    # the C_L series -- both raise "_inputDomain") discard the window too: the control read
+    # "Last 180 d" while the plot still showed all time. The browser tier proves the behaviour;
+    # this keeps the structure that makes it possible.
+    x_first = js.index('"xaxis.range"')
+    y_after = js.index('yaxis.autorange', x_first)
+    assert js.count("Plotly.relayout") >= 3, "window and Y rescale must not share one relayout"
+    assert x_first < y_after, "the x window must be applied before (and apart from) the Y rescale"
+    assert 'gd.layout.yaxis2' in js, "yaxis2 writes must stay guarded"
+    assert 'type === "category"' in js, "category y axes must keep their own ordering"
     assert "#daily" in js, "the daily panel stays out of period relayouts"
 
 
@@ -511,3 +520,82 @@ def test_payload_methods_follow_the_pipeline_policy():
     src = (REPO / "scripts/build_station_dashboard.py").read_text(encoding="utf-8")
     assert "RAYLEIGH_TYPES" in src and "CLOUD_TYPES" in src
     assert "METHODS_BY_TYPE" not in src, "the local guess must be gone"
+
+
+def test_days_without_measurements_are_not_called_rejections():
+    """Regression: 730 payloads on the 25-station site were bare {"kind": "none"} -- days whose L1
+    file does not exist, so the runner never attempted anything. The page called them rejections
+    ("No diagnostic figure is produced for this rejection", "flag undefined") and the calendar
+    painted them amber, while the legend's grey 'no data' state went unused."""
+    src = _panel()
+    assert 'kind": "nodata"' in src.PANEL_JS or '"nodata"' in (REPO / "monitoring/panel.py").read_text(encoding="utf-8")
+    js = src.PANEL_JS
+    assert "isNoData" in js and "present.every(isNoData)" in js, "no-data days must colour grey"
+    assert "No measurement for this day" in js, "the verdict must not claim a rejection"
+    # and the provenance caption may not survive into a day with no curtain
+    i = js.index("no time–height data for this night")
+    assert "curtitle" in js[max(0, i - 400):i], "stale caption must be cleared with the panel"
+
+
+@needs_site
+def test_no_payload_reports_an_undefined_flag():
+    """A payload that reaches the page must always say what it is: either a flag, or an explicit
+    no-data kind. 'flag undefined' in the UI means neither was set."""
+    for idx_file in (SITE / "data").glob("*/_index.json"):
+        index = json.loads(idx_file.read_text(encoding="utf-8"))
+        for ds, by in index.items():
+            for meth, s2 in by.items():
+                if s2.get("flag") is None:
+                    assert s2.get("nodata") is True,                         f"{idx_file.parent.name} {ds} {meth}: no flag and not marked nodata"
+
+
+@needs_site
+def test_cloud_payloads_carry_paired_scene_arrays():
+    """Guards the pairing bug behind the C-vs-cloud-base card: CloudCalResults exposes BOTH a
+    per-profile ``all_coefficients`` (whole day, NaN-padded) and a per-scene ``valid_coefficients``.
+    Only the latter pairs with ``cbh``; using the former silently attached the wrong coefficient to
+    every cloud base. Any stored pair must therefore be the same length."""
+    seen = 0
+    for f in (SITE / "data").glob("*/*_cloud.json"):
+        sc = (json.loads(f.read_text(encoding="utf-8")).get("scenes") or {})
+        if not sc:
+            continue
+        seen += 1
+        assert len(sc.get("cbh", [])) == len(sc.get("c", [])), \
+            f"{f.name}: {len(sc.get('cbh', []))} bases vs {len(sc.get('c', []))} coefficients"
+        assert all(v > 0 for v in sc["c"]), f"{f.name}: non-positive coefficient stored"
+    if seen == 0:
+        pytest.skip("no cloud payload carries scenes yet (regenerate payloads)")
+
+
+@needs_site
+def test_cloud_station_page_shows_the_cbh_heatmap():
+    """The liquid-cloud C vs cloud-base card must reach the page of a station that has enough
+    scenes, with altitude on the Y axis (house rule) and the density + band-mean traces."""
+    pages = [p for p in (SITE / "stations").glob("*.html")
+             if 'id="hopkin-data"' in p.read_text(encoding="utf-8", errors="ignore")]
+    if not pages:
+        pytest.skip("no station has enough pooled cloud scenes for the card")
+    html = pages[0].read_text(encoding="utf-8", errors="ignore")
+    assert "'d_cbh'" in html, "the panel does not build the cloud-base card"
+    assert "cloud base (km AGL)" in html, "altitude must be the Y axis of the CBH heatmap"
+    blob = html.split('id="hopkin-data" type="application/json">')[1].split("</script>")[0]
+    g = json.loads(blob)
+    # Per-DAY sparse cells, so the period selector can re-pool the card. A finished grid could not
+    # be re-pooled, which is exactly why it is not shipped as one.
+    assert g["days"], "no per-day cells shipped - the card could not follow the period"
+    assert len(g["x"]) == g["nx"] and len(g["y"]) == g["ny"], "grid centres disagree with nx/ny"
+    lim = g["nx"] * g["ny"]
+    for ds, arr in g["days"].items():
+        assert len(arr) % 2 == 0, f"{ds}: cells are [cell, count] pairs"
+        assert all(0 <= arr[i] < lim for i in range(0, len(arr), 2)), f"{ds}: cell index out of grid"
+
+
+@needs_site
+def test_hopkin_card_absent_for_rayleigh_only_stations():
+    """A CHM15k has no cloud calibration at all (it saturates in liquid cloud), so the card must not
+    appear on its page — an empty or fabricated one would imply a product that does not exist."""
+    for p in (SITE / "stations").glob("*.html"):
+        html = p.read_text(encoding="utf-8", errors="ignore")
+        if 'id="hopkin-data"' in html:
+            assert 'mtag-cloud' in html, f"{p.name}: CBH card on a station with no cloud method"
