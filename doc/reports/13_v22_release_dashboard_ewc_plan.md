@@ -131,7 +131,7 @@ Then the gates that exist for this:
 balfrin → zueub434, over the existing route:
 
 * the calibration tree **including both `.npz` per stream** (see §1.1);
-* the payload store `data/<key>/*.json[.gz]` — ~41 000 objects. rsync one directory per station
+* the payload store `data/<key>/*.json[.gz]` — ~235 000 objects, ~80 GB. rsync one directory per station
   rather than one flat sweep, and `--partial --inplace`; a stalled transfer then resumes per
   station instead of restarting.
 
@@ -150,7 +150,8 @@ Additions to `publish.sh`:
    `--content-encoding gzip` if the gzip decision is taken. Parallelism matters at 41 000 objects;
    set `max_concurrent_requests` in the AWS config rather than looping.
 2. A **prune** rule mirroring the existing diag-PNG prune: payloads older than the window are
-   removed from the bucket after a successful sync, or the store grows without bound.
+   removed from the bucket after a successful sync, if a horizon is adopted (§0 decision 2);
+   otherwise the store grows by ~40 MB/day, ~15 GB/year.
 3. HTML rsync unchanged — and remember it intermittently returns **rc=2** while the HTML still
    lands; re-run `bash ops/publish.sh` rather than debugging it.
 
