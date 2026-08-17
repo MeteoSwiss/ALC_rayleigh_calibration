@@ -24,6 +24,9 @@
   // The public site serves payloads from the image bucket (publish.sh data leg); the base is the
   // same one every diag <img> already uses, recovered from any of them.
   function bucketUrl(ds, m) {
+    // Explicit base first (station.html bakes it in whenever the site is built in bucket mode).
+    if (window.__payloadBase) return window.__payloadBase + KEY + "/" + ds + "_" + m + ".json";
+    // Fallback for older builds: recover the base from any bucket-hosted image on the page.
     var img = document.querySelector('img[src*="/diag/"], img[data-src-all*="/ombsens/"]');
     var src = img ? (img.getAttribute("src") || img.getAttribute("data-src-all") || "") : "";
     var i = src.indexOf("/diag/") >= 0 ? src.indexOf("/diag/") : src.indexOf("/ombsens/");

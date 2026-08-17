@@ -611,3 +611,19 @@ def test_dated_station_figures_open_their_night():
     assert "__dayClickWired" in js, "re-wiring the same figure would fire goDay twice per click"
     diag = (REPO / "monitoring/static/diag.js").read_text(encoding="utf-8")
     assert "window.__diagJump" in diag, "the per-day images must follow the same click"
+
+
+def test_payload_base_is_baked_in_for_bucket_mode():
+    """The per-day payloads are ~80 GB network-wide, far past the web VM's disk, so the public site
+    serves them from the image bucket. The base must be written into the page, not recovered from
+    some <img>: a station with neither a diagnostic nor an OmB image has no such element, and its
+    panel would have no way to reach its payloads at all."""
+    tpl = (REPO / "monitoring/templates/station.html").read_text(encoding="utf-8")
+    assert "window.__payloadBase" in tpl and "{% if img_base %}" in tpl.replace("{%-", "{%"), \
+        "station.html must bake the payload base when built in bucket mode"
+    js = (REPO / "monitoring/static/dailypanel.js").read_text(encoding="utf-8")
+    i, j = js.index("function bucketUrl"), js.index("querySelector('img[src*=\"/diag/\"]")
+    assert js.index("window.__payloadBase", i) < j, \
+        "the explicit base must be preferred over sniffing an image"
+    src = (REPO / "monitoring/render.py").read_text(encoding="utf-8")
+    assert "img_base=config.IMG_BASE_URL" in src, "render must pass the bucket base to the template"

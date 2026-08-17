@@ -122,7 +122,15 @@
 <script id="payload" type="application/json">{{ daily_panel.payload | safe }}</script>
 {# Explicit handshake: the host owns the keyboard (diag.js + dailypanel.js). Must run BEFORE the
    inline panel script -- DOM sniffing for viewer sections was defeated by page composition. #}
-<script>window.__panelEmbedded = true;</script>
+<script>window.__panelEmbedded = true;
+{%- if img_base %}
+// The per-day payloads are far too large for the web VM's disk, so the public site serves them from
+// the image bucket. The base is baked in HERE rather than recovered from some <img> on the page: a
+// station with no diagnostic and no OmB image has no such <img>, and its panel would then have no
+// way to reach its payloads at all.
+window.__payloadBase = "{{ img_base }}data/";
+{%- endif %}
+</script>
 <script>{{ daily_panel.js | safe }}</script>
 <script src="{{ base }}assets/dailypanel.js?v={{ asset_v }}"></script>
 {% endif %}

@@ -902,6 +902,7 @@ def _render_one_station(key, ctx) -> str:
     hopkin = _hopkin_panel(ctx.out_dir, key) if "cloud" in methods else None
     _emit_hk_hourly(ctx.fullcal_dir, key, ctx.out_dir)
     html = ctx.tmpl.render(base="../", logo=ctx.logo, key=key, meta=meta, cal_classes=cal_classes,
+                           img_base=config.IMG_BASE_URL,
                            daily_panel=daily_panel,
                            hopkin=hopkin, cl_tiles=cl_tiles,
                            cl_stats_json=json.dumps(cl_stats, ensure_ascii=False),
