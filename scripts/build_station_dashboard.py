@@ -686,6 +686,11 @@ def main() -> None:
     ap.add_argument("--bucket", default=BUCKET)
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--payloads", action="store_true", help="compute the per-day JSON payloads")
+    # The production site (scripts/build_dashboard.py) owns index.html, stations/ and assets/.
+    # This tool writing its own pages into the same directory is exactly how the production
+    # summary page got clobbered by a stub -- when feeding a production site, write DATA only.
+    ap.add_argument("--no-pages", action="store_true",
+                    help="write only data/<key>/ payloads + index; never touch pages or assets")
     ap.add_argument("--force", action="store_true", help="recompute payloads that already exist")
     ap.add_argument("--work", type=Path, default=Path("./_dashboard_work"))
     # 32 cores here; leave a couple for the OS and for the Plotly/HTML step. Memory is
@@ -750,11 +755,16 @@ def main() -> None:
             index = json.loads(idx_path.read_text(encoding="utf-8")) if idx_path.exists() else {}
             if not index:
                 print("  (no payload index yet — run once with --payloads)", flush=True)
+        if args.no_pages:
+            print(f"  -> data only ({len(index)} indexed days)", flush=True)
+            continue
         html = build_page(key, rec, args, index, stations)
         p = args.out / f"station_{key}.html"
         p.write_text(html, encoding="utf-8")
         print(f"  -> {p}  ({p.stat().st_size / 1e6:.1f} MB, {len(index)} indexed days)", flush=True)
 
+    if args.no_pages:
+        return
     _write_assets(args.out, stations)
     (args.out / "index.html").write_text(
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>"

@@ -850,6 +850,9 @@ PANEL_CSS = r"""
  .cal .d.has:hover { outline:2px solid #2a5a82; }
  .cal .d.cur { outline:2.5px solid #1a2530; }
  .mon { font-weight:600; font-size:12px; margin:2px 0 6px; }
+ .calnav { display:flex; align-items:center; justify-content:space-between; margin:0 0 6px; }
+ .calnav button { font-size:13px; padding:0 8px; line-height:20px; }
+ .calnav .mon { margin:0; }
  .legend { font-size:11px; color:var(--dim); margin-top:9px; line-height:1.7; }
  .sw { display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:5px;
        vertical-align:-1px; }
@@ -1080,46 +1083,66 @@ function buildLegend() {
 }
 
 // ---------------------------------------------------------------- calendar
+let calMonth = null;                 // 'YYYYMM' currently shown; follows the selected day
+
 function buildCal() {
   const host = document.getElementById('cal');
+  if (!host || !D.dates.length) return;
+  const months = [...new Set(D.dates.map(d => d.slice(0, 6)))].sort();
+  if (!calMonth || !months.length) calMonth = (curDate || D.dates[D.dates.length - 1]).slice(0, 6);
+  if (!months.includes(calMonth)) calMonth = months[months.length - 1];
+  const mi = months.indexOf(calMonth);
+  const y = +calMonth.slice(0, 4), m = +calMonth.slice(4, 6);
   host.innerHTML = '';
-  const months = [...new Set(D.dates.map(d => d.slice(0,6)))];
-  months.forEach(mo => {
-    const y = +mo.slice(0,4), m = +mo.slice(4,6);
-    const lbl = document.createElement('div');
-    lbl.className = 'mon';
-    lbl.textContent = new Date(y, m-1, 1).toLocaleString('en', {month:'long', year:'numeric'});
-    host.appendChild(lbl);
-    const g = document.createElement('div');
-    g.className = 'cal';
-    ['M','T','W','T','F','S','S'].forEach(t => {
-      const e = document.createElement('div'); e.className = 'dow'; e.textContent = t; g.appendChild(e); });
-    const first = new Date(y, m-1, 1), lead = (first.getDay() + 6) % 7;   // Monday-first
-    for (let i = 0; i < lead; i++) g.appendChild(document.createElement('div'));
-    const ndays = new Date(y, m, 0).getDate();
-    for (let dd = 1; dd <= ndays; dd++) {
-      const ds = `${y}${String(m).padStart(2,'0')}${String(dd).padStart(2,'0')}`;
-      const cell = document.createElement('div');
-      cell.className = 'd'; cell.textContent = dd;
-      const col = dayColour(ds);
-      if (col) {
-        cell.classList.add('has');
-        cell.style.background = col.bg;
-        cell.style.color = col.fg;
-        cell.title = ds + ' — ' + D.methods.map(mm => {
-          const p = dayOf(ds, mm);
-          return p ? `${mm}: flag ${p.flag} (${isOK(p) ? 'calibrated' : 'rejected'})`
-                   : `${mm}: not run`;
-        }).join(', ');
-        cell.addEventListener('click', () => { curDate = ds; render(); });
-      }
-      cell.dataset.ds = ds;
-      g.appendChild(cell);
+
+  // ONE month at a time. Six stacked month grids made the rail taller than the plots and buried
+  // the month being worked on; the arrows only step through months that actually have data.
+  const nav = document.createElement('div');
+  nav.className = 'calnav';
+  nav.innerHTML = '<button id="cal-prev" ' + (mi <= 0 ? 'disabled' : '') + '>&lsaquo;</button>' +
+    '<span class="mon">' + new Date(y, m - 1, 1).toLocaleString('en', { month: 'long', year: 'numeric' }) +
+    '</span><button id="cal-next" ' + (mi >= months.length - 1 ? 'disabled' : '') + '>&rsaquo;</button>';
+  host.appendChild(nav);
+  nav.querySelector('#cal-prev').addEventListener('click',
+    () => { calMonth = months[mi - 1]; buildCal(); });
+  nav.querySelector('#cal-next').addEventListener('click',
+    () => { calMonth = months[mi + 1]; buildCal(); });
+
+  const g = document.createElement('div');
+  g.className = 'cal';
+  ['M','T','W','T','F','S','S'].forEach(t => {
+    const e = document.createElement('div'); e.className = 'dow'; e.textContent = t; g.appendChild(e); });
+  const lead = (new Date(y, m - 1, 1).getDay() + 6) % 7;      // Monday-first
+  for (let i = 0; i < lead; i++) g.appendChild(document.createElement('div'));
+  const ndays = new Date(y, m, 0).getDate();
+  for (let dd = 1; dd <= ndays; dd++) {
+    const ds = `${y}${String(m).padStart(2,'0')}${String(dd).padStart(2,'0')}`;
+    const cell = document.createElement('div');
+    cell.className = 'd'; cell.textContent = dd;
+    const col = dayColour(ds);
+    if (col) {
+      cell.classList.add('has');
+      cell.style.background = col.bg;
+      cell.style.color = col.fg;
+      cell.title = ds + ' — ' + D.methods.map(mm => {
+        const p = summaryOf(ds, mm);
+        return p ? `${mm}: flag ${p.flag} (${isOK(p) ? 'calibrated' : 'rejected'})` : `${mm}: not run`;
+      }).join(', ');
+      cell.addEventListener('click', () => {
+        if (window.__onMissingDay && !dayOf(ds, curMethod)) window.__onMissingDay(ds, curMethod);
+        curDate = ds; render();
+      });
     }
-    host.appendChild(g);
-  });
+    cell.dataset.ds = ds;
+    g.appendChild(cell);
+  }
+  host.appendChild(g);
+  markCal();
 }
 function markCal() {
+  // Follow the selected day across month boundaries: the arrows and date links can leave the month
+  // on display, and a highlight that silently is not on screen reads as "nothing selected".
+  if (curDate && curDate.slice(0, 6) !== calMonth) { calMonth = curDate.slice(0, 6); buildCal(); return; }
   document.querySelectorAll('.cal .d').forEach(e =>
     e.classList.toggle('cur', e.dataset.ds === curDate));
 }
@@ -1557,6 +1580,10 @@ document.getElementById('next').addEventListener('click', () => {
   const i = D.dates.indexOf(curDate); if (i < D.dates.length-1) { curDate = D.dates[i+1]; render(); } });
 document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;
+  // Embedded in the production station page, diag.js owns the keyboard contract (arrows, 0-3) and
+  // dailypanel.js follows its date label. A second arrow handler here would navigate twice per
+  // keypress and drift the two viewers apart -- so in that embedding this handler stands down.
+  if (document.querySelector('.diag-data')) return;
   if (e.key === 'ArrowLeft')  document.getElementById('prev').click();
   if (e.key === 'ArrowRight') document.getElementById('next').click();
   if (e.key === 'm') { const a = D.methods.filter(m => summaryOf(curDate, m));
