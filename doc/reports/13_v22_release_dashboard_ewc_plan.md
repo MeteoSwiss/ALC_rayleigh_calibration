@@ -238,3 +238,51 @@ it, and the prune will retire it.
 
 Steps 3–6 can all happen before tomorrow morning; only step 7 touches the operational server, which
 is where your change comes in.
+
+---
+
+## Morning hand-off — the one leg that cannot run on balfrin
+
+Everything else is automated (jobs 5123654 → 5124484 → 5124545). The HTML flip is held back on
+purpose: it is what makes the new site public, and the web VM's ssh key lives on the workstation,
+not on the cluster.
+
+Check the finalize job first:
+
+```bash
+ssh balfrin 'tail -30 /scratch/mch/mhrvo/logs/alc_v22_fin_5124545.log | grep -E "rc=|pages|payloads|ALC_V22"'
+```
+
+It must show `ALC_V22_FINALIZE_DONE build=0 tests=0 s3=0` and ~434 station pages. Then, from the
+workstation:
+
+```bash
+wsl -- bash -lc "rsync -a balfrin:/scratch/mch/mhrvo/alc_v22_html.tgz /tmp/ && mkdir -p /tmp/alc_v22_html && tar -C /tmp/alc_v22_html -xzf /tmp/alc_v22_html.tgz && ls /tmp/alc_v22_html/stations | wc -l"
+```
+
+Sanity-check the extracted site before it goes anywhere (the browser tier needs a served copy):
+
+```bash
+ALC_SITE_DIR=/tmp/alc_v22_html python -m pytest tests/test_dashboard_site.py tests/test_dashboard_browser.py -q
+```
+
+Push the HTML (~250 MB) to the web VM. No `--delete`: a stale page costs nothing, a wrongly deleted
+one costs a rebuild.
+
+```bash
+wsl -- bash -lc "rsync -a -e 'ssh -i ~/.ssh/EWC' /tmp/alc_v22_html/ hem@136.156.139.31:/var/www/alc/"
+```
+
+Then, and only then, refresh the OmB images so the page and its diagnostics share one vintage
+(sensitivity is deliberately NOT included — see the open defect above):
+
+```bash
+ssh balfrin 'bash ~/alc_v22_code/ops/cscs/publish_v22_payloads_to_ewc.sh /scratch/mch/mhrvo/dash_payloads'
+```
+
+Finally, open three stations of different type and confirm the console says
+`[ALC] rangesync ready`, the daily panel draws, and a period change reports `unchanged: none`.
+
+**Rollback**: the previous HTML is still on the VM until overwritten, and nothing in this release
+deletes a bucket object — restoring the old site is an rsync of the previous docroot, with the new
+payloads simply going unreferenced.
