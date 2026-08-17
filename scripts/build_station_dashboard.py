@@ -64,6 +64,43 @@ def _methods_for(itype: str) -> list:
     return METHODS_BY_TYPE.get(str(itype), ["rayleigh", "cloud"])
 
 
+def _meta_from_l1(l1_root, key: str) -> dict | None:
+    """Station metadata straight out of the stream's own L1 file.
+
+    This is the AUTHORITATIVE source and the one the pipeline itself reads: site_location,
+    institution, instrument_type and the station coordinates are all attributes/variables of the
+    file. Sourcing them from a dashboard SQLite instead was a mistake -- that database only contains
+    whatever streams the last dashboard build happened to cover, so a perfectly normal station (the
+    Payerne CL31) can be absent from it while its L1 sits right there.
+    """
+    if not l1_root:
+        return None
+    wmo, _, ident = key.rpartition("_")
+    files = sorted(Path(l1_root).glob(f"{wmo}/*/*/L1_{wmo}_{ident}*.nc"))
+    if not files:
+        return None
+    try:
+        import netCDF4
+        with netCDF4.Dataset(files[-1]) as ds:
+            site = str(getattr(ds, "site_location", "") or "")
+            name, _, country = site.partition(",")
+            g = lambda v: (float(np.ravel(ds.variables[v][:])[0])            # noqa: E731
+                           if v in ds.variables else None)
+            return {"key": key, "wmo": str(getattr(ds, "wigos_station_id", wmo) or wmo),
+                    "ident": ident,
+                    "itype": str(getattr(ds, "instrument_type", "") or ""),
+                    "name": name.strip().title() or wmo,
+                    "country": country.strip().upper(),
+                    "institution": str(getattr(ds, "institution", "") or "").strip(),
+                    "lat": g("station_latitude"), "lon": g("station_longitude"),
+                    "alt": g("station_altitude"),
+                    "constants": {}, "status": None, "status_date": None,
+                    "src": f"L1 {files[-1].name}"}
+    except Exception as exc:                                                 # noqa: BLE001
+        print(f"  {key}: L1 metadata unreadable ({type(exc).__name__}: {exc})", flush=True)
+        return None
+
+
 # ============================================================================ frames from the CSVs
 def _cal_frame(cal_dir: Path, key: str) -> pd.DataFrame:
     """`<key>_cal.csv` -> the frame monitoring.charts expects (it normally comes from SQLite)."""
@@ -566,7 +603,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--key", action="append", required=True)
-    ap.add_argument("--db", type=Path, required=True)
+    ap.add_argument("--db", type=Path, default=None,
+                    help="optional dashboard SQLite; only used for status when L1 metadata exists")
     ap.add_argument("--cal-dir", type=Path, required=True)
     ap.add_argument("--status-dir", type=Path, default=None)
     ap.add_argument("--start", required=True)
@@ -595,33 +633,33 @@ def main() -> None:
     d1 = datetime.strptime(args.end, "%Y%m%d")
     days = [d0 + timedelta(days=i) for i in range((d1 - d0).days + 1)]
 
-    stations = _station_index(args.db, args.cal_dir, args.status_dir)
+    # L1 FIRST. The dashboard SQLite only holds the streams its last build covered, so it is not a
+    # station registry -- reading it as one made a normal station (the Payerne CL31) look missing.
+    # The stream's own L1 file always carries its site, institution, type and coordinates.
+    stations = _station_index(args.db, args.cal_dir, args.status_dir) if args.db else []
     by_key = {s["key"]: s for s in stations}
-    # A stream can be absent from the dashboard DB while its calibrations exist (the DB is built
-    # from whatever the last dashboard run covered). The site metadata is a property of the WMO, not
-    # of the unit, so borrow it from a sibling at the same WMO and take the type from the census --
-    # inventing coordinates would be worse than borrowing real ones from the same mast.
-    census = json.loads((REPO / "validation/scope_l1_2026_census.json").read_text(encoding="utf-8"))
-    crows = census if isinstance(census, list) else census.get("streams", [])
-    ctype = {f"{r['wmo']}_{r['ident']}": r.get("type", "") for r in crows}
     for key in args.key:
-        if key in by_key:
-            continue
-        wmo, _, ident = key.rpartition("_")
-        sib = next((s for s in stations if s.get("wmo") == wmo), None)
-        if sib is None:
-            sys.exit(f"{key}: not in {args.db} and no sibling at {wmo} to take the site from")
-        rec = dict(sib, key=key, ident=ident, itype=ctype.get(key) or sib.get("itype"),
-                   constants={}, status=None, status_date=None)
+        rec = _meta_from_l1(args.l1_root, key)
+        if rec is None:
+            rec = by_key.get(key)
+            if rec is None:
+                sys.exit(f"{key}: no L1 under {args.l1_root} and not in {args.db}")
+            print(f"  {key}: no L1 found -> metadata from {args.db}", flush=True)
+        else:
+            db_rec = by_key.get(key)
+            if db_rec:                       # keep the DB's status, prefer L1 for the identity
+                rec["status"], rec["status_date"] = db_rec["status"], db_rec["status_date"]
+            print(f"  {key}: {rec['itype']} '{rec['name']}' from {rec.pop('src')}", flush=True)
         cal = _cal_frame(args.cal_dir, key)
         ok = cal[cal["cal_value"] > 0] if len(cal) else cal
         for m, g in (ok.groupby("method") if len(ok) else []):
             last = g.sort_values("date").iloc[-1]
             rec["constants"][str(m)] = {"value": float(last["cal_value"]),
                                         "date": str(last["date"])}
-        print(f"  {key}: not in the DB -> site metadata borrowed from {sib['key']} "
-              f"(same WMO), type '{rec['itype']}' from the census", flush=True)
-        stations.append(rec)
+        if key in by_key:
+            stations[[s["key"] for s in stations].index(key)] = rec
+        else:
+            stations.append(rec)
         by_key[key] = rec
     stations.sort(key=lambda s: (s.get("country") or "", s.get("name") or "", s["key"]))
 
