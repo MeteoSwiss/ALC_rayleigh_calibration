@@ -799,6 +799,10 @@ def _daily_panel(out_dir: Path, key: str, methods: list) -> dict | None:
     if not index:
         return None
     from monitoring import panel as PANEL
+    # The panel's method switch must offer every method the INDEX carries, even when the SQLite cal
+    # frame has no rows for it (a DB gap must not hide a product that exists on disk).
+    idx_methods = {m for by in index.values() for m in by}
+    methods = [m for m in config.METHOD_ORDER if m in (set(methods) | idx_methods)]
     boot = {"station": {"key": key}, "methods": methods,
             "dates": sorted(index), "days": {}, "index": index}
     meta = {"n_days": len(index), "gz_kb": 0, "per_unit_kb": 0, "curated": False, "lazy": True}

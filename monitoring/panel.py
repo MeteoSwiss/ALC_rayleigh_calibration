@@ -101,6 +101,14 @@ def _install_capture() -> None:
     P.plot_rayleigh_diagnostics_failure = wrap(P.plot_rayleigh_diagnostics_failure, "rayleigh_fail")
     RC.plot_rayleigh_diagnostics_failure = P.plot_rayleigh_diagnostics_failure
     P.plot_cloud_diagnostics_compact = wrap(P.plot_cloud_diagnostics_compact, "cloud", True)
+    # The runner holds its OWN module-level binding (`from calibration.plotting import
+    # plot_cloud_diagnostics_compact`, run_network_calibration.py:93), so patching the plotting
+    # module alone never intercepted a cloud figure: every cloud night silently fell back to the
+    # raw-L1 'nofit' curtain -- a 48 h full-range RCS panel with no profile and no diagnostics,
+    # under a "Calibrated" verdict. The Rayleigh hooks already patch both modules; this is the
+    # same treatment for cloud.
+    import scripts.run_network_calibration as RN
+    RN.plot_cloud_diagnostics_compact = P.plot_cloud_diagnostics_compact
 
 
 # ============================================================================= profile builders

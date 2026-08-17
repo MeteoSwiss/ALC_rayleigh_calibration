@@ -56,13 +56,21 @@ BUCKET = "https://object-store.os-api.cci2.ecmwf.int/eprofile-alc-dashboard"
 PERIODS = [("all", "all"), ("last30", "last 30 d"), ("last90", "last 90 d"),
            ("last180", "last 180 d"), ("last365", "last 365 d"),
            ("y2025", "2025"), ("y2026", "2026")]
-#: A CHM15k SATURATES in liquid cloud, so the cloud retrieval is not meaningful on it and is never
-#: run -- not even as a control. Everything else gets both methods.
-METHODS_BY_TYPE = {"CHM15k": ["rayleigh"]}
-
-
 def _methods_for(itype: str) -> list:
-    return METHODS_BY_TYPE.get(str(itype), ["rayleigh", "cloud"])
+    """The PIPELINE's method policy, not a local guess. The first version defaulted to both methods
+    for anything non-CHM15k, which fabricated Rayleigh payloads for CL31/CL51 -- a method the
+    operational runner never executes for them (RAYLEIGH_TYPES: the 910 nm CL31/CL51 Rayleigh is
+    not operational; the cloud method IS their calibration) -- and cloud payloads for the Mini-MPL.
+    The page, which derives its methods from the real archive, then rightly refused to show the
+    phantom: 'nothing produced for the rejected calib'."""
+    from scripts.run_network_calibration import CLOUD_TYPES, RAYLEIGH_TYPES
+    t = str(itype)
+    out = []
+    if t in RAYLEIGH_TYPES:
+        out.append("rayleigh")
+    if t in CLOUD_TYPES:
+        out.append("cloud")
+    return out or ["rayleigh"]
 
 
 def _meta_from_l1(l1_root, key: str) -> dict | None:

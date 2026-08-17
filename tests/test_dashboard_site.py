@@ -489,3 +489,25 @@ def test_hourly_monitoring_exists_end_to_end():
     assert "_emit_hk_hourly" in r and "hk_hourly.json" in r
     dj = (REPO / "monitoring/static/dailypanel.js").read_text(encoding="utf-8")
     assert "hk_hourly.json" in dj and "span < 45" in dj and 'apply("daily")' in dj
+
+
+def test_plot_capture_patches_every_binding():
+    """Regression: the runner imports plot_cloud_diagnostics_compact into its OWN namespace
+    (run_network_calibration.py:93), so patching calibration.plotting alone never intercepted a
+    cloud figure -- every cloud night fell back to the raw-L1 'nofit' curtain (48 h, full range,
+    no profile, no diagnostics) while the verdict read 'Calibrated'. Every module that binds a
+    captured plot function must be patched."""
+    import re
+    src = (REPO / "monitoring/panel.py").read_text(encoding="utf-8")
+    runner = (REPO / "scripts/run_network_calibration.py").read_text(encoding="utf-8")
+    for fn in re.findall(r"from calibration\.plotting import (\w+)", runner):
+        assert f"RN.{fn}" in src, f"capture does not patch the runner's own binding of {fn}"
+
+
+def test_payload_methods_follow_the_pipeline_policy():
+    """Regression: the generator defaulted to both methods for anything non-CHM15k, fabricating
+    Rayleigh payloads for CL31/CL51 (a method the operational runner never runs for them). The
+    page derives its methods from the real archive and rightly refused to show the phantom."""
+    src = (REPO / "scripts/build_station_dashboard.py").read_text(encoding="utf-8")
+    assert "RAYLEIGH_TYPES" in src and "CLOUD_TYPES" in src
+    assert "METHODS_BY_TYPE" not in src, "the local guess must be gone"
