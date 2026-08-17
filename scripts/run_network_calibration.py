@@ -423,6 +423,17 @@ def _do_cloud(s, start, end, shared=None):
                 flag, _reason, _rej = dominant_cloud_reject_flag(
                     getattr(res, "filter_stats", None), getattr(res, "cloud_stats", None),
                     getattr(res, "consistency_stats", None))
+                # The peak-shape filters run on EVERY profile, cloud or not: on a clear day the
+                # "peak" is just the strongest aerosol gate, nothing above it is attenuated, and
+                # above_rejected racks up a count on a day with zero clouds -- so the dominant
+                # counter said -22 "peak not sharp" when the truth is "there was no cloud". The
+                # instrument's own cloud base is the honest discriminator: if it saw no cloud all
+                # day, the day is -1 whatever the shape counters say. Attribution only -- no
+                # constant and no filter behaviour changes.
+                if flag <= -20:
+                    _cbh = np.asarray(getattr(data, "cbh", []), dtype=float)
+                    if not np.any(np.isfinite(_cbh) & (_cbh > 0)):
+                        flag = -1.0
             # Headline value is the lidar constant C_L = applied_constant / C (Wiegner) -- the
             # operationally useful quantity, on the SAME scale as Rayleigh -- NOT the O'Connor
             # coefficient C. C_L's relative uncertainty equals the coefficient's (C_L = const / C).

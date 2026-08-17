@@ -853,13 +853,14 @@ PANEL_CSS = r"""
  .legend { font-size:11px; color:var(--dim); margin-top:9px; line-height:1.7; }
  .sw { display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:5px;
        vertical-align:-1px; }
- .msg { background:#fff; border:1px solid var(--line); border-radius:10px; padding:12px 16px;
-        margin:0 0 12px; width:100%; box-sizing:border-box; display:block; }
- .msg:empty { display:none; }
- .msg.bad { border-left:5px solid var(--bad); background:#fdecef; }
- .msg.ok { border-left:5px solid var(--ok); }
- .msg b { font-size:14px; }
- .msg .det { color:var(--dim); font-size:12.5px; margin-top:4px; }
+ .dp-verdict { background:#fff; border:1px solid var(--line); border-radius:10px;
+        padding:12px 16px; margin:0 0 12px; width:100%; max-width:none; box-sizing:border-box;
+        display:block; }
+ .dp-verdict:empty { display:none; }
+ .dp-verdict.bad { border-left:5px solid var(--bad); background:#fdecef; }
+ .dp-verdict.ok { border-left:5px solid var(--ok); }
+ .dp-verdict b { font-size:14px; }
+ .dp-verdict .det { color:var(--dim); font-size:12.5px; margin-top:4px; }
  pre.summary { font:12px/1.45 ui-monospace,Consolas,monospace; margin:0; white-space:pre-wrap; }
  /* min-height, not padding: both cards' control rows must occupy exactly the same vertical space,
     whether they hold buttons or a line of text, or the two plots below them stop lining up. */
@@ -1511,7 +1512,7 @@ function drawMsg(p) {
   if (p.constant) det.push('C_L = ' + (+p.constant).toPrecision(5) +
     (p.uncertainty ? ' ± ' + (+p.uncertainty).toPrecision(3) : ''));
   if (p.profile && p.profile.mean_of) det.push(p.profile.mean_of);
-  host.className = 'msg ' + (ok ? 'ok' : 'bad');
+  host.className = 'dp-verdict ' + (ok ? 'ok' : 'bad');
   host.innerHTML = bits.join('') + (det.length ? '<div class="det">' + det.join(' · ') + '</div>' : '');
 }
 function drawFlags() {
