@@ -75,17 +75,6 @@ def _install_capture() -> None:
     _CAPTURE_INSTALLED = True
     import calibration.plotting as P
     import calibration.rayleigh.calibration as RC
-    # The L1 the run actually loaded. A night that is rejected before any fit draws no figure, but
-    # the curtain does not depend on the calibration succeeding -- it is just the measured field --
-    # and with client-side plots there is no reason to leave the operator with nothing to look at.
-    import calibration.io.data_loader as DL
-    _real_load = DL.load_l1_data
-
-    def _load(*a, **kw):
-        out = _real_load(*a, **kw)
-        CAPTURED.append({"kind": "data", "obj": out})
-        return out
-    DL.load_l1_data = _load
 
     def wrap(real, kind, is_cloud=False):
         def w(*a, **kw):
@@ -685,16 +674,23 @@ def _run_one(rnc, stream: dict, d: datetime, method: str) -> dict:
     plots = [c for c in CAPTURED if c["kind"] != "window"]
     wins = [c for c in CAPTURED if c["kind"] == "window"]
     if not plots:
-        # Some rejections (-4, -10) draw no figure at all. Build the curtain from the L1 the run
-        # loaded anyway: the measured field exists regardless of whether a fit was attempted, and
-        # "we plotted nothing" is an artefact of the old PNG pipeline, not a property of the night.
+        # Some rejections (-4, -10) draw no figure at all -- an artefact of the PNG pipeline, not a
+        # property of the night: the measured field exists whether or not a fit was attempted. So
+        # READ it, with the same data reader the pipeline uses, rather than intercepting internal
+        # load paths and hoping one fired (the read-once shared cache never touched the one I had
+        # wrapped, which is why most early-rejected nights still showed nothing).
         out = {"kind": "none"}
-        dat = [c for c in CAPTURED if c["kind"] == "data"]
-        for c in reversed(dat):
-            cur = _curtain_from_data(c["obj"])
+        try:
+            from datetime import timedelta as _td
+            from calibration.io.data_loader import load_l1_data
+            files = [rnc._l1_file(stream["wmo"], stream["ident"], dd)
+                     for dd in (d - _td(days=1), d)]
+            data = load_l1_data([f for f in files if f.exists()], rnc.ITYPE[stream["type"]])
+            cur = _curtain_from_data(data) if data is not None else {}
             if cur:
                 out = {"kind": "nofit", "curtain": cur, "profile": {}, "diag": {}}
-                break
+        except Exception as exc:                                             # noqa: BLE001
+            print(f"    (nofit curtain unavailable: {type(exc).__name__}: {exc})", flush=True)
         out.update(meta)
         return out
     c = plots[-1]
