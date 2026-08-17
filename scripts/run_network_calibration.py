@@ -821,6 +821,10 @@ def _op_map(s, start, end):
 def _const_per_profile(time, cmap, fallback):
     """Per-profile calibration constant from a date->constant map (Kalman has all
     days, so gaps are rare; fill with the series median, else the default)."""
+    if np.size(time) == 0:
+        # numpy's char.replace on an EMPTY array runs buffersizes.max() and raises -- one empty day
+        # was enough to abort a stream's whole OmB pass (419 streams in job 5122633).
+        return np.array([], dtype="float64")
     med = float(np.median(list(cmap.values()))) if cmap else fallback
     dates = np.char.replace(
         np.datetime_as_string(time.astype("datetime64[D]")).astype("U10"), "-", "")
@@ -919,8 +923,8 @@ def _do_omb(s, start, end, kalman_rows, shared=None):
         idd = shared(ds8) if shared is not None else None
         data = (idd.slice_to_date(d).to_omb_dict() if idd is not None
                 else _load_l1_window(s, d, d))
-        if data is None:
-            continue
+        if data is None or np.size(data["time"]) == 0:
+            continue                          # a file with zero profiles for the day is a skip
         c_ours = _const_per_profile(data["time"], kmap, default)
         c_op = _const_per_profile(data["time"], op_map, default)
         rcs = data["rcs"].astype("float64")
@@ -1178,11 +1182,18 @@ def _process_stream(payload):
         kalman_rows = _kalman_rows(rows) if rows else _read_kalman_csv(sdir / f"{key}_kalman.csv")
         try:
             if do_omb:
-                _do_omb(s, start, end, kalman_rows, shared)
+                try:
+                    _do_omb(s, start, end, kalman_rows, shared)
+                except Exception as exc:  # noqa: BLE001 - OmB must not take sens down with it
+                    import traceback
+                    print(f"{key}: omb failed: {type(exc).__name__}: {exc}", flush=True)
+                    print(traceback.format_exc(limit=6), flush=True)
             if do_sens:
                 _do_sens(s, start, end, kalman_rows, shared)
         except Exception as exc:  # noqa: BLE001 - an add-on failure must not lose the calibration
+            import traceback
             print(f"{key}: sens/omb failed: {type(exc).__name__}: {exc}", flush=True)
+            print(traceback.format_exc(limit=6), flush=True)
 
     return key, s["type"], len(rows), n_ok
 

@@ -51,10 +51,11 @@ export ALC_FULLCAL_DIR=/scratch/mch/mhrvo/E_PROFILE_calout_v22_rel
 export ALC_MOLECULAR_METHOD=eprof_v2.2
 export ALC_WV_SPECTRUM='{"CL61": [910.55, 0.188]}'
 export STREAM_TIMEOUT=28800
-# 64 workers, not 200: the 200-worker run completed 14/433 streams -- the rest died mid-day-loop
-# with truncated caches, no exception and 'no-output', while MaxRSS sampling showed 151G. Whether
-# the killer was a sampled-past memory spike or handle pressure, OmB holds a full day of float64
-# rcs + CAMS grids per worker and 64 is the concurrency the arithmetic supports.
+# Root cause of the 14/433 first run (job 5122633) -- NOT concurrency: a day whose L1 slice holds
+# ZERO profiles reached numpy's char.replace, whose empty-array buffersizes.max() raises ValueError;
+# one such day aborted the stream's whole OmB pass AND (single shared try) its sensitivity pass.
+# Fixed at three layers in run_network_calibration.py: empty-day skip in the OmB loop, an empty-time
+# guard in _const_per_profile, and omb/sens in SEPARATE trys with full tracebacks printed.
 export PLOTS=0
 
 if [ ! -d "$ALC_FULLCAL_DIR" ]; then
@@ -69,7 +70,7 @@ python $CODE/scripts/run_network_calibration.py \
   --start 20250101 --end 20260813 \
   --no-cal --sens --omb \
   --per-type 0 --ignore-coverage --force \
-  --workers 64
+  --workers 200
 rc=$?
 echo "addons rc=$rc"
 
