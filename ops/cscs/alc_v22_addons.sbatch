@@ -42,6 +42,14 @@ export PYTHONPATH=$CODE
 export ALC_L1_ROOT=/scratch/mch/mhrvo/E-PROFILE_L1
 export ALC_CAMS_DIR='/scratch/mch/mhrvo/CAMS_Monthly_04;/scratch/mch/mhrvo/CAMS'
 export ALC_FULLCAL_DIR=/scratch/mch/mhrvo/E_PROFILE_calout_v22_rel
+# The SAME two release switches as alc_v22_release.sbatch, and they are NOT redundant under
+# --no-cal: that flag stops the stored constants being recomputed, but the sensitivity product
+# re-runs the retrieval under perturbed lidar ratio / altitude shifts, and OmB re-derives the
+# 910 nm water-vapour correction. Without these the add-ons would be computed with eprof_v2 and the
+# superseded CL61 spectrum while the archive beside them is v2.2 -- a mixed-vintage tree in the one
+# place the vintage gate does not look.
+export ALC_MOLECULAR_METHOD=eprof_v2.2
+export ALC_WV_SPECTRUM='{"CL61": [910.55, 0.188]}'
 export STREAM_TIMEOUT=28800
 export PLOTS=0
 

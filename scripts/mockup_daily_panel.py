@@ -961,6 +961,12 @@ const GRID_SPEC = {
 };
 
 const dayOf = (d, m) => (D.days[d] || {})[m] || null;
+// A six-month page cannot embed every day's payload (~340 KB each), so the station dashboard ships
+// a tiny per-day INDEX (flag, constant, has_fig) and fetches the full payload only for the day
+// being looked at. Everything that just needs to know HOW a day turned out -- the calendar, the
+// flag chips, which methods ran -- reads the index, so it is complete from the first paint;
+// only the panel itself waits for a fetch.
+const summaryOf = (d, m) => dayOf(d, m) || ((D.index || {})[d] || {})[m] || null;
 // Calibrated iff a constant was produced. Not "which figure was drawn" -- those disagree: flag 0.5
 // draws the success figure AND yields a constant, a cloud rejection draws the full cloud figure and
 // yields none. See the sentinel note in _run_one.
@@ -970,17 +976,20 @@ const hasFig = p => !!(p && p.curtain && p.curtain.b64);
 // single green hid it. Deepest = both methods; the two single-method greens are separated by
 // lightness, not hue, so the "both is more" reading survives. The pale one takes dark text --
 // white on it is not legible at 11 px.
+// The METHOD colours, not a green ramp: blue is Rayleigh and green is liquid-cloud everywhere else
+// on the dashboard (monitoring/config.py METHOD_COLORS), so the calendar has to agree or the same
+// colour would mean two things on one page. Cyan is the additive mix, for the nights both produced.
 const CAL_COL = {
-  both:     { bg:'#14682a', fg:'#ffffff', lbl:'calibrated — Rayleigh <b>and</b> cloud' },
-  cloud:    { bg:'#4caf50', fg:'#ffffff', lbl:'calibrated — cloud only' },
-  rayleigh: { bg:'#b7e4a0', fg:'#0b3d1a', lbl:'calibrated — Rayleigh only' },
+  both:     { bg:'#17a2b8', fg:'#ffffff', lbl:'calibrated — Rayleigh <b>and</b> cloud' },
+  rayleigh: { bg:'#1f77b4', fg:'#ffffff', lbl:'calibrated — Rayleigh only' },
+  cloud:    { bg:'#2ca02c', fg:'#ffffff', lbl:'calibrated — cloud only' },
   fig:      { bg:'#d98c00', fg:'#ffffff', lbl:'rejected — diagnostics shown' },
   none:     { bg:'#b00020', fg:'#ffffff', lbl:'rejected — no figure drawn' },
 };
 function dayColour(d) {
-  const present = D.methods.map(m => dayOf(d, m)).filter(Boolean);
+  const present = D.methods.map(m => summaryOf(d, m)).filter(Boolean);
   if (!present.length) return null;
-  const okm = D.methods.filter(m => isOK(dayOf(d, m)));
+  const okm = D.methods.filter(m => isOK(summaryOf(d, m)));
   if (!okm.length) return present.some(hasFig) ? CAL_COL.fig : CAL_COL.none;
   // "both" means every method CONFIGURED for this station, so a Rayleigh-only instrument (a CHM15k
   // never gets a cloud calibration -- it saturates in liquid cloud) still reads as a full success
@@ -1047,7 +1056,7 @@ function markCal() {
 function buildMethodSwitch() {
   const host = document.getElementById('mswitch');
   host.innerHTML = '';
-  const avail = D.methods.filter(m => dayOf(curDate, m));
+  const avail = D.methods.filter(m => summaryOf(curDate, m));
   if (!avail.includes(curMethod)) curMethod = avail[0] || D.methods[0];
   // The switch only appears when the day genuinely has two calibrations -- a lone disabled
   // button would imply a second product exists and is broken, which is not what happened.
@@ -1435,7 +1444,7 @@ function drawMsg(p) {
 function drawFlags() {
   const host = document.getElementById('flags');
   host.innerHTML = D.methods.map(m => {
-    const p = dayOf(curDate, m);
+    const p = summaryOf(curDate, m);
     const lbl = m === 'cloud' ? 'Cloud' : 'Rayleigh';
     if (!p) return `<div style="margin:4px 0"><span class="chip na">${lbl}: not run</span></div>`;
     const cls = isOK(p) ? 'ok' : 'bad';
@@ -1454,6 +1463,11 @@ function render() {
     curDate.slice(0,4) + '-' + curDate.slice(4,6) + '-' + curDate.slice(6,8);
   buildMethodSwitch();
   const p = dayOf(curDate, curMethod);
+  // On the lazy station dashboard the index knows this day exists before its payload is fetched.
+  // Ask the host page for it; the plots below simply draw empty until it lands.
+  if (!p && summaryOf(curDate, curMethod) && window.__onMissingDay) {
+    window.__onMissingDay(curDate, curMethod);
+  }
   document.getElementById('cst').textContent =
     p && p.constant ? 'C_L = ' + (+p.constant).toPrecision(5) : '';
   drawPanel(p);                    // curtain + profile, one figure, shared y
@@ -1471,7 +1485,7 @@ document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;
   if (e.key === 'ArrowLeft')  document.getElementById('prev').click();
   if (e.key === 'ArrowRight') document.getElementById('next').click();
-  if (e.key === 'm') { const a = D.methods.filter(m => dayOf(curDate, m));
+  if (e.key === 'm') { const a = D.methods.filter(m => summaryOf(curDate, m));
     if (a.length > 1) { curMethod = a[(a.indexOf(curMethod)+1) % a.length]; render(); } }
 });
 buildLegend();

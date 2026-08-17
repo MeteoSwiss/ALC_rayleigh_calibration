@@ -34,6 +34,11 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 V22_VERSION_CODE = 220
+#: Molecular vintages this release supersedes (calibration/io/output.py VERSION_CODES). A row
+#: carrying one of these in the NEW tree means an old result survived the recompute. The cloud code
+#: (1000) is deliberately absent: it is a different retrieval, not an older Rayleigh, and it shares
+#: the yearly NetCDF with the Rayleigh rows.
+_SUPERSEDED_MOLECULAR = {25, 90, 95, 100, 110, 120, 200, 205, 300, 310}
 
 #: Nights the calibration must keep REJECTING. Both are genuine Payerne outliers that v1 accepted
 #: and v2 correctly throws out (6x and 1.9x the surrounding level); if a release starts accepting
@@ -124,11 +129,17 @@ def gate_vintage(new: Path, old: Path | None) -> tuple:
                 except OSError:
                     continue
                 checked += 1
-                if vals - {V22_VERSION_CODE}:
+                # The yearly NetCDF carries BOTH methods -- the run is --methods rayleigh,cloud and
+                # they append to the same file -- so 1000 (cloud_oconnor) beside 220 is correct, not
+                # a mixed vintage. Demanding {220} alone failed every CL31/CL51 stream, where
+                # Rayleigh never succeeds at 910 nm and only cloud rows exist. What actually must
+                # hold is that no row carries a SUPERSEDED molecular vintage.
+                stale = vals & _SUPERSEDED_MOLECULAR
+                if stale:
                     wrong += 1
-                    msgs.append(f"  {nc.name}: versions {sorted(vals)} != {V22_VERSION_CODE}")
-        msgs.append(f"  calibration_version == {V22_VERSION_CODE} in {checked - wrong}/{checked} "
-                    f"sampled NetCDFs")
+                    msgs.append(f"  {nc.name}: superseded molecular version(s) {sorted(stale)}")
+        msgs.append(f"  no superseded molecular vintage in {checked - wrong}/{checked} sampled "
+                    f"NetCDFs (220 = v2.2 Rayleigh, 1000 = cloud; both are expected)")
         if wrong:
             bad += 1
         # A vintage gate that verified nothing must not report success: either there are no
