@@ -580,9 +580,19 @@ def cl_overlay(by_method: dict) -> go.Figure:
                                      marker=dict(size=9, symbol="square",
                                                  color="rgba(70,130,140,0.25)")))
         last = ref[1]["datetime"].max()
+        # The shaded band is WHERE the 15-day drift tile is computed (its median against the 45
+        # days before it); the red line is the last calibrated night. Both get legend entries --
+        # an unlabelled orange region on a time axis reads as "something happened here".
         fig.add_vrect(x0=last - pd.Timedelta(days=15), x1=last,
                       fillcolor="rgba(240,173,78,0.16)", line_width=0, layer="below")
         fig.add_vline(x=last, line=dict(color="#d9534f", width=1.2))
+        fig.add_trace(go.Scatter(x=[None], y=[None], mode="markers",
+                                 name="15-day drift window",
+                                 marker=dict(size=9, symbol="square",
+                                             color="rgba(240,173,78,0.45)")))
+        fig.add_trace(go.Scatter(x=[None], y=[None], mode="lines",
+                                 name="last calibrated night",
+                                 line=dict(color="#d9534f", width=2)))
     fig.update_layout(**_LAYOUT, title="Rayleigh vs cloud — lidar constant C_L",
                       yaxis_title="C_L", legend=dict(orientation="h", y=1.14))
     fig.update_yaxes(exponentformat="e")
