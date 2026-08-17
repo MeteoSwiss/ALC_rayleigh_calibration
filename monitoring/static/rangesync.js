@@ -24,7 +24,7 @@
   if (!sel) return;
 
   function plots() {
-    return Array.prototype.slice.call(document.querySelectorAll(".js-plotly-plot"));
+    return Array.prototype.slice.call(Array.prototype.filter.call(document.querySelectorAll(".js-plotly-plot"), function (gd) { return !gd.closest("#daily") && !gd.closest(".dp-rail"); }));
   }
 
   function hasBars(gd) {

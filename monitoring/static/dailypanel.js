@@ -25,12 +25,19 @@
   // A page opened by double-click runs on file://, where fetch() of a sibling JSON is blocked as a
   // cross-origin request. The panel then draws nothing at all, which looks exactly like a broken
   // build. Say so instead of failing silently -- this is the most likely way anyone first opens it.
-  var warned = false;
   function warn(why) {
-    if (warned) return;
-    warned = true;
+    // A sibling element, NOT #panel: drawPanel rewrites #panel on every render, which both erased
+    // this warning an instant after it appeared and (via the old `warned` latch) prevented it from
+    // ever coming back.
     var host = document.getElementById("panel");
     if (!host) return;
+    var box = document.getElementById("panel-warn");
+    if (!box) {
+      box = document.createElement("div");
+      box.id = "panel-warn";
+      host.parentNode.insertBefore(box, host);
+    }
+    host = box;
     var fileUrl = location.protocol === "file:";
     host.innerHTML =
       '<div style="border:1px solid #f5c2c7;background:#fdecef;border-left:5px solid #b00020;' +
@@ -64,6 +71,11 @@
 
   function goDay(ds) {
     if (!ds || !/^\d{8}$/.test(ds)) return;
+    if (D.index && !D.index[ds]) {
+      var w = document.getElementById("panel-warn");
+      if (w) w.textContent = "";
+      return;                                  // outside the panel window: nothing to fetch
+    }
     curDate = ds;
     Promise.all((D.methods || []).map(function (m) { return ensureDay(ds, m); }))
       .then(function () { if (pending === 0) render(); });
@@ -102,7 +114,33 @@
     if (a && a.dataset && a.dataset.date) goDay(a.dataset.date);
   });
 
-  watchViewer();
+  function onReady(fn) {
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", fn);
+    else fn();
+  }
+
+  onReady(function () {
+    // The include sits above the method blocks, so at parse time the diag sections do not exist
+    // yet -- this is why the panel<->viewer sync never attached before.
+    watchViewer();
+    // Plain arrows: diag.js owns them when a CALIBRATION viewer exists; otherwise they would do
+    // nothing at all, so the panel steps its own indexed days.
+    if (!document.querySelector('section.diag[data-method="rayleigh"], '
+                                + 'section.diag[data-method="cloud"]')) {
+      document.addEventListener("keydown", function (e) {
+        if (e.ctrlKey || e.metaKey) return;
+        if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+        var t = e.target;
+        if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) return;
+        var dir = e.key === "ArrowRight" ? 1 : -1;
+        var i = (D.dates || []).indexOf(curDate);
+        var j2 = i + dir;
+        if (i < 0 || j2 < 0 || j2 >= D.dates.length) return;
+        e.preventDefault();
+        goDay(D.dates[j2]);
+      });
+    }
+  });
 
   // Ctrl+Left / Ctrl+Right jump to the previous / next night that PRODUCED A CONSTANT, straight
   // from the embedded index. Capture phase, so it wins over diag.js's own Ctrl binding (step every
@@ -144,5 +182,5 @@
   });
   var start = (withCal.length ? withCal : (D.dates || []))[
     (withCal.length ? withCal : (D.dates || [])).length - 1];
-  if (start) goDay(start);
+  if (start) onReady(function () { goDay(start); });
 })();

@@ -593,8 +593,11 @@ def cl_overlay(by_method: dict) -> go.Figure:
         fig.add_trace(go.Scatter(x=[None], y=[None], mode="lines",
                                  name="last calibrated night",
                                  line=dict(color="#d9534f", width=2)))
+    # Legend BELOW the axis: at y=1.14 it sat on top of the title text.
     fig.update_layout(**_LAYOUT, title="Rayleigh vs cloud — lidar constant C_L",
-                      yaxis_title="C_L", legend=dict(orientation="h", y=1.14))
+                      yaxis_title="C_L",
+                      legend=dict(orientation="h", y=-0.22, x=0.5, xanchor="center",
+                                  yanchor="top"))
     fig.update_yaxes(exponentformat="e")
     return fig
 

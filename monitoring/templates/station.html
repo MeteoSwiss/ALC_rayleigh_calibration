@@ -71,16 +71,19 @@
 {% if overlay or cl_tiles %}
 <section class="card">
   {% if overlay %}{{ overlay | safe }}
-  <p class="muted">Both retrievals on one axis — a systematic offset between them points at the
-    water-vapour correction, not the instrument.</p>{% endif %}
+  <p class="muted">Both retrievals on one axis — a systematic offset between them likely reflects
+    electronic distortion of the signal, not the water-vapour correction. Click a legend entry to
+    isolate one method; the tiles below follow the selection.</p>{% endif %}
   {% if cl_tiles %}
-  <div class="tiles">
+  <div class="tiles" id="cl-tiles">
     {% for t in cl_tiles %}
     <div class="tile"><div class="tl">{{ t.label }}</div>
       <div class="tv" style="color:{{ t.color }}">{{ t.value }}</div>
       <div class="tn">{{ t.note }}</div></div>
     {% endfor %}
   </div>
+  {% if cl_stats_json %}<script type="application/json" id="cl-tiles-data">{{ cl_stats_json | safe }}</script>
+  <script src="{{ base }}assets/cltiles.js?v={{ asset_v }}"></script>{% endif %}
   {% endif %}
 </section>
 {% endif %}
@@ -112,6 +115,9 @@
   </section>
 </div>
 <script id="payload" type="application/json">{{ daily_panel.payload | safe }}</script>
+{# Explicit handshake: the host owns the keyboard (diag.js + dailypanel.js). Must run BEFORE the
+   inline panel script -- DOM sniffing for viewer sections was defeated by page composition. #}
+<script>window.__panelEmbedded = true;</script>
 <script>{{ daily_panel.js | safe }}</script>
 <script src="{{ base }}assets/dailypanel.js?v={{ asset_v }}"></script>
 {% endif %}

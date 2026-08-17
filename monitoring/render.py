@@ -28,7 +28,7 @@ _STATIC = Path(__file__).parent / "static"
 # stable + large -> left unversioned). Same list is used to copy them into the site.
 _VERSIONED_ASSETS = ("style.css", "table-sort.js", "paginate.js", "filter.js", "qcflag.js",
                      "diag.js", "histlink.js", "search.js", "rangesync.js",
-                     "stationindex.js", "stationnav.js", "dailypanel.js")
+                     "stationindex.js", "stationnav.js", "dailypanel.js", "cltiles.js")
 
 
 def _asset_version() -> str:
@@ -759,7 +759,7 @@ def _daily_panel(out_dir: Path, key: str, methods: list) -> dict | None:
         return None
     if not index:
         return None
-    from scripts import mockup_daily_panel as PANEL
+    from monitoring import panel as PANEL
     boot = {"station": {"key": key}, "methods": methods,
             "dates": sorted(index), "days": {}, "index": index}
     meta = {"n_days": len(index), "gz_kb": 0, "per_unit_kb": 0, "curated": False, "lazy": True}
@@ -795,7 +795,9 @@ def _render_one_station(key, ctx) -> str:
     by_method = {m: cal[(cal["key"] == key) & (cal["method"] == m)] for m in methods}
     # The headline tiles are useful on a ONE-method stream too (median, spread, drift, last valid),
     # so they are not gated on the two-method overlay the way the comparison figure is.
-    cl_tiles = metrics.cl_headline_tiles(by_method)
+    _as_of = cal["datetime"].max() if len(cal) else None
+    cl_stats = metrics.cl_headline_stats(by_method, as_of=_as_of)
+    cl_tiles = cl_stats.get("combined", [])
     if len(methods) >= 2:
         overlay = charts.fig_to_div(charts.cl_overlay(by_method), "fig-overlay")
     i = ctx.nav_idx.get(key)
@@ -824,6 +826,7 @@ def _render_one_station(key, ctx) -> str:
     daily_panel = _daily_panel(ctx.out_dir, key, methods)
     html = ctx.tmpl.render(base="../", logo=ctx.logo, key=key, meta=meta, cal_classes=cal_classes,
                            daily_panel=daily_panel, cl_tiles=cl_tiles,
+                           cl_stats_json=json.dumps(cl_stats, ensure_ascii=False),
                            blocks=blocks, overlay=overlay, search_json=ctx.search_json,
                            countries=getattr(ctx, "countries", []), types=getattr(ctx, "types", []),
                            prev_station=prev_station, next_station=next_station,

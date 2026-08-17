@@ -49,7 +49,7 @@ from monitoring import charts, config                                     # noqa
 from monitoring.render import _load_hk, _load_status                      # noqa: E402
 from scripts.mockup_station_card import probe_cloud_cover, _month_with_data   # noqa: E402
 from scripts.mockup_station_page import _cl_series, _station_index, TILE_OK   # noqa: E402
-import scripts.mockup_daily_panel as PANEL                                # noqa: E402
+import monitoring.panel as PANEL                                # noqa: E402
 
 BUCKET = "https://object-store.os-api.cci2.ecmwf.int/eprofile-alc-dashboard"
 #: Period keys the operational OmB/sensitivity renderer emits (seen on the live station pages).
@@ -192,8 +192,19 @@ def _write_payloads(key: str, itype: str, days: list, out: Path, force: bool,
                     el = time.perf_counter() - t0
                     print(f"    {done}/{len(jobs)}  {el/60:.1f} min  "
                           f"({el/max(done,1):.2f} s/night wall, {len(jobs)-done} left)", flush=True)
-    # Rebuild the index from what is on disk, so a resumed run indexes earlier days too.
+    # MERGE into the existing index: rebuilding only from this run's `days` truncated the panel's
+    # whole history whenever a shorter window was regenerated (the 11-day incident, and any future
+    # incremental daily run). Days inside the window are rebuilt from disk; days outside it are
+    # kept as they were.
     index = {}
+    idx_path = ddir / "_index.json"
+    if idx_path.exists():
+        try:
+            index = json.loads(idx_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            index = {}
+    for d in days:
+        index.pop(d.strftime("%Y%m%d"), None)
     for d in days:
         ds = d.strftime("%Y%m%d")
         for m in methods:

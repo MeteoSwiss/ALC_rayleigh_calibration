@@ -38,7 +38,7 @@ needs_site = pytest.mark.skipif(SITE is None, reason="ALC_SITE_DIR not set (no b
 
 
 def _panel():
-    import scripts.mockup_daily_panel as M
+    import monitoring.panel as M
     return M
 
 
@@ -54,23 +54,42 @@ def _css_classes(css: str) -> set:
 # UNIT TIER
 # =====================================================================================
 
-def test_panel_css_does_not_collide_with_production_css():
-    """Regression: the panel reused ``.msg``, which style.css caps at 360 px — the night's
-    verdict box rendered as a narrow strip. Any selector defined by BOTH sheets is a landmine;
-    the two below are shared ON PURPOSE (compatible box styling). Adding a name to this list
-    requires checking both definitions side by side, not just appending it."""
-    allowed_shared = {"card", "empty"}
-    style = (REPO / "monitoring/static/style.css").read_text(encoding="utf-8")
-    inter = _css_classes(_panel().PANEL_CSS) & _css_classes(style)
-    assert inter <= allowed_shared, f"new CSS collision(s) with style.css: {sorted(inter - allowed_shared)}"
+def test_panel_css_is_fully_scoped():
+    """Regression lineage: .msg collided with style.css (the 360px verdict box); then the audit
+    found bare h2/:root/body/* rules restyling every host heading and hijacking the host CSS
+    tokens -- and the old class-intersection test was DEFEATED by an allowlist and by matching
+    classes only. The invariant now: every selector in the embedded sheet is scoped under
+    .dp-wrap, and every custom property is namespaced --dp-*."""
+    import re
+    css = _panel().PANEL_CSS
+    i = 0
+    while True:
+        j = css.find("{", i)
+        if j < 0:
+            break
+        sel = css[i:j]
+        sel = sel.split("}")[-1]                 # drop a preceding @media close
+        sel = sel[sel.rfind("*/") + 2 if "*/" in sel else 0:].strip()
+        if sel.startswith("@media"):
+            i = j + 1
+            continue
+        if sel:
+            for one in sel.split(","):
+                assert one.strip().startswith(".dp-wrap"), f"unscoped selector: {one.strip()[:60]}"
+        i = css.find("}", j) + 1
+    assert ":root" not in css, "the embedded sheet must not touch :root"
+    assert not re.search(r"--(line|ink|dim|ok|bad)\s*:", css), "un-namespaced custom property"
+    assert "body" in _panel().STANDALONE_CSS, "standalone chrome must live in STANDALONE_CSS"
 
 
 def test_panel_keyboard_stands_down_when_diag_owns_it():
     """Regression: PANEL_JS and diag.js both bound document keydown, so every arrow press
     navigated twice and the image viewer drifted apart from the panel."""
     js = _panel().PANEL_JS
-    assert ".diag-data" in js.split("keydown", 1)[1][:600], \
-        "PANEL_JS keydown must stand down when the production diag viewer is on the page"
+    assert "window.__panelEmbedded" in js.split("keydown", 1)[1][:900], \
+        "PANEL_JS keydown must stand down via the explicit embed handshake"
+    tpl = (REPO / "monitoring/templates/station.html").read_text(encoding="utf-8")
+    assert "window.__panelEmbedded = true" in tpl, "host must set the handshake before PANEL_JS"
 
 
 def test_no_stale_wording_in_panel_fragments():
@@ -128,6 +147,7 @@ def test_payload_tool_offers_data_only_mode():
     production site directory, clobbering the summary page with a stub."""
     src = (REPO / "scripts/build_station_dashboard.py").read_text(encoding="utf-8")
     assert "--no-pages" in src and "args.no_pages" in src
+    assert "index.pop(d.strftime" in src,         "_write_payloads must MERGE into the existing index, not rebuild from this run's window"
 
 
 def test_flag_labels_agree_between_pipeline_and_dashboard():
@@ -392,3 +412,19 @@ def test_calendar_month_navigation_does_not_snap_back():
     assert guard < snap, "the month snap-back must sit INSIDE the day-changed guard"
     assert "#cal-prev" in js and "#cal-next" in js, "month arrows missing"
     assert "cell.addEventListener('click'" in js, "day cells must be clickable"
+
+
+def test_rangesync_never_touches_the_panel():
+    """Audit-confirmed: #period-sel relayouted the panel's one-night figures with station-history
+    date ranges, corrupting their axes. rangesync must exclude figures inside #daily."""
+    js = (REPO / "monitoring/static/rangesync.js").read_text(encoding="utf-8")
+    assert "#daily" in js and "filter" in js, "rangesync must skip the daily panel's figures"
+
+
+def test_panel_module_is_production_code():
+    """Audit-confirmed: production render.py imported panel fragments from scripts/mockup_*. The
+    panel lives in monitoring/panel.py; the mockup path is a thin shim."""
+    r = (REPO / "monitoring/render.py").read_text(encoding="utf-8")
+    assert "from monitoring import panel as PANEL" in r
+    shim = (REPO / "scripts/mockup_daily_panel.py").read_text(encoding="utf-8")
+    assert "from monitoring.panel import" in shim and len(shim) < 1000
