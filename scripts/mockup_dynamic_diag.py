@@ -40,6 +40,8 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 CAPTURED: dict = {}
+#: emit the opt-in native-resolution curtain alongside the default one (--no-hires to skip)
+HIRES = True
 
 
 def _b64(a: np.ndarray) -> str:
@@ -206,13 +208,31 @@ def _payload_rayleigh_ok(kw: dict) -> dict:
         if cbh0 is not None:
             hc = used & np.isfinite(cbh0) & ~flagged
             y_hi = float(rr.max()) * 1e-3
-            cur["high_cloud_ylo"] = [None if not h else
-                                     round(float(np.clip((c - 500.0) * 1e-3, 0.0, y_hi)), 4)
+            # EXACTLY the PNG's expression (plotting.py:1030):
+            #   y_lo = np.where(high_cloud, clip((cbh - 500 m), 0, y_hi), y_hi)
+            # Outside the mask y_lo == y_hi, i.e. a ZERO-HEIGHT band. Emitting null there instead
+            # looks equivalent but is not: Plotly's fill:"tonexty" bridges across nulls and joins
+            # distant points into spurious wedges (the operator saw triangles).
+            cur["high_cloud_ylo"] = [round(float(np.clip((c - 500.0) * 1e-3, 0.0, y_hi)), 4)
+                                     if (h and np.isfinite(c)) else round(y_hi, 4)
                                      for h, c in zip(hc[::st_t], cbh0[::st_t])]
+            cur["has_high_cloud"] = bool(hc.any())
             cur["y_hi_km"] = y_hi
         if br is not None and bh is not None:
             cur["mol_layer_km"] = [(float(br) - float(bh)) * 1e-3, (float(br) + float(bh)) * 1e-3]
         out["curtain"] = cur
+        if HIRES:
+            # The opt-in payload: NATIVE resolution, no striding. This is the one that only makes
+            # sense fetched on demand for the single night being interrogated -- it is larger than
+            # the PNG it replaces, so it can never be the default.
+            hi = _curtain(m, rr, st_target_t=m.shape[0], st_target_r=m.shape[1],
+                          vmin=cur["lo"], vmax=cur["hi"])
+            hi["time"] = ([str(t)[:19] for t in np.asarray(tdt)] if (tdt is not None and len(tdt))
+                          else None)
+            if hi["time"] is None:
+                hrs = np.asarray(kw.get("hours_since_start", []), float)
+                hi["hours"] = _jsonable(hrs) if hrs.size else []
+            out["curtain_hi"] = hi
     out["title"] = str(kw.get("title", ""))
     return out
 
@@ -258,6 +278,15 @@ def _payload_rayleigh_fail(kw: dict) -> dict:
                 cur["cbh_km"] = _jsonable(c[::st_t] * 1e-3)
         cur["y_max_km"] = float(rng.max()) * 1e-3 if rng.size else None
         out["curtain"] = cur
+        if HIRES:
+            hi = _curtain(m, rng, st_target_t=m.shape[0], st_target_r=m.shape[1],
+                          vmin=cur["lo"], vmax=cur["hi"])
+            if tdt is not None and len(tdt):
+                hi["time"] = [str(t)[:19] for t in np.asarray(tdt)]
+            else:
+                hrs = np.asarray(kw.get("hours_since_start", []), float)
+                hi["hours"] = _jsonable(hrs) if hrs.size else []
+            out["curtain_hi"] = hi
         # the profile panel is computed on the FULL matrix, not the strided one
         with np.errstate(all="ignore"):
             rcs_mean = np.nanmean(m, axis=0)
@@ -318,6 +347,11 @@ def _payload_cloud(data, res, title: str) -> dict:
     cur["hours"] = _jsonable(hrs[::st_t])
     out["curtain"] = cur
     out["y_max_km"] = y_max_km
+    if HIRES:
+        hi = _curtain(beta.T, rng, st_target_t=beta.shape[1], st_target_r=beta.shape[0],
+                      vmin=cur["lo"], vmax=cur["hi"], crop_km=y_max_km)
+        hi["hours"] = _jsonable(hrs)
+        out["curtain_hi"] = hi
     out["gate_km"] = [cal_lo * 1e-3, cal_hi * 1e-3]
 
     cbh = np.asarray(getattr(data, "cbh", []), float)
@@ -413,16 +447,24 @@ BODY = {
 <div class="grid"><div class="card"><div id="g_slopes"></div></div>
 <div class="card"><div id="g_intercepts"></div></div>
 <div class="card"><div id="g_r_squared"></div></div></div>
-<h3>Range-corrected signal &mdash; full night</h3>
+<h3>Range-corrected signal &mdash; full night
+  <button class="resbtn" id="res-btn">full resolution</button>
+  <span class="res" id="res"></span></h3>
 <div class="card"><div id="curtain"></div></div>
 <h3>Sensitivity</h3>
 <div class="grid2"><div class="card"><div id="sens"></div></div>
 <div class="card"><div id="spread"></div></div></div>""",
     "rayleigh_fail": """
 <div class="banner" id="banner"></div>
+<h3>Range-corrected signal &mdash; full night
+  <button class="resbtn" id="res-btn">full resolution</button>
+  <span class="res" id="res"></span></h3>
 <div class="grid23"><div class="card"><div id="curtain"></div></div>
 <div class="card"><div id="failprof"></div></div></div>""",
     "cloud": """
+<h3>Attenuated backscatter
+  <button class="resbtn" id="res-btn">full resolution</button>
+  <span class="res" id="res"></span></h3>
 <div class="grid23"><div class="card"><div id="cl_curtain"></div></div>
 <div class="card"><div id="cl_prof"></div></div></div>
 <div class="grid"><div class="card"><div id="cl_S"></div></div>
@@ -451,6 +493,12 @@ HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8">
  td,th {{ border:1px solid #dbe3ea; padding:5px 10px; text-align:right; }}
  th:first-child, td:first-child {{ text-align:left; }}
  .win {{ font-weight:600; color:#b7791f; }}
+ .resbtn {{ font:inherit; font-size:12px; font-weight:600; margin-left:14px; padding:3px 10px;
+            border:1px solid #2a5a82; border-radius:6px; background:#eef4fb; color:#0b3d61;
+            cursor:pointer; }}
+ .resbtn:hover {{ background:#dceaf7; }}
+ .res {{ font-size:12px; font-weight:400; color:#66707a; margin-left:10px; }}
+ .res.on {{ color:#0b7285; font-weight:600; }}
 </style></head><body>
 <div class="hdr"><b>FEASIBILITY MOCKUP</b> ({kind}) — every plot below is drawn <b>in your
 browser</b> from a {size_kb:.0f} KB payload ({gz_kb:.0f} KB gzipped) captured from the real
@@ -489,6 +537,76 @@ function grid(c) {{
 }}
 const xOf = c => c.time || c.hours;
 const xIsDate = c => !!c.time;
+
+// --------------------------------------------------------------- adaptive resolution
+// The default curtain matches the PNG's own grid (<=800x800), so nothing is lost relative to
+// today's image. The native-resolution block is an OPT-IN second payload: it is larger than the
+// PNG it replaces, so it can never be the default -- but once the operator zooms in, only the
+// visible columns are decoded, which is cheap. In production this second block is a separate
+// fetch; in this mockup it is embedded so the file stays self-contained.
+function attachHiRes(divId, cLo, cHi, label) {{
+  const gd = document.getElementById(divId);
+  if (!cHi) return;
+  const xLo = xOf(cLo), xHi = xOf(cHi);
+  const asNum = v => (typeof v === 'string' ? Date.parse(v) : +v);
+  const numHi = xHi.map(asNum);
+  const full = [asNum(xLo[0]), asNum(xLo[xLo.length - 1])];
+  const rkHi = Array.from(dec(cHi.range_km, 'f32'));
+  const qHi = dec(cHi.b64, 'u8');
+  const [nyHi, nxHi] = cHi.shape;
+  let mode = 'png';
+
+  function sliceHi(x0, x1) {{               // decode ONLY the visible columns
+    let i0 = 0, i1 = nxHi - 1;
+    while (i0 < nxHi - 1 && numHi[i0] < x0) i0++;
+    while (i1 > 0 && numHi[i1] > x1) i1--;
+    i0 = Math.max(0, i0 - 1); i1 = Math.min(nxHi - 1, i1 + 1);
+    const w = i1 - i0 + 1, zz = [];
+    for (let j = 0; j < nyHi; j++) {{
+      const row = new Array(w);
+      for (let i = 0; i < w; i++) {{
+        const v = qHi[j * nxHi + (i0 + i)];
+        row[i] = v === 255 ? null : cHi.lo + (v / 254) * (cHi.hi - cHi.lo);
+      }}
+      zz.push(row);
+    }}
+    return {{ z: zz, x: xHi.slice(i0, i1 + 1), y: rkHi, n: w }};
+  }}
+  function setPNG() {{
+    if (mode === 'png') return;
+    Plotly.restyle(gd, {{ z:[grid(cLo)], x:[xLo], y:[Array.from(dec(cLo.range_km,'f32'))] }}, [0]);
+    mode = 'png'; badge();
+  }}
+  function setHi(x0, x1) {{
+    const s = sliceHi(x0, x1);
+    Plotly.restyle(gd, {{ z:[s.z], x:[s.x], y:[s.y] }}, [0]);
+    mode = 'hi'; badge(s.n);
+  }}
+  function badge(n) {{
+    const el = document.getElementById(label);
+    if (!el) return;
+    el.textContent = mode === 'png'
+      ? `resolution: PNG grid (${{cLo.shape[1]}} x ${{cLo.shape[0]}}) — zoom in for native`
+      : `resolution: NATIVE (${{n}} x ${{nyHi}} in view, of ${{nxHi}} x ${{nyHi}})`;
+    el.className = mode === 'png' ? 'res' : 'res on';
+  }}
+  badge();
+
+  gd.on('plotly_relayout', function (e) {{
+    if (e['xaxis.autorange'] || e['autosize']) {{ setPNG(); return; }}
+    const a = e['xaxis.range[0]'], b = e['xaxis.range[1]'];
+    if (a === undefined || b === undefined) return;
+    const x0 = asNum(a), x1 = asNum(b);
+    // switch once the view is a small enough slice that native columns actually add detail
+    if ((x1 - x0) / (full[1] - full[0]) < 0.5) setHi(x0, x1); else setPNG();
+  }});
+  const btn = document.getElementById(label + '-btn');
+  if (btn) btn.addEventListener('click', function () {{
+    if (mode === 'hi') {{ setPNG(); Plotly.relayout(gd, {{'xaxis.autorange': true}}); }}
+    else setHi(full[0], full[1]);
+    btn.textContent = mode === 'hi' ? 'back to PNG grid' : 'full resolution';
+  }});
+}}
 
 // ------------------------------------------------------------------ RAYLEIGH SUCCESS
 if (D.kind === 'rayleigh_ok') {{
@@ -548,11 +666,14 @@ if (D.kind === 'rayleigh_ok') {{
   }};
   bandRuns(c.excl_lowcloud, 'rgba(214,39,40,0.28)', 'excluded (low cloud)');
   bandRuns(c.excl_screened, 'rgba(70,70,70,0.26)', 'screened / not used');
-  if (c.high_cloud_ylo && c.y_hi_km) {{
-    traces.push({{ x:X, y:c.high_cloud_ylo.map(v => v===null?null:c.y_hi_km), mode:'lines',
-        line:{{width:0}}, hoverinfo:'skip', showlegend:false }});
+  if (c.high_cloud_ylo && c.y_hi_km && c.has_high_cloud) {{
+    // Two traces, both gap-free: the ceiling at y_hi and the floor at y_lo (== y_hi outside the
+    // mask, so the band collapses to nothing there rather than being bridged across a null).
+    // shape 'hvh' reproduces matplotlib's step="mid".
+    traces.push({{ x:X, y:X.map(() => c.y_hi_km), mode:'lines', line:{{width:0, shape:'hvh'}},
+        hoverinfo:'skip', showlegend:false }});
     traces.push({{ x:X, y:c.high_cloud_ylo, mode:'lines', fill:'tonexty',
-        fillcolor:'rgba(25,211,243,0.22)', line:{{width:0}},
+        fillcolor:'rgba(25,211,243,0.22)', line:{{width:0, shape:'hvh'}},
         name:'high cloud (masked above fit)', hoverinfo:'skip' }});
   }}
   if (c.cbh_km) traces.push({{ x:X, y:c.cbh_km, mode:'markers', name:'cloud base',
@@ -564,10 +685,13 @@ if (D.kind === 'rayleigh_ok') {{
     traces.push({{ x:[null], y:[null], mode:'lines', line:{{color:'#ffc107',width:2}},
         name:'molecular layer' }});
   }}
-  Plotly.newPlot('curtain', traces, Object.assign({{}}, LAY, {{ height:430, shapes:shapes,
-    title:{{text:'molecular layer (gold), cloud base (dots), excluded (red), screened (grey), high cloud masked (cyan)', font:{{size:11}}}},
+  // No descriptive title here: the legend already names every overlay, and the two collided.
+  Plotly.newPlot('curtain', traces, Object.assign({{}}, LAY, {{ height:450, shapes:shapes,
+    margin:{{l:74, r:12, t:44, b:48}},
     xaxis:{{title:{{text: xIsDate(c)?'Time (UTC)':'Hours since start'}}, type: xIsDate(c)?'date':'linear'}},
-    yaxis:{{title:{{text:'Range (km)'}}}}, legend:{{orientation:'h', y:1.10, font:{{size:9.5}}}} }}), CFG);
+    yaxis:{{title:{{text:'Range (km)'}}}},
+    legend:{{orientation:'h', y:1.12, x:0, xanchor:'left', font:{{size:9.5}}}} }}), CFG);
+  attachHiRes('curtain', c, D.curtain_hi, 'res');
 
   if (D.sens) {{
     const S = D.sens, a = dec(S.b64,'f32'), [n1,n2] = S.shape, zz = [];
@@ -626,6 +750,7 @@ if (D.kind === 'rayleigh_fail') {{
     xaxis:{{title:{{text: xIsDate(c)?'Time (UTC)':'Hours since start'}}, type: xIsDate(c)?'date':'linear'}},
     yaxis:{{title:{{text:'Range (km)'}}, range:[0, c.y_max_km]}},
     legend:{{orientation:'h', y:1.10, font:{{size:10}}}} }}), CFG);
+  attachHiRes('curtain', c, D.curtain_hi, 'res');
 
   if (D.has_profile) {{
     const z = Array.from(dec(D.z_km,'f32'));
@@ -669,6 +794,7 @@ if (D.kind === 'cloud') {{
     xaxis:{{title:{{text:'Hours since start'}}}},
     yaxis:{{title:{{text:'Range (km AGL)'}}, range:[0, D.y_max_km]}},
     legend:{{orientation:'h', y:1.10, font:{{size:9.5}}}} }}), CFG);
+  attachHiRes('cl_curtain', c, D.curtain_hi, 'res');
 
   const pt = [];
   if (D.prof) pt.push({{ x:Array.from(dec(D.prof,'f32')), y:Array.from(dec(D.rng_km,'f32')),
@@ -727,8 +853,12 @@ def main() -> None:
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--work", type=Path, default=Path("./_dyn_diag_work"))
     ap.add_argument("--skip-ab", action="store_true")
+    ap.add_argument("--no-hires", action="store_true",
+                    help="omit the opt-in native-resolution curtain")
     args = ap.parse_args()
 
+    global HIRES
+    HIRES = not args.no_hires
     os.environ["ALC_L1_ROOT"] = args.l1_root
     os.environ["ALC_FULLCAL_DIR"] = str(args.work.resolve())
     if args.cams:
