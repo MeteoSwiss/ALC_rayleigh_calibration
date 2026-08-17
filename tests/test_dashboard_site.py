@@ -238,7 +238,14 @@ def test_sampled_payloads_decode():
                 assert len(b64decode(cur["b64"])) == ny * nx, f"{f.name}: b64 != shape"
                 assert cur["lo"] < cur["hi"], f"{f.name}: degenerate colour limits"
                 picked += 1
-        assert picked, f"{idx_file.parent.name}: no decodable payload found"
+        if not picked:
+            # A station with no usable L1 in the whole window is a legal state -- but then EVERY
+            # payload must say so (kind none), not merely fail to decode.
+            for ds in index:
+                for meth in index[ds]:
+                    payload = json.loads((idx_file.parent / f"{ds}_{meth}.json")
+                                         .read_text(encoding="utf-8"))
+                    assert payload.get("kind") == "none",                         f"{idx_file.parent.name} {ds} {meth}: figure-less but kind != none"
 
 
 @needs_site
@@ -432,3 +439,25 @@ def test_panel_module_is_production_code():
     assert "from monitoring import panel as PANEL" in r
     shim = (REPO / "scripts/mockup_daily_panel.py").read_text(encoding="utf-8")
     assert "from monitoring.panel import" in shim and len(shim) < 1000
+
+
+def test_period_selector_reaches_every_series_and_spares_the_panel():
+    """Regression: 'All time' silently failed for every single-axis chart -- the unconditional
+    yaxis2 relayout throws, relayout is atomic, and the per-figure try swallowed it, so charts
+    could narrow but never widen again (only the dual-axis housekeeping panel obeyed). And the
+    period must never touch the daily panel's one-night figures."""
+    js = (REPO / "monitoring/static/rangesync.js").read_text(encoding="utf-8")
+    assert "hasY2" in js and 'gd.layout.yaxis2' in js, "yaxis2 writes must be guarded"
+    assert js.count("yaxis2.autorange") >= 2 and 'if (hasY2)' in js
+    assert "#daily" in js, "the daily panel stays out of period relayouts"
+
+
+def test_qc_flagging_works_from_the_panel():
+    """Operator request: flagging a day must work via the flag button AND the 0/1/2/3 keys, on
+    every page -- including stations where no diag image viewer exists to own the keyboard. One
+    store only (qcflag.js); the panel binds the keys solely when no calibration viewer does."""
+    js = (REPO / "monitoring/static/dailypanel.js").read_text(encoding="utf-8")
+    assert "QCFlags.openDialog" in js and "QCFlags.set" in js and "PRESETS" in js
+    assert "isDialogOpen" in js, "typing in the QC dialog must not navigate the panel"
+    body = _panel().PANEL_BODY
+    assert 'id="dp-flag"' in body, "the panel toolbar must carry the flag button"

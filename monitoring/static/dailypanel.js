@@ -119,7 +119,23 @@
     else fn();
   }
 
+  function qcRec() {
+    var st = D.station || {};
+    var wmo = st.wmo || (st.key || "").split("_")[0];
+    return { key: st.key, wmo: wmo, identifier: st.ident || (st.key || "").split("_").pop(),
+             itype: st.type || "", method: (typeof curMethod !== "undefined" && curMethod) || "",
+             date: curDate };
+  }
+
   onReady(function () {
+    // QC flagging goes through the ONE store (qcflag.js). The visible button always works; the
+    // 0/1/2/3 keys are bound here only when no calibration diag viewer owns them (diag.js binds
+    // the same keys to the same store when its sections exist -- two writers would double-flag).
+    var flagBtn = document.getElementById("dp-flag");
+    if (flagBtn && window.QCFlags) {
+      flagBtn.hidden = false;
+      flagBtn.addEventListener("click", function () { window.QCFlags.openDialog(qcRec()); });
+    }
     // The include sits above the method blocks, so at parse time the diag sections do not exist
     // yet -- this is why the panel<->viewer sync never attached before.
     watchViewer();
@@ -129,15 +145,24 @@
                                 + 'section.diag[data-method="cloud"]')) {
       document.addEventListener("keydown", function (e) {
         if (e.ctrlKey || e.metaKey) return;
-        if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
         var t = e.target;
         if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) return;
-        var dir = e.key === "ArrowRight" ? 1 : -1;
-        var i = (D.dates || []).indexOf(curDate);
-        var j2 = i + dir;
-        if (i < 0 || j2 < 0 || j2 >= D.dates.length) return;
-        e.preventDefault();
-        goDay(D.dates[j2]);
+        if (window.QCFlags && window.QCFlags.isDialogOpen && window.QCFlags.isDialogOpen()) return;
+        if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+          var dir = e.key === "ArrowRight" ? 1 : -1;
+          var i = (D.dates || []).indexOf(curDate);
+          var j2 = i + dir;
+          if (i < 0 || j2 < 0 || j2 >= D.dates.length) return;
+          e.preventDefault();
+          goDay(D.dates[j2]);
+          return;
+        }
+        if (!window.QCFlags) return;
+        if (e.key === "0") { window.QCFlags.openDialog(qcRec()); e.preventDefault(); }
+        else if (e.key === "1" || e.key === "2" || e.key === "3") {
+          window.QCFlags.set(qcRec(), window.QCFlags.PRESETS[+e.key - 1]);
+          e.preventDefault();
+        }
       });
     }
   });

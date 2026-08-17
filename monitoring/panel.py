@@ -967,6 +967,8 @@ PANEL_BODY = r"""<div>
    <span class="datelbl" id="datelbl"></span>
    <button id="next">next →</button>
    <span class="seg" id="mswitch"></span>
+   <button id="dp-flag" title="Flag this night for QC review (0 opens the dialog; 1/2/3 quick-flag)"
+           hidden>&#9873; flag</button>
   </div>
 
   <div id="msg"></div>

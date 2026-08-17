@@ -65,8 +65,14 @@
     plots().forEach(function (gd) {
       try {
         var rl = {};
+        // Touch yaxis2 ONLY when the figure has one: relayout is atomic and throws on a missing
+        // axis, so the unconditional yaxis2 write silently killed the WHOLE update for every
+        // single-axis chart -- once narrowed, they could never return to "All time" (only the
+        // dual-axis housekeeping panel obeyed the selector).
+        var hasY2 = !!(gd.layout && gd.layout.yaxis2);
         if (allTime) {
-          rl["xaxis.autorange"] = true; rl["yaxis.autorange"] = true; rl["yaxis2.autorange"] = true;
+          rl["xaxis.autorange"] = true; rl["yaxis.autorange"] = true;
+          if (hasY2) rl["yaxis2.autorange"] = true;
           Plotly.relayout(gd, rl); return;
         }
         rl["xaxis.range"] = [lo, hi];
@@ -74,7 +80,8 @@
         // Rescale Y to the visible points for line/marker plots; bar charts keep their from-zero
         // autorange so stacked monthly bars are never clipped.
         if (hasBars(gd)) {
-          rl["yaxis.autorange"] = true; rl["yaxis2.autorange"] = true;
+          rl["yaxis.autorange"] = true;
+          if (hasY2) rl["yaxis2.autorange"] = true;
         } else {
           var yr = visibleYRange(gd, +new Date(lo), +new Date(hi));
           ["y", "y2"].forEach(function (ax) {
