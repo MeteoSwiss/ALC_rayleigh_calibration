@@ -89,7 +89,7 @@ from calibration.io.data_loader import build_file_paths  # noqa: E402
 from calibration.io.instrument_day import load_instrument_day  # noqa: E402
 from calibration.flags import cloud_flag, flag_label, dominant_cloud_reject_flag  # noqa: E402
 from calibration.io.output import (  # noqa: E402
-    VERSION_CODES, write_calibration_result, strip_calibration_method)  # noqa: E402
+    VERSION_CODES, version_code, write_calibration_result, strip_calibration_method)  # noqa: E402
 from calibration.plotting import plot_cloud_diagnostics_compact  # noqa: E402
 from monitoring.kalman import kalman_best_estimate  # noqa: E402  (self-contained leaf)
 from monitoring import periods as periods_mod  # noqa: E402  (period set: auto years + active/frozen)
@@ -143,8 +143,11 @@ OMB_FIELDS = ["period", "date_start", "date_end", "wavelength", "median_bias_our
 SENS_FIELDS = ["period", "date_start", "date_end", "wavelength", "icao_alt_200", "icao_alt_2000",
                "icao_alt_4000", "sigma_night_3000", "n_days_night", "n_days_day"]
 
+# "version" is the numeric algorithm code (calibration/io/output.py VERSION_CODES: 220 = eprof_v2.2
+# Rayleigh, 1000 = the O'Connor cloud retrieval). Without it in the CSV an archive does not say
+# what produced it, and the dashboard was left ASSERTING a hard-coded "v2.0" over v2.2 numbers.
 CSV_FIELDS = ["date", "method", "flag", "cal_value", "uncertainty",
-              "n_profiles", "bottom_height", "top_height", "message"]
+              "n_profiles", "bottom_height", "top_height", "version", "message"]
 _SUCCESS = (1, 1.0, 0.5)
 _HK_NAN = {k: float("nan") for k in ("laser_life_time", "status_detector", "status_laser",
                                      "temperature_optical_module", "window_transmission",
@@ -347,7 +350,9 @@ def _do_rayleigh(s, start, end, shared=None, screen=False):
             rows.append(dict(date=ds, method="rayleigh", flag=r.flag, cal_value=r.lidar_constant,
                              uncertainty=r.uncertainty, n_profiles="",
                              bottom_height=r.calibration_bottom_height,
-                             top_height=r.calibration_top_height, message=r.message))
+                             top_height=r.calibration_top_height,
+                             version=version_code(getattr(o, "molecular_method", "")),
+                             message=r.message))
         except Exception as exc:  # noqa: BLE001 - one bad night must not kill the stream
             rows.append(dict(date=ds, method="rayleigh", flag=-99, cal_value=-1, uncertainty=0,
                              n_profiles="", bottom_height=None, top_height=None,

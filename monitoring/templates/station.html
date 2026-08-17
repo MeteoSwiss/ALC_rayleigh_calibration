@@ -23,7 +23,7 @@
 {% block content %}
 <div id="station-nav" data-key="{{ key }}" data-prev="{{ prev_station }}" data-next="{{ next_station }}" hidden></div>
 <h1>{{ key }} <span class="badge">{{ meta.itype }}</span>
-  {% for b in blocks %}<span class="mtag mtag-{{ b.method }}">{{ b.label }}</span>{% endfor %}
+{% for b in blocks %}<span class="mtag mtag-{{ b.method }}">{{ b.label }}</span>{% endfor %}
 </h1>
 <p class="subtitle">
   {%- set bits = [] -%}
@@ -84,6 +84,21 @@
   </div>
   {% endif %}
 </section>
+{% endif %}
+
+{% if daily_panel %}
+{# Interactive daily calibration. Renders ONLY when its per-day payloads exist, so a station without
+   them keeps exactly the page it had before. It sits next to the per-day diagnostic images rather
+   than replacing them: the images are the operational product, this reads the same nights as data. #}
+<style>{{ daily_panel.css | safe }}</style>
+<section class="card" id="daily">
+  <h2>Daily calibration <span class="muted">— drawn in the browser from
+    {{ daily_panel.n_days }} days of per-night data; no PNG involved</span></h2>
+  {{ daily_panel.body | safe }}
+</section>
+<script id="payload" type="application/json">{{ daily_panel.payload | safe }}</script>
+<script>{{ daily_panel.js | safe }}</script>
+<script src="{{ base }}assets/dailypanel.js?v={{ asset_v }}"></script>
 {% endif %}
 
 {% for b in blocks %}
@@ -166,20 +181,6 @@
 </section>
 {% endif %}
 
-{% if daily_panel %}
-{# Interactive daily calibration. Renders ONLY when its per-day payloads exist, so a station without
-   them keeps exactly the page it had before. It sits next to the per-day diagnostic images rather
-   than replacing them: the images are the operational product, this reads the same nights as data. #}
-<style>{{ daily_panel.css | safe }}</style>
-<section class="card" id="daily">
-  <h2>Daily calibration <span class="muted">— drawn in the browser from
-    {{ daily_panel.n_days }} days of per-night data; no PNG involved</span></h2>
-  {{ daily_panel.body | safe }}
-</section>
-<script id="payload" type="application/json">{{ daily_panel.payload | safe }}</script>
-<script>{{ daily_panel.js | safe }}</script>
-<script src="{{ base }}assets/dailypanel.js?v={{ asset_v }}"></script>
-{% endif %}
 
 {% if monitoring %}
 <section class="card">

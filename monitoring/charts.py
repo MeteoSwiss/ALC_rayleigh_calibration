@@ -397,6 +397,31 @@ def cl_median_iqr_by_station(d: pd.DataFrame, itype: str) -> go.Figure:
 
 # --- Station-page figures (one set per method) ------------------------------
 
+#: Numeric algorithm code -> the label an operator recognises (calibration/io/output.py
+#: VERSION_CODES). Used to name the series from the DATA rather than from a constant.
+_VERSION_NAMES = {25: "v0.25", 90: "main", 95: "improved", 100: "v1.0", 110: "v1.1", 120: "v1.2",
+                  200: "v2.0", 205: "v2.0p", 220: "v2.2", 300: "earlinet", 310: "bellini",
+                  1000: "O'Connor"}
+
+
+def version_label(g_m: pd.DataFrame) -> str:
+    """The algorithm vintage actually present in these rows, or "" when the archive does not say.
+
+    This label used to be the literal string "v2.0", written when the pipeline ran eprof_v2 -- so a
+    v2.2 archive was displayed, in the legend and in the Kalman trace, as v2.0. Deriving it from the
+    data means the page cannot misreport the release; an archive predating the `version` column gets
+    no version claim at all, which is honest rather than convenient.
+    """
+    if "version" not in g_m.columns:
+        return ""
+    v = pd.to_numeric(g_m["version"], errors="coerce").dropna()
+    if not len(v):
+        return ""
+    codes = sorted(set(int(x) for x in v))
+    names = [_VERSION_NAMES.get(c, f"code {c}") for c in codes]
+    return " + ".join(names)
+
+
 def series_timeseries(g_m: pd.DataFrame, kal_m: pd.DataFrame, method: str,
                       op_df: pd.DataFrame | None = None,
                       oldray_df: pd.DataFrame | None = None) -> go.Figure:
@@ -410,6 +435,7 @@ def series_timeseries(g_m: pd.DataFrame, kal_m: pd.DataFrame, method: str,
     vname = _value_name(method)
     color = config.METHOD_COLORS.get(method, "#1f77b4")
     ok = g_m[g_m["success"] == 1].sort_values("datetime")
+    ver = version_label(ok if len(ok) else g_m)
     fig = go.Figure()
     if op_df is not None and len(op_df):
         od = op_df.sort_values("datetime")
@@ -426,7 +452,7 @@ def series_timeseries(g_m: pd.DataFrame, kal_m: pd.DataFrame, method: str,
     if len(ok):
         fig.add_trace(go.Scatter(
             x=ok["datetime"], y=ok["cal_value"], mode="markers",
-            name=("v2.0" if method == "rayleigh" else f"{vname} (per cal)"),
+            name=(f"{vname} · {ver}" if ver else f"{vname} (per cal)"),
             marker=dict(size=5, color=color, opacity=0.7),
             error_y=dict(type="data", array=ok["uncertainty"], visible=True,
                          thickness=0.6, width=0, color="rgba(120,120,120,0.3)"),
@@ -439,7 +465,8 @@ def series_timeseries(g_m: pd.DataFrame, kal_m: pd.DataFrame, method: str,
                 fill="toself", fillcolor="rgba(214,39,40,0.12)", line=dict(width=0),
                 hoverinfo="skip", showlegend=False))
             fig.add_trace(go.Scatter(x=kt, y=ks, mode="lines",
-                                     name=("v2.0 Kalman estimate" if method == "rayleigh" else "Kalman best estimate"),
+                                     name=(f"Kalman estimate ({ver})" if ver
+                                           else "Kalman best estimate"),
                                      line=dict(color="#d62728", width=2),
                                      hovertemplate="%{x|%Y-%m-%d}<br>Kalman=%{y:.3e}<extra></extra>"))
     fig.update_layout(**_LAYOUT, yaxis_title=vname,
