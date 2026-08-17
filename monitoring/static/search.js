@@ -14,7 +14,9 @@
       r._s = (r.n + " " + r.w + " " + r.k + " " + r.c + " " + r.t).toLowerCase();
       return r;
     });
-    if (box.value.trim()) update();   // the operator may have typed before the fetch landed
+    // the operator may have typed OR just clicked into the (still empty) box before the fetch
+    // landed; in the empty case update() renders the neighbourhood, which needs these records
+    if (box.value.trim() || document.activeElement === box) update();
   });
   var matches = [], sel = -1;
 
@@ -33,10 +35,9 @@
     panel.innerHTML = matches.map(function (r, i) {
       // status dot + constant as a percent of the type's nominal value, so the panel doubles as a
       // "browse the network" view instead of being search-only
-      var dot = r.q ? '<span class="ndot ndot-' + r.q + '"></span>' : "";
       var cl = window.ALCStations.clLabel(r, window.ALCStations.bestMethod(r));
       return '<div class="sr' + (i === sel ? " sel" : "") + '" data-i="' + i + '">' +
-        dot + '<span class="sr-name">' + (r.n || r.w) + '</span>' +
+        window.ALCStations.statusDot(r) + '<span class="sr-name">' + (r.n || r.w) + '</span>' +
         '<span class="sr-key">' + r.k + '</span>' +
         '<span class="sr-meta">' + [r.t, r.c].filter(Boolean).join(" · ") + '</span>' +
         (cl ? '<span class="sr-cl">' + cl + '</span>' : "") + '</div>';
@@ -84,7 +85,14 @@
   box.addEventListener("keydown", function (e) {
     if (e.key === "ArrowDown") { sel = Math.min(sel + 1, matches.length - 1); render(); e.preventDefault(); }
     else if (e.key === "ArrowUp") { sel = Math.max(sel - 1, 0); render(); e.preventDefault(); }
-    else if (e.key === "Enter") { go(matches[sel >= 0 ? sel : 0]); e.preventDefault(); }
+    // Enter opens an explicit selection, or the best hit of a TYPED query. It must not open
+    // anything from the empty-box browse list — before the browse list existed, Enter on an empty
+    // box did nothing, and silently jumping to a station would be a nasty surprise.
+    else if (e.key === "Enter") {
+      if (sel >= 0) go(matches[sel]);
+      else if (box.value.trim()) go(matches[0]);
+      e.preventDefault();
+    }
     else if (e.key === "Escape") { matches = []; render(); box.blur(); }
   });
   document.addEventListener("click", function (e) { if (!wrap.contains(e.target)) { matches = []; render(); } });

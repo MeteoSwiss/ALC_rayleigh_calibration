@@ -249,6 +249,9 @@ def test_station_index_payload(dash):
     a = recs[0]
     assert a["t"] == "CHM15k" and a["n"] == "ALPHA" and a["w"] == "0-20000-0-00001"
     assert a["q"] == "warning"                       # last row of the synthetic status CSV
+    # the status DATE travels with the class so the client can grey out a months-old dot instead
+    # of presenting it as the station's current health
+    assert a["qd"] == _DATES[-1]
     m = a["m"]["rayleigh"]
     assert m["d"] == _DATES[-1] and m["f"] == 1.0
     # the constant is also expressed as a percent of the type's nominal value, which is what the
@@ -258,26 +261,39 @@ def test_station_index_payload(dash):
     assert "cloud" in recs[2]["m"]
 
 
-def test_station_pages_fetch_the_index_and_defer_navigation(dash):
-    """Station pages ship the filters + an EMPTY prev/next (stationnav.js fills them in), and the
-    index URL carries a cache-busting token."""
-    page = (dash["out"] / "stations" / f"{_STATIONS[1]['wmo']}_{_STATIONS[1]['ident']}.html").read_text(
-        encoding="utf-8")
+def test_station_pages_fetch_the_index_and_keep_a_baked_fallback(dash):
+    """Station pages ship the filters and fetch the index, but keep the server-baked UNFILTERED
+    neighbours in data-prev/data-next so the arrow keys work before the fetch lands."""
+    keys = [f"{s['wmo']}_{s['ident']}" for s in _STATIONS]
+    page = (dash["out"] / "stations" / f"{keys[1]}.html").read_text(encoding="utf-8")
     assert 'id="f-country"' in page and 'id="f-type"' in page
-    assert 'data-key="0-20000-0-00002_C"' in page
-    assert 'data-prev=""' in page and 'data-next=""' in page      # filled client-side
-    assert "data/stations.json?v=" in page
+    assert f'data-key="{keys[1]}"' in page
+    assert f'data-prev="{keys[0]}.html"' in page and f'data-next="{keys[2]}.html"' in page
     for asset in ("stationindex.js", "stationnav.js"):
         assert asset in page and (dash["out"] / "assets" / asset).exists()
 
 
-def test_station_index_url_token_tracks_content(dash, tmp_path):
-    """The ?v= token is the index's own content hash, so an unchanged index keeps its cached URL."""
+def test_station_index_url_is_stable_and_revalidated(dash):
+    """No ?v= token: the daily build re-renders only changed stations, so a token stamped into the
+    HTML would go stale on exactly the pages that were NOT re-rendered. One stable URL + a
+    revalidating fetch is what keeps every page correct."""
     page = (dash["out"] / "index.html").read_text(encoding="utf-8")
-    tok = page.split("data/stations.json?v=")[1].split('"')[0]
-    import hashlib
-    body = (dash["out"] / "data" / "stations.json").read_text(encoding="utf-8")
-    assert tok == hashlib.md5(body.encode("utf-8")).hexdigest()[:8]
+    assert 'data-index="data/stations.json"' in page
+    assert "stations.json?v=" not in page
+    js = (dash["out"] / "assets" / "stationindex.js").read_text(encoding="utf-8")
+    assert 'cache: "no-cache"' in js
+
+
+def test_write_if_changed_survives_a_corrupt_file(tmp_path):
+    """A file truncated mid-UTF-8 must not kill the build: read_text would raise UnicodeDecodeError
+    (a ValueError, so `except OSError` misses it) and the daily run would abort before rendering a
+    single page, repeating every day until someone deleted the file by hand."""
+    p = tmp_path / "stations.json"
+    p.write_bytes(b'[{"n":"\xc3')                     # lone UTF-8 lead byte
+    assert render._write_if_changed(p, '[{"n":"OK"}]') is True
+    assert p.read_text(encoding="utf-8") == '[{"n":"OK"}]'
+    assert render._write_if_changed(p, '[{"n":"OK"}]') is False   # unchanged -> not rewritten
+    assert not list(tmp_path.glob("*.tmp"))                       # atomic write leaves no debris
 
 
 def test_cal_class_groups_flags():

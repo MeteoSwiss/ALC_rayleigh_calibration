@@ -9,9 +9,10 @@
   <option value="">All types</option>
   {% for t in types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
 </select>
-{# The prev/next links are filled in by stationnav.js from data/stations.json: their target depends
-   on the filters above, so it cannot be baked in at build time. Hidden until then to avoid a flash
-   of empty links. #}
+{# The prev/next links are filled in by stationnav.js from data/stations.json, because their target
+   depends on the filters above. Hidden until then to avoid a flash of empty links; #station-nav
+   below still carries the server-baked UNFILTERED neighbours so the Up/Down keys work in the
+   moments before the index arrives (stationnav.js overwrites both attributes once it does). #}
 <a class="back navnb" id="nav-prev" href="#" title="Previous station (Up arrow)" hidden></a>
 <a class="back navnb" id="nav-next" href="#" title="Next station (Down arrow)" hidden></a>
 <span class="muted navhint" id="nav-hint" hidden></span>
@@ -20,7 +21,7 @@
 </select>{% endif %}{% endblock %}
 
 {% block content %}
-<div id="station-nav" data-key="{{ key }}" data-prev="" data-next="" hidden></div>
+<div id="station-nav" data-key="{{ key }}" data-prev="{{ prev_station }}" data-next="{{ next_station }}" hidden></div>
 <h1>{{ key }} <span class="badge">{{ meta.itype }}</span>
   {% for b in blocks %}<span class="mtag mtag-{{ b.method }}">{{ b.label }}</span>{% endfor %}
 </h1>

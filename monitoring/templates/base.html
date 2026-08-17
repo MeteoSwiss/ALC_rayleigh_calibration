@@ -30,8 +30,7 @@
       {% endif %}
     </a>
     <a class="brand" href="{{ base }}index.html">E-PROFILE · Calibration monitoring</a>
-    <div class="navsearch" data-base="{{ base }}"
-         data-index="{{ base }}data/stations.json{% if stations_v %}?v={{ stations_v }}{% endif %}">
+    <div class="navsearch" data-base="{{ base }}" data-index="{{ base }}data/stations.json">
       <input id="station-search" type="text" autocomplete="off" spellcheck="false"
              placeholder="Search station — name or WIGOS ID…">
       <div id="search-results" class="search-results" hidden></div>

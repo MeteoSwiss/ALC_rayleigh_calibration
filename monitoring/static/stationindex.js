@@ -2,9 +2,11 @@
 // search (search.js) and by the filtered previous/next navigation (stationnav.js).
 //
 // Why a fetch and not an inline blob: the index is the same ~100 kB for every page, so inlining it
-// duplicates it into all 436 station pages. Fetched once, it is browser-cached across the whole
-// site; its URL carries a content hash so a changed index busts that cache and an unchanged one
-// does not.
+// duplicates it into all 436 station pages. Fetched once from ONE stable URL, it is browser-cached
+// across the whole site. cache:"no-cache" makes the browser revalidate rather than trust its copy:
+// the server answers 304 (~250 B) while the index is unchanged, so the page is never stale after an
+// incremental build -- which a URL token could not guarantee, since the daily build re-renders only
+// the pages whose own data changed.
 //
 // file:// fallback: an operator opening a local build by double-click cannot fetch (the browser
 // blocks it for file:// origins), so we fall back to the inline #search-index blob, which carries
@@ -31,7 +33,7 @@
       promise = Promise.resolve(fromInline());
       return promise;
     }
-    promise = fetch(url)
+    promise = fetch(url, { cache: "no-cache" })
       .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
       .catch(function () { return fromInline(); });
     return promise;
@@ -52,5 +54,21 @@
     return ks.length ? ks[0] : null;
   }
 
-  window.ALCStations = { load: load, clLabel: clLabel, bestMethod: bestMethod };
+  // A status class is only meaningful with its date: the record holds the LAST row of the station's
+  // status file, which for a stream that stopped reporting can be months old. Beyond a week the dot
+  // is drawn as "stale" rather than as today's health.
+  var STALE_DAYS = 7;
+  function statusDot(rec) {
+    if (!rec || !rec.q) return "";
+    var cls = rec.q, title = rec.q;
+    if (rec.qd && /^\d{8}$/.test(rec.qd)) {
+      var d = Date.UTC(+rec.qd.slice(0, 4), +rec.qd.slice(4, 6) - 1, +rec.qd.slice(6, 8));
+      var age = Math.floor((Date.now() - d) / 86400000);
+      title = rec.q + " on " + rec.qd.slice(0, 4) + "-" + rec.qd.slice(4, 6) + "-" + rec.qd.slice(6, 8);
+      if (age > STALE_DAYS) { cls = "stale"; title += " (" + age + " days ago)"; }
+    }
+    return '<span class="ndot ndot-' + cls + '" title="' + title + '"></span>';
+  }
+
+  window.ALCStations = { load: load, clLabel: clLabel, bestMethod: bestMethod, statusDot: statusDot };
 })();

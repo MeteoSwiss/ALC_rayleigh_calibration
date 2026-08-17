@@ -46,13 +46,23 @@ def _write_if_changed(path: Path, text: str) -> bool:
     """Write *text* only when it differs from what is on disk. Returns True if the file was written.
 
     The publish step rsyncs by timestamp, so rewriting an identical file re-uploads it for nothing;
-    this keeps a data file out of the daily transfer on the days it does not change."""
+    this keeps a data file out of the daily transfer on the days it does not change.
+
+    Compares BYTES and writes through a temp file + os.replace, for two reasons that are not
+    theoretical: read_text() on a file truncated mid-UTF-8-sequence raises UnicodeDecodeError (a
+    ValueError, so an `except OSError` would not catch it) and would kill the whole daily build
+    before a single page is rendered, repeating on every subsequent run until someone deleted the
+    file by hand; and a non-atomic write is what would leave such a file behind in the first place.
+    Callers must pass newline-free text (a byte compare does not do the text-mode CRLF translation)."""
+    data = text.encode("utf-8")
     try:
-        if path.exists() and path.read_text(encoding="utf-8") == text:
+        if path.exists() and path.read_bytes() == data:
             return False
     except OSError:
         pass
-    path.write_text(text, encoding="utf-8")
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_bytes(data)
+    os.replace(tmp, path)
     return True
 
 
@@ -583,10 +593,12 @@ def _load_status(fullcal_dir, key):
 
 
 def _latest_status_by_key(fullcal_dir, keys) -> dict:
-    """{key: latest daily quality class} from the last line of each ``<key>_status.csv``.
+    """{key: (date, quality)} from the last line of each ``<key>_status.csv``.
 
     Reads the header plus the tail of each file rather than parsing it, because this runs once for
-    the whole network (436 files) purely to put a status dot on the neighbour links."""
+    the whole network (436 files) purely to put a status dot on the neighbour links. The DATE comes
+    back with the class because the last row can be arbitrarily old: an instrument that stopped
+    reporting months ago would otherwise show its last-ever green dot as if it were today's."""
     out = {}
     if not fullcal_dir:
         return out
@@ -607,7 +619,7 @@ def _latest_status_by_key(fullcal_dir, keys) -> dict:
         for line in reversed(tail):
             parts = line.split(",")
             if len(parts) > idx and parts[0][:1].isdigit():   # skip a re-read header line
-                out[str(k)] = parts[idx]
+                out[str(k)] = (parts[0], parts[idx])
                 break
     return out
 
@@ -621,7 +633,9 @@ def _station_index_records(st, series, fullcal_dir) -> list:
     the client never re-sorts and the navigation order is identical to the old server-baked one.
 
     Keys are short because this file is fetched by every page: k=key, n=name, w=WIGOS id,
-    c=country, t=instrument type, q=latest daily quality, m={method: {...}}."""
+    c=country, t=instrument type, q=latest daily quality, qd=the DATE of that status row (so the
+    client can grey out a dot that is months old rather than present it as current),
+    m={method: {...}}."""
     latest_q = _latest_status_by_key(fullcal_dir, list(st["key"]))
     by_key: dict = {}
     for _, r in series.iterrows():
@@ -644,13 +658,15 @@ def _station_index_records(st, series, fullcal_dir) -> list:
                 "f": float(flag) if pd.notna(flag) else None,
                 "d": str(s.get("last_date") or ""),
             }
+        qd, qv = latest_q.get(k, ("", ""))
         out.append({
             "k": k,
             "n": str(r.get("name", "") or ""),
             "w": k.rsplit("_", 1)[0] if "_" in k else k,
             "c": str(r.get("country", "") or ""),
             "t": itype,
-            "q": latest_q.get(k, ""),
+            "q": qv,
+            "qd": qd,
             "m": methods,
         })
     return out
@@ -741,7 +757,7 @@ _WORKER_CTX = None
 
 
 def _render_worker_init(db_path, out_dir, fullcal_dir, opcoeff_csv, oldray_dir, logo,
-                        search_json, periods_json, ceda_json="", stations_v="",
+                        search_json, periods_json, ceda_json="",
                         countries_json="", types_json=""):
     global _WORKER_CTX
     if _WORKER_CTX is not None:
@@ -750,9 +766,6 @@ def _render_worker_init(db_path, out_dir, fullcal_dir, opcoeff_csv, oldray_dir, 
     cal, series, st, kal, diag = metrics.load_frames(Path(db_path))
     all_keys = list(st["key"])
     env = _env()
-    # the parent computed this from the station-index content; a spawned worker must not emit a
-    # different (or empty) cache-busting token than the serial path
-    env.globals["stations_v"] = stations_v or ""
     _WORKER_CTX = SimpleNamespace(
         cal=cal, series=series, st=st, kal=kal,
         diag_by=_diag_index(diag, cal),
@@ -891,14 +904,18 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
             (["Unknown"] if "Unknown" in set(st["itype"]) else [])
 
     # Station index written ONCE to data/stations.json and fetched by every page, instead of being
-    # inlined into all 436 of them. Its own content hash is the cache-busting token, so the URL only
-    # changes when the data does. The inline #search-index blob stays for now as the file:// fallback
-    # (a build opened by double-click cannot fetch).
+    # inlined into all 436 of them. The inline #search-index blob stays for now as the file://
+    # fallback (a build opened by double-click cannot fetch).
+    #
+    # Deliberately NO ?v= token on the URL: the daily build re-renders only the stations whose data
+    # changed, so a token stamped into the HTML would go stale on exactly the pages that were not
+    # re-rendered -- i.e. it would bust the cache only where it was not needed. The client fetches
+    # the one stable URL with cache:"no-cache" instead, so the server revalidates (304, ~250 B, when
+    # unchanged) and every page is correct immediately after an incremental build.
     stations_json = json.dumps(_station_index_records(st, series, fullcal_dir),
                                ensure_ascii=False, separators=(",", ":"))
     (out_dir / "data").mkdir(parents=True, exist_ok=True)
     _write_if_changed(out_dir / "data" / "stations.json", stations_json)
-    env.globals["stations_v"] = hashlib.md5(stations_json.encode("utf-8")).hexdigest()[:8]
     # --- Time-period set (auto-derived years; active vs frozen) ----------------
     # All-time + each calendar year (first..current) + rolling last-N-day windows. The current year,
     # the rolling windows and all-time are rebuilt every run; a past complete year is built ONCE and
@@ -969,7 +986,6 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
                     str(opcoeff_csv) if opcoeff_csv else "", str(oldray_dir) if oldray_dir else "",
                     logo or "", search_json, periods_json,
                     json.dumps(ceda_by, ensure_ascii=False),
-                    env.globals.get("stations_v", ""),
                     json.dumps(countries, ensure_ascii=False),
                     json.dumps(types, ensure_ascii=False))
         # Expose the parent's ctx so fork()ed workers (Linux/CSCS) inherit it for free; spawn()ed

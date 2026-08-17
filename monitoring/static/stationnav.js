@@ -32,9 +32,9 @@
 
   function label(rec, arrow) {
     if (!rec) return "";
-    var dot = rec.q ? '<span class="ndot ndot-' + rec.q + '"></span>' : "";
     var cl = window.ALCStations.clLabel(rec, window.ALCStations.bestMethod(rec));
-    return arrow + " " + dot + '<span class="nname">' + (rec.n || rec.k) + "</span>" +
+    return arrow + " " + window.ALCStations.statusDot(rec) +
+      '<span class="nname">' + (rec.n || rec.k) + "</span>" +
       (cl ? '<span class="ncl">' + cl + "</span>" : "");
   }
 
@@ -42,15 +42,20 @@
     var c = fc ? fc.value : "";
     var t = ft ? ft.value : "";
     save({ c: c, t: t });
-    var subset = records.filter(function (r) {
+    // The selects are live from page load, so a pick made while the index is still in flight must
+    // still be persisted -- but there is nothing to recompute from yet. The load().then() below
+    // re-applies once the records arrive.
+    if (!records.length) return;
+    var filtered = records.filter(function (r) {
       return (!c || r.c === c) && (!t || r.t === t);
     });
+    var subset = filtered;
     var i = subset.findIndex(function (r) { return r.k === here; });
     var scoped = true;
     if (i < 0) {
       // The station being viewed is outside its own filter (e.g. the operator filtered to Germany
-      // while looking at a Swiss station). Dead arrows would be worse than useless, so fall back to
-      // the unfiltered neighbours and say so.
+      // while looking at a Swiss station), or the filter matches nothing at all. Dead arrows would
+      // be worse than useless, so fall back to the unfiltered neighbours and say so.
       subset = records;
       i = subset.findIndex(function (r) { return r.k === here; });
       scoped = false;
@@ -63,35 +68,43 @@
     [[prevA, prev, "&uarr;"], [nextA, next, "&darr;"]].forEach(function (t2) {
       var a = t2[0], rec = t2[1];
       if (!a) return;
-      if (!rec) { a.hidden = true; return; }
+      if (!rec) {
+        // Clear it as well as hiding it: a stale label must not be recoverable if a future
+        // stylesheet ever overrides [hidden] again.
+        a.hidden = true; a.innerHTML = ""; a.removeAttribute("href"); a.removeAttribute("title");
+        return;
+      }
       a.hidden = false;
       a.href = base + "stations/" + rec.k + ".html";
       a.innerHTML = label(rec, t2[2]);
       a.title = rec.k + (rec.c ? " · " + rec.c : "") + (rec.t ? " · " + rec.t : "");
     });
     if (hint) {
-      if (!scoped && (c || t)) {
-        hint.hidden = false;
-        hint.textContent = "this station is outside the filter — arrows walk the full network";
-      } else if (c || t) {
-        hint.hidden = false;
-        hint.textContent = subset.length + " stations in filter";
-      } else {
+      if (!(c || t)) {
         hint.hidden = true;
+      } else {
+        hint.hidden = false;
+        hint.textContent = !filtered.length
+          ? "no station matches this filter — arrows walk the full network"
+          : (!scoped ? "this station is outside the filter — arrows walk the full network"
+                     : filtered.length + " stations in filter");
       }
     }
   }
 
+  // Restore the stored filter and bind the listeners SYNCHRONOUSLY -- neither needs the index, and
+  // binding them inside the promise would silently drop a filter change made while it was in flight.
+  var f = saved();
+  if (fc && f.c) fc.value = f.c;
+  if (ft && f.t) ft.value = f.t;
+  // a stored value that no longer exists in the option list would silently filter everything out
+  if (fc && fc.selectedIndex < 0) fc.value = "";
+  if (ft && ft.selectedIndex < 0) ft.value = "";
+  if (fc) fc.addEventListener("change", apply);
+  if (ft) ft.addEventListener("change", apply);
+
   window.ALCStations.load().then(function (recs) {
     records = recs || [];
-    var f = saved();
-    if (fc && f.c) fc.value = f.c;
-    if (ft && f.t) ft.value = f.t;
-    // a stored value that no longer exists in the option list would silently filter everything out
-    if (fc && fc.selectedIndex < 0) fc.value = "";
-    if (ft && ft.selectedIndex < 0) ft.value = "";
-    if (fc) fc.addEventListener("change", apply);
-    if (ft) ft.addEventListener("change", apply);
     apply();
   });
 })();
