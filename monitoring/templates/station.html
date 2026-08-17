@@ -131,7 +131,8 @@
 <section class="methodblock">
   <h2><span class="mtag mtag-{{ b.method }}">{{ b.label }}</span>
     <span class="muted">{{ b.meta.success_rate | fmt('{:.0f}') }}% success · {{ b.meta.n_success or 0 }}/{{ b.meta.n_dates or 0 }} ·
-    median {{ b.meta.median_cl | fmt('{:.4g}') }} · rel. unc {{ b.meta.median_rel_unc | fmt('{:.0f}') }}%</span></h2>
+    median {{ b.meta.median_cl | fmt('{:.4g}') }} · rel. unc {{ b.meta.median_rel_unc | fmt('{:.0f}') }}%
+    {% if daily_panel %}· click a point to open that night{% endif %}</span></h2>
   {% if b.diags %}
   <section class="diag card" id="diag-{{ b.method }}" data-ts="fig-ts-{{ b.method }}"
            data-key="{{ key }}" data-method="{{ b.method }}" data-itype="{{ meta.itype }}" tabindex="0">

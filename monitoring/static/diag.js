@@ -130,6 +130,14 @@
 
   // The station-level availability bar (fig-avail) drives EVERY method viewer: clicking a day loads
   // that day's diagnostic + highlights it in the calendar(s) below + updates the status field.
+  // Jump every diagnostic viewer to a day. wireAvail did this inline for the availability card;
+  // exported so the C_L time series (owned by dailypanel.js) can move the viewers too.
+  window.__diagJump = function (ds) {
+    if (!ds) return;
+    viewers.forEach(function (v) { v.jumpNearest(ds); });
+    if (viewers.length) active = viewers[0];
+  };
+
   function wireAvail(id, tries) {
     var gd = document.getElementById(id);
     if (!gd) return;

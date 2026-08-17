@@ -534,3 +534,28 @@ def test_cloud_station_shows_the_cbh_heatmap(page, server, station_urls):
     order = page.evaluate("""() => [...document.querySelectorAll('.js-plotly-plot')]
         .map(d => d.id).filter(i => i === 'd_hist' || i === 'd_cbh')""")
     assert order == ["d_hist", "d_cbh"], f"cloud-base card is not beside the histogram: {order}"
+
+
+def test_clicking_the_time_series_opens_that_night(page, server, station_urls):
+    """Clicking a point on the C_L time series must open that night in the daily panel.
+
+    The click is emitted through Plotly's own event bus rather than by pointing at pixels: what
+    regressed (and what this guards) is the HANDLER wiring, not Plotly's hit-testing, and a
+    pixel-hunt for a scatter marker would make the test flaky for no added coverage.
+    """
+    _daily(page, server, station_urls)
+    got = page.evaluate("""() => {
+        const gd = document.querySelector('[id^="fig-ts-"]');
+        if (!gd || !gd.data || !gd.emit) return null;
+        const tr = gd.data.find(t => (t.x || []).length);
+        if (!tr) return null;
+        const x = tr.x[Math.floor(tr.x.length / 2)];
+        gd.emit('plotly_click', { points: [{ x: x }] });
+        const d = new Date(x);
+        return isNaN(+d) ? null : d.toISOString().slice(0, 10).replace(/-/g, '');
+    }""")
+    if not got:
+        pytest.skip("no dated time series on this page")
+    page.wait_for_timeout(1600)
+    shown = page.evaluate("() => (location.hash.match(/d=(\d{8})/) || [])[1] || ''")
+    assert shown == got, f"clicking the series point of {got} opened {shown or 'nothing'}"

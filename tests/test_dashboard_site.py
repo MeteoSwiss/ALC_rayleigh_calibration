@@ -599,3 +599,15 @@ def test_hopkin_card_absent_for_rayleigh_only_stations():
         html = p.read_text(encoding="utf-8", errors="ignore")
         if 'id="hopkin-data"' in html:
             assert 'mtag-cloud' in html, f"{p.name}: CBH card on a station with no cloud method"
+
+
+def test_dated_station_figures_open_their_night():
+    """The per-night figures (C_L series, calibration window, Rayleigh overlay) must be wired to the
+    daily panel: a marker there IS one night, and clicking the outlier you just spotted is the most
+    direct way into its diagnostic. The availability card always did this; the series did not."""
+    js = (REPO / "monitoring/static/dailypanel.js").read_text(encoding="utf-8")
+    assert 'fig-ts-' in js and 'fig-aux-' in js and 'fig-overlay' in js,         "the dated station figures must be wired for click-to-open"
+    assert "plotly_click" in js and "goDay(ds)" in js, "the click must open the day in the panel"
+    assert "__dayClickWired" in js, "re-wiring the same figure would fire goDay twice per click"
+    diag = (REPO / "monitoring/static/diag.js").read_text(encoding="utf-8")
+    assert "window.__diagJump" in diag, "the per-day images must follow the same click"

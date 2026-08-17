@@ -236,6 +236,39 @@
       });
     }
 
+    // Clicking a point on any dated station figure opens that night below. The availability card
+    // always advertised this; the C_L time series, the calibration-window chart and the Rayleigh
+    // overlay carry one marker PER NIGHT, so a click on them means exactly one day and it is the
+    // most direct way to inspect an outlier the operator has just spotted.
+    function dayFromPoint(pt) {
+      if (!pt || pt.x === undefined || pt.x === null) return null;
+      var dt = new Date(pt.x);
+      if (isNaN(+dt)) return null;
+      return dt.toISOString().slice(0, 10).replace(/-/g, "");
+    }
+    function wireDayClick(gd, tries) {
+      if (!gd) return;
+      if (typeof gd.on !== "function") {         // Plotly may not have taken the div over yet
+        if ((tries || 0) < 40) setTimeout(function () { wireDayClick(gd, (tries || 0) + 1); }, 150);
+        return;
+      }
+      if (gd.__dayClickWired) return;
+      gd.__dayClickWired = true;
+      gd.on("plotly_click", function (ev) {
+        var ds = dayFromPoint(ev && ev.points && ev.points[0]);
+        if (!ds) return;
+        console.info("[ALC] time-series click ->", ds, "(" + (gd.id || "?") + ")");
+        goDay(ds);
+        // Keep the per-day diagnostic images in step with the panel, exactly as a click on the
+        // availability card does.
+        if (typeof window.__diagJump === "function") {
+          try { window.__diagJump(ds); } catch (e) { /* viewers are optional */ }
+        }
+      });
+    }
+    document.querySelectorAll('[id^="fig-ts-"], [id^="fig-aux-"], #fig-overlay')
+      .forEach(function (gd) { wireDayClick(gd, 0); });
+
     // Plain arrows: diag.js owns them when a CALIBRATION viewer exists; otherwise they would do
     // nothing at all, so the panel steps its own indexed days.
     if (!document.querySelector('section.diag[data-method="rayleigh"], '
