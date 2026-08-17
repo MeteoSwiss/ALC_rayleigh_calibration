@@ -172,6 +172,15 @@ def test_payload_index_matches_files_on_disk():
         orphans = sorted(files - indexed)[:5]
         assert not missing, f"{key}: indexed but no file: {missing}"
         assert not orphans, f"{key}: on disk but not indexed (stale index?): {orphans}"
+        # "a daily plot in all conditions": every payload parses, none is an error, and an entry
+        # without a figure is only legitimate when the night truly has nothing to draw (kind none).
+        for ds, by in index.items():
+            for meth, summ in by.items():
+                payload = json.loads((idx_file.parent / f"{ds}_{meth}.json")
+                                     .read_text(encoding="utf-8"))
+                assert payload.get("kind") != "error", f"{key} {ds} {meth}: error payload"
+                if not summ.get("has_fig"):
+                    assert payload.get("kind") == "none",                         f"{key} {ds} {meth}: no figure but kind={payload.get('kind')}"
 
 
 @needs_site
@@ -342,6 +351,20 @@ def test_ctrl_arrows_jump_to_valid_calibrations():
     assert js.rstrip().count("}, true);") >= 1, "Ctrl handler must be a capture-phase listener"
 
 
+def test_calendar_colour_classes_are_all_defined():
+    """Regression: 'the reject days are gone' — merging the two rejected classes removed
+    CAL_COL.none while a lookup still referenced it, so rejected days resolved undefined and
+    rendered unstyled grey. Every CAL_COL.<x> reference must be a defined key, and hasFig must
+    understand index summaries (has_fig), not only full payloads."""
+    import re
+    js = _panel().PANEL_JS
+    block = js[js.index("const CAL_COL"): js.index("};", js.index("const CAL_COL"))]
+    defined = set(re.findall(r"^\s*(\w+):\s*\{", block, re.M))
+    used = set(re.findall(r"CAL_COL\.(\w+)", js))
+    assert used <= defined, f"dangling CAL_COL references: {sorted(used - defined)}"
+    assert "p.has_fig" in js, "hasFig must read the index summary field"
+
+
 def test_calendar_rail_beside_the_card():
     """Operator request: the calendar stands OUTSIDE the daily card, collapsible, with the date and
     day arrows on the card's title row."""
@@ -349,6 +372,8 @@ def test_calendar_rail_beside_the_card():
     assert 'id="cal"' in m.PANEL_RAIL and 'id="cal"' not in m.PANEL_BODY
     assert "dp-title" in m.PANEL_BODY.split("</h2>")[0], "title must open the toolbar row"
     assert "cal-toggle" in m.PANEL_BODY and "dp-wrap" in m.PANEL_CSS
+    assert "right:100%" in m.PANEL_CSS, "rail must float in the page margin, not steal card width"
+    assert 'id="cst"' not in m.PANEL_BODY, "C_L belongs to the verdict line, not the title row"
     tpl = (REPO / "monitoring/templates/station.html").read_text(encoding="utf-8")
     assert "dp-rail" in tpl and "daily_panel.rail" in tpl
     assert "no PNG involved" not in tpl

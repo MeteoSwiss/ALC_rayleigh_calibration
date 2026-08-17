@@ -835,10 +835,15 @@ PANEL_CSS = r"""
  /* Host-page grid: the calendar rail stands OUTSIDE the daily card, to its left. The rail is
     collapsible (#cal-toggle) and starts collapsed on narrow screens -- the media query only sets
     the DEFAULT; the button always wins. */
- .dp-wrap { display:grid; grid-template-columns:232px minmax(0,1fr); gap:14px; align-items:start; }
- .dp-wrap.rail-hidden { grid-template-columns:minmax(0,1fr); }
+ /* The rail lives in the PAGE MARGIN, left of the container, so the daily card spans the same
+    width as every other card (grid columns were stealing 246px from it). The host container is
+    1280px centred -> the margin fits the rail only above ~1780px viewport; below that the rail
+    starts collapsed and the toggle brings it back over the content. */
+ .dp-wrap { position:relative; }
+ .dp-rail { position:absolute; top:0; right:100%; margin-right:14px; width:232px; }
  .dp-wrap.rail-hidden .dp-rail { display:none; }
- .dp-rail { position:sticky; top:10px; }
+ @media (max-width:1779px) { .dp-wrap:not(.rail-hidden) .dp-rail {
+   position:relative; right:auto; margin:0 0 12px; width:auto; } }
  .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:9px; }
  .card + .card { margin-top:12px; }
  .toolbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
@@ -950,7 +955,6 @@ PANEL_BODY = r"""<div>
    <span class="datelbl" id="datelbl"></span>
    <button id="next">next →</button>
    <span class="seg" id="mswitch"></span>
-   <span id="cst" class="sub"></span>
   </div>
 
   <div id="msg"></div>
@@ -1062,7 +1066,7 @@ const summaryOf = (d, m) => dayOf(d, m) || ((D.index || {})[d] || {})[m] || null
 // draws the success figure AND yields a constant, a cloud rejection draws the full cloud figure and
 // yields none. See the sentinel note in _run_one.
 const isOK = p => !!(p && p.constant != null);
-const hasFig = p => !!(p && p.curtain && p.curtain.b64);
+const hasFig = p => !!(p && (p.has_fig || (p.curtain && p.curtain.b64)));
 // THREE greens: which method calibrated is the thing an operator scans the calendar for, and a
 // single green hid it. Deepest = both methods; the two single-method greens are separated by
 // lightness, not hue, so the "both is more" reading survives. The pale one takes dark text --
@@ -1084,7 +1088,7 @@ function dayColour(d) {
   const present = D.methods.map(m => summaryOf(d, m)).filter(Boolean);
   if (!present.length) return null;
   const okm = D.methods.filter(m => isOK(summaryOf(d, m)));
-  if (!okm.length) return present.some(hasFig) ? CAL_COL.fig : CAL_COL.none;
+  if (!okm.length) return CAL_COL.fig;
   // "both" means every method CONFIGURED for this station, so a Rayleigh-only instrument (a CHM15k
   // never gets a cloud calibration -- it saturates in liquid cloud) still reads as a full success
   // rather than as a permanent half-result.
@@ -1589,8 +1593,7 @@ function render() {
   if (!p && summaryOf(curDate, curMethod) && window.__onMissingDay) {
     window.__onMissingDay(curDate, curMethod);
   }
-  document.getElementById('cst').textContent =
-    p && p.constant ? 'C_L = ' + (+p.constant).toPrecision(5) : '';
+
   drawPanel(p);                    // curtain + profile, one figure, shared y
   drawWhy(p);
   drawDiag(p);
@@ -1619,7 +1622,7 @@ document.addEventListener('keydown', e => {
   if (!wrap || !btn) return;
   const KEY = 'alc-dp-rail';
   const stored = localStorage.getItem(KEY);
-  const narrow = window.matchMedia && window.matchMedia('(max-width: 1100px)').matches;
+  const narrow = window.matchMedia && window.matchMedia('(max-width: 1779px)').matches;
   if (stored === 'hidden' || (stored === null && narrow)) wrap.classList.add('rail-hidden');
   const paint = () => { btn.classList.toggle('on', !wrap.classList.contains('rail-hidden')); };
   btn.addEventListener('click', () => {

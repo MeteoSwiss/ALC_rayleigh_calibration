@@ -203,6 +203,15 @@ def _write_payloads(key: str, itype: str, days: list, out: Path, force: bool,
             try:
                 p = json.loads(f.read_text(encoding="utf-8"))
             except (OSError, ValueError):
+                # An unreadable payload whose file EXISTS is the worst state: no-force reruns skip
+                # it (the file is there) and the index rebuild drops it (unparseable), so the day
+                # silently vanishes from the calendar forever. Delete it so the next pass heals it.
+                print(f"    corrupt payload {f.name} -> deleted (next --payloads run recomputes it)",
+                      flush=True)
+                try:
+                    f.unlink()
+                except OSError:
+                    pass
                 continue
             index.setdefault(ds, {})[m] = {
                 "flag": p.get("flag"), "constant": p.get("constant"),

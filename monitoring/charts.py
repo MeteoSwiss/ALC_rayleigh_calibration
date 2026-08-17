@@ -511,11 +511,23 @@ def aux_timeseries(g_m: pd.DataFrame, method: str) -> go.Figure:
     if method == "rayleigh":
         ok = g_m[(g_m["success"] == 1) & g_m["bottom_height"].notna()].sort_values("datetime")
         if len(ok):
-            fig.add_trace(go.Scatter(x=ok["datetime"], y=ok["top_height"], mode="markers",
-                                     name="top", marker=dict(size=4, color="#2ca02c")))
-            fig.add_trace(go.Scatter(x=ok["datetime"], y=ok["bottom_height"], mode="markers",
-                                     name="bottom", fill="tonexty", fillcolor="rgba(44,160,44,0.12)",
-                                     marker=dict(size=4, color="#8c564b")))
+            # One VERTICAL SEGMENT per night, bottom to top: the window is an extent, and two
+            # disconnected dot clouds ("top" green, "bottom" brown) forced the reader to pair them
+            # by eye across the whole plot. None separators keep it a single cheap trace.
+            xs, ys = [], []
+            for t, b, tp in zip(ok["datetime"], ok["bottom_height"], ok["top_height"]):
+                xs += [t, t, None]
+                ys += [b, tp, None]
+            col = config.METHOD_COLORS.get("rayleigh", "#1f77b4")
+            fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines", name="fitted window (bottom–top)",
+                                     line=dict(color=col, width=2), hoverinfo="skip"))
+            mid = (ok["bottom_height"] + ok["top_height"]) / 2.0
+            fig.add_trace(go.Scatter(
+                x=ok["datetime"], y=mid, mode="markers", showlegend=False,
+                marker=dict(size=3, color=col),
+                customdata=np.stack([ok["bottom_height"], ok["top_height"]], axis=1),
+                hovertemplate="%{x|%Y-%m-%d}<br>%{customdata[0]:.0f}–%{customdata[1]:.0f} m"
+                              "<extra></extra>"))
         fig.update_layout(**{**_LAYOUT, "height": 300}, yaxis_title="height (m AGL)",
                           title="Calibration window", legend=dict(orientation="h", y=1.14))
     else:
