@@ -523,40 +523,79 @@ def cl_overlay(by_method: dict) -> go.Figure:
 
 
 def monitoring_timeseries(hk_df: pd.DataFrame, itype: str | None = None) -> go.Figure:
-    """Instrument monitoring: daily-mean laser power/energy & window transmission (%) on the left
-    axis and temperatures (degC) on the right axis, over time. Plots only the housekeeping fields the
-    stream actually reports (others are blank in <key>_hk.csv and skipped); gaps are real downtime."""
+    """Instrument monitoring: mean laser power/energy & window transmission (%) on the left axis and
+    temperatures (degC) on the right axis, over time. Plots only the housekeeping fields the stream
+    actually reports (others are blank in <key>_hk.csv and skipped); gaps are real downtime.
+
+    The series are reindexed onto a complete uniform time grid and shipped as ``x0``/``dx`` instead of
+    an explicit x array: with an explicit x, EVERY trace serialises its own full ISO-datetime string
+    array, which measures 82.7 kB for five daily traces over a year (and would be 1.77 MB at hourly
+    resolution). x0/dx + float32 y brings the same daily data to 19.7 kB and makes hourly resolution
+    affordable (~252 kB). ``connectgaps=False`` keeps real downtime readable as a gap."""
     fig = go.Figure()
     has_temp = False
+    t = pd.to_datetime(hk_df["datetime"])
+    step = t.diff().dropna().min() if len(t) > 1 else pd.Timedelta(days=1)
+    if pd.isna(step) or step <= pd.Timedelta(0):
+        step = pd.Timedelta(days=1)
+    grid = pd.date_range(t.min(), t.max(), freq=step)
+    d = hk_df.set_index(t).reindex(grid)            # missing days -> NaN -> a real gap in the line
+    x0 = float(grid[0].value // 10**6)              # epoch ms, as Plotly expects for a date axis
+    dx = float(step.value // 10**6)
     for field, label, unit, group in config.HK_PANEL:
-        if field not in hk_df.columns:
+        if field not in d.columns:
             continue
-        y = pd.to_numeric(hk_df[field], errors="coerce")
+        y = pd.to_numeric(d[field], errors="coerce")
         if not y.notna().any():
             continue
         if group == "temp":
             has_temp = True
         fig.add_trace(go.Scatter(
-            x=hk_df["datetime"], y=y, mode="lines", name=f"{label} [{unit}]",
+            x0=x0, dx=dx, y=y.to_numpy(dtype="float32"), mode="lines", name=f"{label} [{unit}]",
             line=dict(color=config.HK_COLORS.get(field), width=1.4),
             yaxis=("y2" if group == "temp" else "y"), connectgaps=False,
             hovertemplate="%{x|%Y-%m-%d}<br>" + label + "=%{y:.1f} " + unit + "<extra></extra>"))
-    lay = {**_LAYOUT, "height": 300, "title": "Instrument monitoring — daily averages",
-           "legend": dict(orientation="h", y=1.16), "yaxis": dict(title="laser / window [%]")}
+    # No Plotly title: the station page already has an <h2> above this card.
+    lay = {**_LAYOUT, "height": 300, "margin": dict(l=56, r=56, t=10, b=34),
+           "legend": dict(orientation="h", y=1.16), "yaxis": dict(title="laser / window [%]"),
+           "xaxis": dict(type="date")}
     if has_temp:
         lay["yaxis2"] = dict(title="temperature [degC]", overlaying="y", side="right", showgrid=False)
     fig.update_layout(**lay)
     return fig
 
 
-def daily_availability_bar(status_df: pd.DataFrame) -> go.Figure | None:
-    """Cloudnet-style daily instrument-health strip: one cell per day over the whole record, coloured
-    by quality (pass / warning / error), with record gaps shown as 'no data'. Hover gives the day's
-    decoded reporting string; clicking a day drives the diagnostic viewer (wired in diag.js via the
-    'fig-avail' id). Returns None when the stream has no decoded status history.
+def _discrete_colorscale(colors):
+    """Piecewise-constant Plotly colorscale over z = 0..len(colors)-1 (each class gets a flat band)."""
+    n = len(colors)
+    out = []
+    for i, c in enumerate(colors):
+        out.append([i / n, c])
+        out.append([(i + 1) / n, c])
+    return out
 
-    Built from <key>_status.csv (date, quality, summary). The bar spans the full record (not the
-    period selector) so it reads like Cloudnet's multi-year availability strip."""
+
+def daily_availability_rows(status_df: pd.DataFrame, cal_df: pd.DataFrame | None = None,
+                            methods=None) -> go.Figure | None:
+    """Cloudnet-style daily strip, stacked: instrument status, mean cloud cover, and one calibration
+    row per method (CL61 carries both Rayleigh and liquid-cloud, so it gets four rows).
+
+    One cell per day over the whole record; record gaps read as 'no data'. Hover gives the decoded
+    status string / the octa value / the exact calibration flag. Clicking a day drives the diagnostic
+    viewer (wired in diag.js via the 'fig-avail' id) -- that contract reads only ``points[0].x``, so
+    it is unaffected by the extra rows. Returns None when the stream has no decoded status history.
+
+    Rows are separate ``go.Heatmap`` traces, NOT bars: a bar trace makes rangesync.js force
+    ``yaxis.autorange`` on every period change (rangesync.js hasBars), which would scramble a fixed
+    row stack, and Plotly allows only one colorscale per trace while the rows need three different
+    ones. Each trace is placed with ``y0``/``dy`` on a NUMERIC axis that is then labelled by
+    tickvals/ticktext: a one-row heatmap declaring a single value on a *category* axis has no
+    defined cell height and Plotly draws nothing at all (verified -- the card came out blank).
+
+    Built from ``<key>_status.csv`` (date, quality, summary, and -- once the producer ships it --
+    mean_cloud_cover / cloud_cover_n / cloud_src) plus the station's ``<key>_cal.csv`` rows. The
+    strip spans the full record (not the period selector) so it reads like Cloudnet's multi-year
+    availability bar."""
     if status_df is None or not len(status_df):
         return None
     d = status_df.copy()
@@ -564,22 +603,99 @@ def daily_availability_bar(status_df: pd.DataFrame) -> go.Figure | None:
     d = d.dropna(subset=["dt"]).sort_values("dt")
     if not len(d):
         return None
+
+    # The x axis must span status AND calibration dates: a stream can carry calibration rows for days
+    # with no decoded status (and vice versa), and clipping to the status range would silently drop
+    # part of the calibration history.
+    lo, hi = d["dt"].min(), d["dt"].max()
+    cal_by_method = {}
+    for m in (methods or []):
+        if cal_df is None or not len(cal_df):
+            continue
+        c = cal_df[cal_df["method"] == m]
+        if not len(c):
+            continue
+        c = c.assign(dt=pd.to_datetime(c["date"].astype(str), format="%Y%m%d", errors="coerce"))
+        c = c.dropna(subset=["dt"])
+        if not len(c):
+            continue
+        cal_by_method[m] = c
+        lo, hi = min(lo, c["dt"].min()), max(hi, c["dt"].max())
+    full = pd.date_range(lo, hi, freq="D")
+
+    rows, traces = [], []
+
+    # --- row 1: instrument status (unchanged semantics and palette) --------------------------------
     qmap = dict(zip(d["dt"], d["quality"].astype(str)))
     smap = (dict(zip(d["dt"], d["summary"].astype(str))) if "summary" in d.columns else {})
-    full = pd.date_range(d["dt"].min(), d["dt"].max(), freq="D")   # fill gaps -> nodata
+    q_order = ["pass", "warning", "error", "nodata"]
+    q_idx = {q: i for i, q in enumerate(q_order)}
     quals = [qmap.get(t, "nodata") or "nodata" for t in full]
-    colors = [config.quality_color(q) for q in quals]
-    labels = [config.QUALITY_LABELS.get(q, q) for q in quals]
-    summ = [(smap.get(t, "") if t in qmap else "No data") or "" for t in full]
-    fig = go.Figure(go.Bar(
-        x=list(full), y=[1] * len(full), width=86400000.0,   # 1 day in ms -> contiguous cells
-        marker=dict(color=colors, line=dict(width=0)),
-        customdata=[[lab, ss] for lab, ss in zip(labels, summ)],
-        hovertemplate="%{x|%Y-%m-%d}<br><b>%{customdata[0]}</b><br>%{customdata[1]}<extra></extra>"))
-    fig.update_layout(**{**_LAYOUT, "height": 130, "margin": dict(l=10, r=10, t=36, b=34)},
-                      title="Daily data availability & instrument status",
-                      bargap=0, showlegend=False,
-                      yaxis=dict(visible=False, range=[0, 1], fixedrange=True),
+    rows.append("Instrument status")
+    traces.append(go.Heatmap(
+        x=list(full), y0=0, dy=1,
+        z=[[q_idx.get(q, 3) for q in quals]],
+        customdata=[[[config.QUALITY_LABELS.get(q, q),
+                      (smap.get(t, "") if t in qmap else "No data") or ""]
+                     for q, t in zip(quals, full)]],
+        colorscale=_discrete_colorscale([config.QUALITY_COLORS[q] for q in q_order]),
+        zmin=0, zmax=len(q_order), showscale=False,
+        hovertemplate="%{x|%Y-%m-%d}<br><b>%{customdata[0]}</b>"
+                      "<br>%{customdata[1]}<extra></extra>"))
+
+    # --- row 2: mean cloud cover (octas) -----------------------------------------------------------
+    # Absent until the producer writes mean_cloud_cover into <key>_status.csv; the row is simply not
+    # drawn rather than drawn empty, so an old archive looks unchanged instead of looking broken.
+    if "mean_cloud_cover" in d.columns:
+        cc = pd.to_numeric(d["mean_cloud_cover"], errors="coerce")
+        cmap = dict(zip(d["dt"], cc))
+        src = (dict(zip(d["dt"], d["cloud_src"].astype(str))) if "cloud_src" in d.columns else {})
+        vals = [cmap.get(t) for t in full]
+        vals = [None if (v is None or not pd.notna(v)) else float(v) for v in vals]
+        if any(v is not None for v in vals):
+            traces.append(go.Heatmap(
+                x=list(full), y0=len(rows), dy=1, z=[vals],
+                customdata=[[[("cbh fraction" if src.get(t) == "cbh" else "cloud_amount")]
+                             for t in full]],
+                colorscale=config.CLOUD_COVER_SCALE, zmin=0, zmax=8, showscale=False,
+                hovertemplate="%{x|%Y-%m-%d}<br><b>%{z:.1f} octas</b>"
+                              "<br>%{customdata[0]}<extra></extra>"))
+            rows.append("Mean cloud cover")
+
+    # --- rows 3..N: one calibration outcome row per method ----------------------------------------
+    cls_order = config.CAL_CLASS_ORDER
+    cls_idx = {c: i for i, c in enumerate(cls_order)}
+    cls_scale = _discrete_colorscale([config.CAL_CLASS_COLORS[c] for c in cls_order])
+    for m, c in cal_by_method.items():
+        # one row per (date, method); keep the last row if a day somehow carries duplicates
+        fmap = {t: f for t, f in zip(c["dt"], c["flag"])}
+        z, cd = [], []
+        for t in full:
+            f = fmap.get(t)
+            if f is None or not pd.notna(f):
+                z.append(None)
+                cd.append(["—", "no calibration row"])
+                continue
+            k = config.cal_class(f)
+            z.append(cls_idx[k])
+            cd.append([config.CAL_CLASS_LABELS[k], config.flag_label(f, m)])
+        traces.append(go.Heatmap(
+            x=list(full), y0=len(rows), dy=1, z=[z], customdata=[cd],
+            colorscale=cls_scale, zmin=0, zmax=len(cls_order), showscale=False,
+            hovertemplate="%{x|%Y-%m-%d}<br><b>%{customdata[0]}</b>"
+                          "<br>%{customdata[1]}<extra></extra>"))
+        rows.append(f"Calibration — {config.method_label(m)}")
+
+    fig = go.Figure(traces)
+    # The HTML card already carries an <h2>; a Plotly title here would duplicate it.
+    # Descending range = row 0 on top, without relying on autorange="reversed" (which the period
+    # selector would fight over).
+    fig.update_layout(**{**_LAYOUT, "height": 44 * len(rows) + 46,
+                         "margin": dict(l=136, r=10, t=8, b=34)},
+                      showlegend=False,
+                      yaxis=dict(tickmode="array", tickvals=list(range(len(rows))), ticktext=rows,
+                                 range=[len(rows) - 0.5, -0.5], fixedrange=True,
+                                 showgrid=False, zeroline=False, ticksuffix="  "),
                       xaxis=dict(title="", type="date"))
     return fig
 

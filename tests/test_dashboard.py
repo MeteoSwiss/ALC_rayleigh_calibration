@@ -181,7 +181,9 @@ def test_summary_reactive_kpis_and_instrument_chart(dash):
     html = (dash["out"] / "index.html").read_text(encoding="utf-8")
     assert "fig-instr" in html                                  # instruments-over-time chart
     assert 'id="series-index"' in html and 'id="instr-activity"' in html
-    for kid in ("kpi-instruments", "kpi-series", "kpi-cals", "kpi-success"):
+    # "method series" was dropped from the KPI row (operator request 2026-08-17)
+    assert 'id="kpi-series"' not in html
+    for kid in ("kpi-instruments", "kpi-cals", "kpi-success"):
         assert f'id="{kid}"' in html, f"missing KPI id {kid}"
     # filter.js recomputes those ids
     js = (Path(charts.__file__).resolve().parent / "static" / "filter.js").read_text(encoding="utf-8")
@@ -195,19 +197,70 @@ def test_favicon_present(dash):
     assert 'rel="icon"' in page and "favicon.png" in page
 
 
-def test_availability_bar_builder():
-    """daily_availability_bar builds a bar spanning the record with the quality colours + gaps."""
-    df = pd.DataFrame({"date": ["20260101", "20260103", "20260110"],  # a gap between 03 and 10
-                       "quality": ["pass", "error", "warning"],
-                       "summary": ["No warning or error recorded", "'Transmitter failure (A)' 2 h",
-                                   "'Window contamination (W)' 5 h"]})
-    fig = charts.daily_availability_bar(df)
-    assert fig is not None and fig.data
-    colors = set(fig.data[0].marker.color)
-    assert config.QUALITY_COLORS["pass"] in colors
-    assert config.QUALITY_COLORS["error"] in colors
-    assert config.QUALITY_COLORS["nodata"] in colors   # the gap days
-    assert len(fig.data[0].x) == 10                     # 20260101..20260110 inclusive
+def _status_frame():
+    return pd.DataFrame({"date": ["20260101", "20260103", "20260110"],  # a gap between 03 and 10
+                         "quality": ["pass", "error", "warning"],
+                         "summary": ["No warning or error recorded",
+                                     "'Transmitter failure (A)' 2 h",
+                                     "'Window contamination (W)' 5 h"]})
+
+
+def test_availability_rows_status_only():
+    """With no calibration rows the card is the status row alone, spanning the whole record."""
+    fig = charts.daily_availability_rows(_status_frame())
+    assert fig is not None and len(fig.data) == 1
+    assert len(fig.data[0].x) == 10                    # 20260101..20260110 inclusive
+    assert list(fig.layout.yaxis.ticktext) == ["Instrument status"]
+    assert fig.layout.title.text is None               # the HTML card carries the title
+    q = list(fig.data[0].z[0])
+    assert q[0] == 0 and q[2] == 2 and q[3] == 3       # pass, error, then gap days -> nodata
+
+
+def test_availability_rows_adds_cloud_and_calibration_rows():
+    """A CL61-like stream gets four rows: status, cloud cover, and one row per method."""
+    status = _status_frame()
+    status["mean_cloud_cover"] = [0.0, 4.0, 8.0]
+    status["cloud_src"] = ["cloud_amount"] * 3
+    cal = pd.DataFrame({"date": ["20260101", "20260103", "20260110"] * 2,
+                        "method": ["rayleigh"] * 3 + ["cloud"] * 3,
+                        "flag": [1.0, -1.0, -2.0, 1.0, -24.0, -21.0]})
+    fig = charts.daily_availability_rows(status, cal, ["rayleigh", "cloud"])
+    assert list(fig.layout.yaxis.ticktext) == [
+        "Instrument status", "Mean cloud cover", "Calibration — Rayleigh",
+        "Calibration — Liquid-cloud"]
+    assert len(fig.data) == 4
+    # rows are stacked top-down: y0 increases, and the axis range is descending
+    assert [t.y0 for t in fig.data] == [0, 1, 2, 3]
+    assert fig.layout.yaxis.range[0] > fig.layout.yaxis.range[1]
+    order = config.CAL_CLASS_ORDER
+    ray = list(fig.data[2].z[0])
+    assert ray[0] == order.index("ok") and ray[2] == order.index("noscene")
+    cld = list(fig.data[3].z[0])
+    assert cld[9] == order.index("instrument")         # flag -21 = laser energy too low
+
+
+def test_cal_class_groups_flags():
+    """Every documented flag maps to a class, and an unknown flag never reads as a success."""
+    assert config.cal_class(1) == "ok" and config.cal_class(0.5) == "ok"
+    assert config.cal_class(-1) == "noscene"
+    assert config.cal_class(-24) == "atmos" and config.cal_class(-2) == "atmos"
+    assert config.cal_class(-20) == "instrument"
+    assert config.cal_class(-3) == "retrieval"
+    assert config.cal_class(0) == "nodata"
+    assert config.cal_class(-77) == "retrieval"        # unknown -> never "ok"
+    assert config.cal_class(None) == "nodata"
+
+
+def test_monitoring_timeseries_uses_compact_x_encoding():
+    """The HK figure ships x0/dx (not a per-trace datetime array) and carries no Plotly title."""
+    hk = pd.DataFrame({"datetime": pd.to_datetime(["20260101", "20260102", "20260104"],
+                                                  format="%Y%m%d"),
+                       "laser": [100.0, 99.0, 98.0], "window": [80.0, 81.0, 82.0]})
+    fig = charts.monitoring_timeseries(hk)
+    assert fig.data and fig.data[0].x is None and fig.data[0].x0 is not None
+    assert fig.data[0].dx == 86400000.0                # one day in ms
+    assert len(fig.data[0].y) == 4                     # reindexed onto the full grid (a gap on 03)
+    assert fig.layout.title.text is None
 
 
 def test_instrument_count_chart_builder():

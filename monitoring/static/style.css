@@ -70,7 +70,9 @@ h2 { font-size: 17px; margin: 22px 0 10px; }
 .foot code { font-size: 11px; }
 
 /* KPI cards */
-.kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 8px 0 4px; }
+/* auto-fit so the row stays balanced whatever the number of KPI tiles (it went 4 -> 3) */
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px;
+  margin: 8px 0 4px; }
 .kpi { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
 .kpi-val { font-size: 22px; font-weight: 700; }
 .kpi-lbl { color: var(--muted); font-size: 12px; margin-top: 2px; }
@@ -88,10 +90,13 @@ h2 { font-size: 17px; margin: 22px 0 10px; }
   border-radius: 8px; padding: 5px 11px; }
 .btnlink:hover { border-color: var(--accent); color: var(--accent); background: #eef4fb; }
 
-/* Metadata bar */
-.metabar { display: flex; flex-wrap: wrap; gap: 8px 18px; background: var(--card);
-  border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin-bottom: 6px; }
-.metabar b { color: var(--muted); font-weight: 600; margin-right: 4px; }
+/* Station metadata, inline in the subtitle (was a separate .metabar card) */
+.metainline { color: var(--muted); font-size: 13px; margin-left: 10px; white-space: nowrap; }
+.metainline b { font-weight: 600; margin-right: 3px; margin-left: 8px; }
+@media (max-width: 900px) {
+  .metainline { display: block; margin-left: 0; white-space: normal; }
+  .metainline b:first-child { margin-left: 0; }
+}
 
 /* Tables */
 table { border-collapse: collapse; width: 100%; background: var(--card);
@@ -225,6 +230,12 @@ td a:hover { text-decoration: underline; }
 .ak-warning { background: #f4c430; }
 .ak-error { background: #e03131; }
 .ak-nodata { background: #e9ecef; }
+.ak-cc0 { background: #2b6cb0; }
+.ak-cc4 { background: #b9c4cf; }
+.ak-cc8 { background: #5a6068; }
+.avail-legend b { color: #44505f; font-weight: 600; }
+.avail-legend .legsep { display: inline-block; width: 1px; height: 14px; background: var(--line);
+  margin: 0 2px; }
 
 .diag-status { margin: 10px 2px 2px; font-size: 13px; padding: 7px 11px; border-radius: 7px;
   border-left: 4px solid var(--line); background: #f7f8fa; color: var(--ink); }

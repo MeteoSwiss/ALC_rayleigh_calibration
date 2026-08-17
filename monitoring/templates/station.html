@@ -18,6 +18,9 @@
   {%- if meta.country %}{{ bits.append(meta.country) or "" }}{% endif -%}
   {%- if meta.institution %}{{ bits.append(meta.institution) or "" }}{% endif -%}
   {% if bits %}{{ bits | join("  ·  ") }}{% else %}<span class="muted">station metadata unavailable</span>{% endif %}
+  <span class="metainline"><b>WMO</b> {{ meta.wmo or "—" }}
+    <b>Lat/Lon</b> {{ meta.lat | fmt('{:.3f}') }}, {{ meta.lon | fmt('{:.3f}') }}
+    <b>Alt</b> {{ meta.alt | fmt('{:.0f}') }} m</span>
 </p>
 
 {% if nc_files or ceda_url %}
@@ -29,21 +32,24 @@
 </section>
 {% endif %}
 
-<section class="metabar">
-  <span><b>WMO</b> {{ meta.wmo or "—" }}</span>
-  <span><b>Lat/Lon</b> {{ meta.lat | fmt('{:.3f}') }}, {{ meta.lon | fmt('{:.3f}') }}</span>
-  <span><b>Alt</b> {{ meta.alt | fmt('{:.0f}') }} m</span>
-</section>
-
 {% if availability %}
 <section class="card availcard">
-  <h2>Data availability &amp; instrument status
-    <span class="muted">— per day, decoded from the instrument status strings; click a day to load its diagnostic below</span></h2>
+  <h2>Data availability, cloud cover &amp; calibration
+    <span class="muted">— per day; click a day to load its diagnostic below</span></h2>
   <div class="avail-legend">
+    <b>Status</b>
     <span class="ak ak-pass"></span> Pass
     <span class="ak ak-warning"></span> Warning
     <span class="ak ak-error"></span> Error
     <span class="ak ak-nodata"></span> No data
+    <span class="legsep"></span>
+    <b>Cloud cover</b>
+    <span class="ak ak-cc0"></span> 0
+    <span class="ak ak-cc4"></span> 4
+    <span class="ak ak-cc8"></span> 8 octas
+    <span class="legsep"></span>
+    <b>Calibration</b>
+    {% for c in cal_classes %}<span class="ak" style="background:{{ c.color }}" title="{{ c.title }}"></span> {{ c.label }}{% endfor %}
   </div>
   {{ availability | safe }}
 </section>

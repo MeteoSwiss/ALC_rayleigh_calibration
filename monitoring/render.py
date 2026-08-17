@@ -618,7 +618,7 @@ def _render_one_station(key, ctx) -> str:
     status_df = _load_status(ctx.fullcal_dir, key)
     availability, status_json = None, None
     if status_df is not None:
-        avail_fig = charts.daily_availability_bar(status_df)
+        avail_fig = charts.daily_availability_rows(status_df, cal[cal["key"] == key], methods)
         if avail_fig is not None:
             availability = charts.fig_to_div(avail_fig, "fig-avail")
             status_map = {str(r["date"]): {"q": str(r.get("quality", "")), "s": str(r.get("summary", ""))}
@@ -628,7 +628,10 @@ def _render_one_station(key, ctx) -> str:
     # Top-of-page links: download the calibration NetCDF(s) + the matching CEDA L2 archive page.
     nc_files = _stage_netcdfs(ctx.fullcal_dir, key, ctx.out_dir)
     ceda_url = getattr(ctx, "ceda_by", {}).get(key)
-    html = ctx.tmpl.render(base="../", logo=ctx.logo, key=key, meta=meta,
+    cal_classes = [{"key": c, "label": config.CAL_CLASS_SHORT[c],
+                    "title": config.CAL_CLASS_LABELS[c],
+                    "color": config.CAL_CLASS_COLORS[c]} for c in config.CAL_CLASS_ORDER]
+    html = ctx.tmpl.render(base="../", logo=ctx.logo, key=key, meta=meta, cal_classes=cal_classes,
                            blocks=blocks, overlay=overlay, search_json=ctx.search_json,
                            prev_station=prev_station, next_station=next_station,
                            monitoring=monitoring, availability=availability, status_json=status_json,

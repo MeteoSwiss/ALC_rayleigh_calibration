@@ -149,6 +149,74 @@ def quality_color(q) -> str:
     """Colour for a daily quality class (falls back to the 'no data' grey)."""
     return QUALITY_COLORS.get(str(q), QUALITY_COLORS["nodata"])
 
+# --- Daily calibration outcome classes (availability card, row 3/4) -------------------------------
+# The 26-value FLAG_MEANINGS table is far too fine for a ~3 px daily cell, so the flags are folded
+# into six classes chosen to answer the operator's actual question -- "did we calibrate, and if not,
+# whose fault?". The boundaries follow the measured network distribution (433 streams, 112,934
+# (date, method) rows): calibrated 48.4 %, no usable scene 16.5 %, atmosphere 28.6 %, instrument
+# 0.94 %, retrieval 0.57 %, no data 1.5 %. "Instrument" gets a colour that stands out precisely
+# because it is rare AND actionable (dirty window / weak laser).
+CAL_CLASS_ORDER = ["ok", "noscene", "atmos", "retrieval", "instrument", "nodata"]
+CAL_CLASS_LABELS = {
+    "ok": "Calibrated",
+    "noscene": "No usable scene",
+    "atmos": "Rejected — atmosphere",
+    "retrieval": "Rejected — retrieval",
+    "instrument": "Rejected — instrument",
+    "nodata": "No data / missing input",
+}
+#: Legend forms. The full labels above are what the hover shows; a legend of six of them wraps to
+#: three lines on a narrow window, so the chips use these instead.
+CAL_CLASS_SHORT = {
+    "ok": "calibrated",
+    "noscene": "no scene",
+    "atmos": "atmosphere",
+    "retrieval": "retrieval",
+    "instrument": "instrument",
+    "nodata": "no data",
+}
+CAL_CLASS_COLORS = {
+    "ok": "#1a9850",          # same green as FLAG_COLORS[1]
+    "noscene": "#f6e3a1",     # pale sand: expected, the sky's fault, not a defect
+    "atmos": "#f0932b",
+    "retrieval": "#d64545",
+    "instrument": "#8e44ad",  # rare + actionable -> deliberately unlike the others
+    "nodata": "#dfe3e8",
+}
+_CAL_CLASS_OF_FLAG = {
+    1: "ok", 0.5: "ok",
+    -1: "noscene",
+    -2: "atmos", -9: "atmos", -11: "atmos",
+    -22: "atmos", -23: "atmos", -24: "atmos", -25: "atmos", -26: "atmos",
+    -3: "retrieval", -6: "retrieval", -7: "retrieval", -8: "retrieval", -99: "retrieval",
+    -20: "instrument", -21: "instrument",
+    0: "nodata", -4: "nodata", -5: "nodata", -10: "nodata",
+}
+
+
+def cal_class(flag) -> str:
+    """Display class for a daily calibration flag. Unknown flags read as a retrieval failure rather
+    than silently as 'calibrated' -- a new flag must never be able to look like a success."""
+    try:
+        f = float(flag)
+    except (TypeError, ValueError):
+        return "nodata"
+    key = int(f) if float(f).is_integer() else f
+    return _CAL_CLASS_OF_FLAG.get(key, "retrieval")
+
+# --- Mean cloud cover (availability card, row 2) ---------------------------------------------------
+# Octas 0..8 from the L1 per-profile cloud_amount (or the cbh-presence fallback). Clear sky reads as
+# a saturated blue and overcast as a dark grey, so the row reads like a sky, not like a quality
+# scale. Days the instrument does not report cloud cover at all must be z=None (paper background) --
+# visually distinct from 0 octa, which is a real measurement of a clear sky.
+CLOUD_COVER_SCALE = [
+    [0.00, "#2b6cb0"],
+    [0.25, "#7fa9d4"],
+    [0.50, "#b9c4cf"],
+    [0.75, "#8b929a"],
+    [1.00, "#5a6068"],
+]
+
 # Theoretical (reference) lidar constant per instrument type, on the C_L scale. Used to express a
 # station's median C_L as a percent of the nominal value. Mirrors INSTRUMENT_CAL_DEFAULT in the
 # cloud calibration core.

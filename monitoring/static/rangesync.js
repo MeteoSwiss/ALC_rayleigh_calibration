@@ -37,6 +37,13 @@
     (gd.data || []).forEach(function (tr) {
       if (tr.visible === "legendonly" || tr.visible === false) return;
       var xs = tr.x, ys = tr.y;
+      // Compact encoding: a uniform-grid trace ships x0/dx instead of an explicit x array (see
+      // charts.monitoring_timeseries). Without this branch the whole trace is skipped and Y stops
+      // rescaling on period change -- silently, which is why it must land with that encoding.
+      if (!xs && ys && tr.x0 !== undefined && tr.dx) {
+        xs = new Array(ys.length);
+        for (var j = 0; j < ys.length; j++) xs[j] = +tr.x0 + j * (+tr.dx);
+      }
       if (!xs || !ys) return;
       var ax = tr.yaxis || "y";
       for (var i = 0; i < xs.length; i++) {
