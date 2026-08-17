@@ -21,6 +21,15 @@
   var pending = 0;
 
   function url(ds, m) { return "../data/" + KEY + "/" + ds + "_" + m + ".json"; }
+  // The public site serves payloads from the image bucket (publish.sh data leg); the base is the
+  // same one every diag <img> already uses, recovered from any of them.
+  function bucketUrl(ds, m) {
+    var img = document.querySelector('img[src*="/diag/"], img[data-src-all*="/ombsens/"]');
+    var src = img ? (img.getAttribute("src") || img.getAttribute("data-src-all") || "") : "";
+    var i = src.indexOf("/diag/") >= 0 ? src.indexOf("/diag/") : src.indexOf("/ombsens/");
+    if (i < 0) return null;
+    return src.slice(0, i) + "/data/" + KEY + "/" + ds + "_" + m + ".json";
+  }
 
   // A page opened by double-click runs on file://, where fetch() of a sibling JSON is blocked as a
   // cross-origin request. The panel then draws nothing at all, which looks exactly like a broken
@@ -60,7 +69,13 @@
     pending++;
     return fetch(url(ds, m), { cache: "no-cache" })
       .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error(r.status)); })
-      .catch(function () { warn(url(ds, m)); return null; })
+      .catch(function () {
+        var alt = bucketUrl(ds, m);
+        if (!alt) { warn(url(ds, m)); return null; }
+        return fetch(alt, { cache: "no-cache" })
+          .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error(r.status)); })
+          .catch(function () { warn(alt); return null; });
+      })
       .then(function (p) {
         CACHE[ck] = p;
         if (p) { D.days[ds] = D.days[ds] || {}; D.days[ds][m] = p; }

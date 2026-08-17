@@ -59,6 +59,16 @@ def _changed_keys(fullcal_dir: Path, out_dir: Path):
                 changed.add(nc.relative_to(fullcal_dir).parts[0])
         except OSError:
             continue
+    # A payload backfill without any CSV change must still re-render the page that embeds the
+    # panel's boot index -- --changed-only was blind to data/<key>/_index.json updates.
+    data_dir = out_dir / "data"
+    if data_dir.exists():
+        for idx in data_dir.glob("*/_index.json"):
+            try:
+                if idx.stat().st_mtime > cutoff:
+                    changed.add(idx.parent.name)
+            except OSError:
+                continue
     return changed
 
 
@@ -87,7 +97,9 @@ def main() -> None:
     ap.add_argument("--start", default=None, help="restrict to dates >= YYYYMMDD")
     ap.add_argument("--end", default=None, help="restrict to dates <= YYYYMMDD")
     ap.add_argument("--open", action="store_true", help="open the result in a browser when done")
-    ap.add_argument("--flagex", type=Path, default=None,
+    ap.add_argument("--flagex", type=Path,
+                    default=(Path(os.environ["ALC_FLAGEX_DIR"])
+                             if os.environ.get("ALC_FLAGEX_DIR") else None),
                     help="dir of curated flag-example PNGs (named '<anchor>__<caption>.png') for flags.html")
     ap.add_argument("--opcoeff", type=Path, default=None,
                     help="CSV (key,date,op_coeff) of operational L2 calibration constants "
@@ -120,6 +132,7 @@ def main() -> None:
 
     t0 = time.perf_counter()
     print(f"Indexing {args.fullcal} ...", flush=True)
+    _t0_build = time.time()
     stats = index.build_index(args.fullcal, args.manifest, db_path, limit=args.limit,
                               types=types, l2_dir=args.l2dir, start=args.start, end=args.end)
     print(f"  {stats['n_stations']} stations, {stats['n_series']} series, "
@@ -139,7 +152,11 @@ def main() -> None:
                              opcoeff_csv=args.opcoeff, only_keys=only_keys, oldray_dir=args.oldray,
                              fullcal_dir=args.fullcal, workers=args.workers, ceda_links=args.ceda_links)
     # stamp the build time so the next --changed-only run knows what to re-render
-    (args.out / ".last_build").write_text(time.strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
+    marker = args.out / ".last_build"
+    marker.write_text(time.strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
+    # Backdate the marker's mtime to BEFORE the index was built: a CSV written while this build ran
+    # would otherwise be older than the marker and silently skipped by every future --changed-only.
+    os.utime(marker, (_t0_build, _t0_build))
     print(f"  {site['n_pages']} station pages -> {site['out_dir']}  "
           f"({time.perf_counter() - t0:.1f}s total)", flush=True)
 

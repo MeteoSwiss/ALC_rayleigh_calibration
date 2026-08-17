@@ -142,6 +142,36 @@ def update_opcoeff(ds: str) -> None:
         log(f"  opcoeff {ds}: failed: {type(exc).__name__}: {exc}")
 
 
+def update_panel_payloads(days) -> None:
+    """Regenerate the daily-calibration panel's per-night payloads for the processed days.
+
+    Gated on ALC_PANEL_PAYLOADS=1 so the operational cron is UNCHANGED until the panel is rolled
+    out deliberately. Only stations that already carry a payload index (data/<key>/_index.json in
+    the dashboard dir) are updated -- the panel appears exactly where its payloads exist, and the
+    audit's finding was that without this step the panel froze at the last manual run. Best-effort:
+    a payload failure must never fail the calibration run.
+    """
+    if os.environ.get("ALC_PANEL_PAYLOADS", "").strip() not in ("1", "true", "True"):
+        return
+    data_dir = Path(DASHBOARD_DIR) / "data"
+    keys = sorted(p.parent.name for p in data_dir.glob("*/_index.json")) if data_dir.exists() else []
+    if not keys or not days:
+        return
+    cmd = [PY, str(REPO / "scripts" / "build_station_dashboard.py"),
+           "--cal-dir", str(FULLCAL_DIR), "--status-dir", str(FULLCAL_DIR),
+           "--start", min(days), "--end", max(days),
+           "--l1-root", os.environ.get("ALC_L1_ROOT", ""),
+           "--out", str(DASHBOARD_DIR), "--payloads", "--no-pages", "--force",
+           "--workers", os.environ.get("ALC_PANEL_WORKERS", "8")]
+    for k in keys:
+        cmd += ["--key", k]
+    log(f"  panel payloads: {len(keys)} stations, {min(days)}..{max(days)}")
+    try:
+        subprocess.run(cmd, cwd=str(REPO), timeout=3600)
+    except Exception as exc:                                                  # noqa: BLE001
+        log(f"  panel payloads FAILED (non-fatal): {exc}")
+
+
 def update_dashboard() -> bool:
     cmd = [PY, str(REPO / "scripts" / "build_dashboard.py"),
            "--fullcal", str(FULLCAL_DIR), "--out", str(DASHBOARD_DIR), "--changed-only"]
@@ -209,6 +239,8 @@ def main() -> int:
     dash_ok = True
     published = None
     if ran and not args.no_dashboard:
+        update_panel_payloads(ran)               # gated on ALC_PANEL_PAYLOADS=1; BEFORE the build,
+                                                 # so --changed-only sees the fresh _index.json
         log("updating dashboard (incremental) ...")
         dash_ok = update_dashboard()
         log(f"dashboard update {'ok' if dash_ok else 'FAILED'}")

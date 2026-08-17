@@ -96,3 +96,12 @@ export ALC_TMPDIR="${ALC_TMPDIR:-/data/zue/E_PROFILE/ALC/Calibration/tmp}"
 mkdir -p "$ALC_TMPDIR" 2>/dev/null || true
 export TMPDIR="$ALC_TMPDIR"; export TMP="$ALC_TMPDIR"; export TEMP="$ALC_TMPDIR"
 export CAMS_TMPDIR="$ALC_TMPDIR"
+
+# Curated per-flag example images for flags.html. Without this the DAILY rebuild silently strips
+# the examples the operator curated (build_dashboard only kept them when --flagex was passed).
+# export ALC_FLAGEX_DIR="$ALC_BASE/flag_examples"
+
+# Daily-calibration panel payloads (interactive station pages). OFF until the panel is rolled out:
+# when =1, ops_daily regenerates data/<key>/<date>_<method>.json for panel-enabled stations after
+# each calibrated day, and publish.sh ships data/ on the S3 bucket leg.
+# export ALC_PANEL_PAYLOADS=1

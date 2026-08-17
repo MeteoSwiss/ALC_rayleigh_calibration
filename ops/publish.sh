@@ -72,7 +72,10 @@ s3_sync() {
 
 # --- 1. images -> public S3 bucket ---------------------------------------------------------------
 if [ -n "${ALC_S3_BUCKET:-}" ] && { [ -n "${ALC_S3_REMOTE:-}" ] || [ "$S3_TOOL" = "aws" ]; }; then
-  for d in diag ombsens flagex nc; do
+  # 'data' = the daily panel's per-night JSON payloads + station index. They are bucket cargo
+  # like the images: tens of MB per stream, immutable per night -- the ssh HTML leg must never
+  # carry them. The page fetches same-origin first and falls back to the bucket URL.
+  for d in diag ombsens flagex nc data; do
     [ -d "$SITE/$d" ] || continue
     echo "publish: $S3_TOOL sync $d/ -> $ALC_S3_BUCKET/$d"
     err=$(s3_sync "$SITE/$d" "$d" 2>&1 1>/dev/null); lrc=$?
@@ -115,7 +118,7 @@ fi
 if [ -n "${ALC_VM_RSYNC_TARGET:-}" ]; then
   echo "publish: rsync HTML/assets -> $ALC_VM_RSYNC_TARGET"
   err=$(rsync -az --delete --chmod=D755,F644 -e "$VM_SSH" \
-    --exclude 'diag/' --exclude 'ombsens/' --exclude 'flagex/' --exclude 'nc/' --exclude 'fullcal_l1_2026/' \
+    --exclude 'diag/' --exclude 'ombsens/' --exclude 'flagex/' --exclude 'nc/' --exclude 'data/' --exclude 'fullcal_l1_2026/' \
     --exclude 'calib_index.sqlite' --exclude '.last_build' \
     --exclude '.processed_days' --exclude '.last_success' --exclude '.git*' \
     "$SITE/" "$ALC_VM_RSYNC_TARGET/" 2>&1 1>/dev/null); lrc=$?

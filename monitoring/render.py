@@ -118,11 +118,16 @@ def _copy_flag_examples(flagex_dir, out_dir: Path) -> dict:
 def _write_assets(out_dir: Path) -> str | None:
     assets = out_dir / "assets"
     assets.mkdir(parents=True, exist_ok=True)
-    (assets / "plotly.min.js").write_text(get_plotlyjs(), encoding="utf-8")
+    # Byte-compare before writing: rewriting identical assets (4.7 MB of Plotly every day) gives
+    # them fresh mtimes and the publish rsync re-uploads them for nothing.
+    _write_if_changed(assets / "plotly.min.js", get_plotlyjs())
     for name in _VERSIONED_ASSETS:
         src = _STATIC / name
         if src.exists():
-            shutil.copyfile(src, assets / name)
+            data = src.read_bytes()
+            dst = assets / name
+            if not (dst.exists() and dst.read_bytes() == data):
+                dst.write_bytes(data)
     logo = None
     for ext in ("svg", "png", "jpg", "jpeg"):
         src = _STATIC / f"eumetnet_logo.{ext}"
