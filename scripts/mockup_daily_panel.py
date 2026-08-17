@@ -805,8 +805,9 @@ PANEL_CSS = r"""
  .legend { font-size:11px; color:var(--dim); margin-top:9px; line-height:1.7; }
  .sw { display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:5px;
        vertical-align:-1px; }
- .msg { background:#fff; border:1px solid var(--line); border-radius:10px; padding:11px 13px;
-        margin-top:12px; }
+ .msg { background:#fff; border:1px solid var(--line); border-radius:10px; padding:12px 16px;
+        margin:0 0 12px; width:100%; box-sizing:border-box; display:block; }
+ .msg:empty { display:none; }
  .msg.bad { border-left:5px solid var(--bad); background:#fdecef; }
  .msg.ok { border-left:5px solid var(--ok); }
  .msg b { font-size:14px; }
@@ -876,6 +877,8 @@ PANEL_BODY = r"""<div class="layout">
    <span id="cst" class="sub"></span>
   </div>
 
+  <div id="msg"></div>
+
   <!-- ONE card, ONE Plotly figure, two subplots on a SHARED y axis. Two separate figures could
        only be aligned by hand-matching margins, control rows and card heights, and any later edit
        silently broke it; here the alignment is structural and the y zoom is shared for free. -->
@@ -895,7 +898,6 @@ PANEL_BODY = r"""<div class="layout">
    <div class="notebar"><span class="note" id="curtitle"></span></div>
   </div>
 
-  <div id="msg"></div>
   <div id="why"></div>
   <div class="diagrow" id="diag"></div>
  </div>
@@ -996,8 +998,15 @@ const CAL_COL = {
   both:     { bg:'#17a2b8', fg:'#ffffff', lbl:'calibrated — Rayleigh <b>and</b> cloud' },
   rayleigh: { bg:'#1f77b4', fg:'#ffffff', lbl:'calibrated — Rayleigh only' },
   cloud:    { bg:'#2ca02c', fg:'#ffffff', lbl:'calibrated — cloud only' },
-  fig:      { bg:'#d98c00', fg:'#ffffff', lbl:'rejected — diagnostics shown' },
-  none:     { bg:'#b00020', fg:'#ffffff', lbl:'rejected — no figure drawn' },
+  fig:      { bg:'#d98c00', fg:'#ffffff', lbl:'rejected — you can still open the night',
+              tip:'The night did not calibrate, but a diagnostic was produced: select the day to '
+                + 'see the curtain, the profile and the reason.' },
+  // Not the same as amber. These nights stop before any diagnostic is made at all -- typically
+  // flag -4 (no usable water-vapour correction, e.g. missing CAMS) or -10. There is nothing to
+  // draw, so the panel shows only the flag and the message.
+  none:     { bg:'#b00020', fg:'#ffffff', lbl:'rejected before anything could be plotted',
+              tip:'Stopped too early for a diagnostic (e.g. flag -4: no usable water-vapour '
+                + 'correction). Only the flag and message exist for this night.' },
 };
 function dayColour(d) {
   const present = D.methods.map(m => summaryOf(d, m)).filter(Boolean);
@@ -1016,7 +1025,8 @@ function buildLegend() {
     : [{ bg:CAL_COL.both.bg, lbl:'calibrated' }];
   rows.push(CAL_COL.fig, CAL_COL.none, { bg:'#f2f4f7', lbl:'no data' });
   document.getElementById('legend').innerHTML = rows.map(r =>
-    `<span class="sw" style="background:${r.bg};border:1px solid #dbe3ea"></span>${r.lbl}`
+    `<span title="${(r.tip || r.lbl).replace(/"/g, '&quot;')}">` +
+    `<span class="sw" style="background:${r.bg};border:1px solid #dbe3ea"></span>${r.lbl}</span>`
   ).join('<br>');
 }
 

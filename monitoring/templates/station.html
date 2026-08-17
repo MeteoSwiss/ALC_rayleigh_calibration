@@ -86,6 +86,18 @@
 </section>
 {% endif %}
 
+
+
+{% for b in blocks %}
+<section class="card">
+  <h2><span class="mtag mtag-{{ b.method }}">{{ b.label }}</span> — calibration constant over time
+    <span class="muted">{{ b.meta.success_rate | fmt('{:.0f}') }}% success ·
+    {{ b.meta.n_success or 0 }}/{{ b.meta.n_dates or 0 }} ·
+    median {{ b.meta.median_cl | fmt('{:.3e}') }}</span></h2>
+  {{ b.figs.ts | safe }}
+</section>
+{% endfor %}
+
 {% if daily_panel %}
 {# Interactive daily calibration. Renders ONLY when its per-day payloads exist, so a station without
    them keeps exactly the page it had before. It sits next to the per-day diagnostic images rather
@@ -106,8 +118,6 @@
   <h2><span class="mtag mtag-{{ b.method }}">{{ b.label }}</span>
     <span class="muted">{{ b.meta.success_rate | fmt('{:.0f}') }}% success · {{ b.meta.n_success or 0 }}/{{ b.meta.n_dates or 0 }} ·
     median {{ b.meta.median_cl | fmt('{:.3e}') }} · rel. unc {{ b.meta.median_rel_unc | fmt('{:.0f}') }}%</span></h2>
-  <div class="card">{{ b.figs.ts | safe }}</div>
-
   {% if b.diags %}
   <section class="diag card" id="diag-{{ b.method }}" data-ts="fig-ts-{{ b.method }}"
            data-key="{{ key }}" data-method="{{ b.method }}" data-itype="{{ meta.itype }}" tabindex="0">
