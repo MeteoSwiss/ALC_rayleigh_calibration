@@ -627,3 +627,26 @@ def test_payload_base_is_baked_in_for_bucket_mode():
         "the explicit base must be preferred over sniffing an image"
     src = (REPO / "monitoring/render.py").read_text(encoding="utf-8")
     assert "img_base=config.IMG_BASE_URL" in src, "render must pass the bucket base to the template"
+
+
+def test_sensitivity_survives_an_empty_day():
+    """Regression, found during the v2.2 release run: a day whose L1 slice holds ZERO profiles
+    reached sensitivity_over_period, which indexes time[0] -> IndexError. The exception surfaced on
+    the worker's stdout rather than the batch log, so it presented as "sensitivity silently produces
+    nothing" -- for 419 of 434 streams. Short windows survived by luck; the full 2025-2026 window
+    contains such a day for almost every station.
+
+    Guarded at BOTH layers: the kernel returns None for an empty day, and the runner's sens loop
+    skips it exactly as the OmB loop already did."""
+    import numpy as np
+    from calibration.sensitivity.network import sensitivity_over_period
+    got = sensitivity_over_period(time=np.array([], dtype="datetime64[ns]"),
+                                  beta=np.zeros((0, 8), dtype="float32"),
+                                  range_agl=np.arange(8.0) * 30.0,
+                                  cbh=np.array([]), lat=46.8, lon=6.9, wavelength=1064.0)
+    assert got is None, "an empty day must yield no result, not raise"
+    src = (REPO / "scripts/run_network_calibration.py").read_text(encoding="utf-8")
+    i = src.index("def _do_sens")
+    j = src.index("sensitivity_over_period(", i)
+    assert 'np.size(data["time"])' in src[i:j], \
+        "the sens day loop must skip empty days before calling the kernel"

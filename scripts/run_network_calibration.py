@@ -994,7 +994,10 @@ def _do_sens(s, start, end, kalman_rows, shared=None):
         idd = shared(ds8) if shared is not None else None
         data = (idd.slice_to_date(d).to_omb_dict() if idd is not None
                 else _load_l1_window(s, d, d))
-        if data is not None:
+        # Same empty-day guard the OmB loop already carries: a day can return a dict whose arrays
+        # are EMPTY (not None), and sensitivity_over_period then indexed time[0]. One such day in
+        # the window lost the whole stream's sensitivity product.
+        if data is not None and np.size(data["time"]):
             c = _const_per_profile(data["time"], kmap, default).astype("float32")
             beta = (data["rcs"] / c[:, None]) * np.float32(1e6)  # Mm^-1 sr^-1
             parts.append(sensitivity_over_period(
