@@ -842,8 +842,12 @@ PANEL_CSS = r"""
  .dp-wrap { position:relative; }
  .dp-rail { position:absolute; top:0; right:100%; margin-right:14px; width:232px; }
  .dp-wrap.rail-hidden .dp-rail { display:none; }
+ /* Narrow screens: no margin to live in, so an OPENED rail is a compact overlay anchored under
+    the toolbar -- never a full-width block pushing the whole card down. Picking a day closes it. */
  @media (max-width:1779px) { .dp-wrap:not(.rail-hidden) .dp-rail {
-   position:relative; right:auto; margin:0 0 12px; width:auto; } }
+   position:absolute; right:auto; left:0; top:46px; width:266px; z-index:60; margin:0;
+   background:#f7f9fb; border:1px solid var(--line); border-radius:12px; padding:8px;
+   box-shadow:0 10px 30px rgba(20,40,60,.28); } }
  .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:9px; }
  .card + .card { margin-top:12px; }
  .toolbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
@@ -1155,6 +1159,12 @@ function buildCal() {
       cell.addEventListener('click', () => {
         if (window.__onMissingDay && !dayOf(ds, curMethod)) window.__onMissingDay(ds, curMethod);
         curDate = ds; render();
+        // On narrow screens the rail is an overlay covering the plots: picking a day is the end of
+        // the interaction, so it closes (without persisting -- the stored preference is untouched).
+        if (window.matchMedia && window.matchMedia('(max-width: 1779px)').matches) {
+          const w = document.querySelector('.dp-wrap');
+          if (w) w.classList.add('rail-hidden');
+        }
       });
     }
     cell.dataset.ds = ds;
