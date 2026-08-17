@@ -51,6 +51,10 @@ export ALC_FULLCAL_DIR=/scratch/mch/mhrvo/E_PROFILE_calout_v22_rel
 export ALC_MOLECULAR_METHOD=eprof_v2.2
 export ALC_WV_SPECTRUM='{"CL61": [910.55, 0.188]}'
 export STREAM_TIMEOUT=28800
+# 64 workers, not 200: the 200-worker run completed 14/433 streams -- the rest died mid-day-loop
+# with truncated caches, no exception and 'no-output', while MaxRSS sampling showed 151G. Whether
+# the killer was a sampled-past memory spike or handle pressure, OmB holds a full day of float64
+# rcs + CAMS grids per worker and 64 is the concurrency the arithmetic supports.
 export PLOTS=0
 
 if [ ! -d "$ALC_FULLCAL_DIR" ]; then
@@ -65,7 +69,7 @@ python $CODE/scripts/run_network_calibration.py \
   --start 20250101 --end 20260813 \
   --no-cal --sens --omb \
   --per-type 0 --ignore-coverage --force \
-  --workers 200
+  --workers 64
 rc=$?
 echo "addons rc=$rc"
 
