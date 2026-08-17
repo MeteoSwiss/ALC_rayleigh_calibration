@@ -32,6 +32,7 @@ import os
 import subprocess
 import sys
 import time
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -80,8 +81,28 @@ PNG_GRID_T = 800
 PNG_GRID_R = 800
 
 
+def _block_mean(a: np.ndarray, bt: int, br: int) -> np.ndarray:
+    """Block-average a (n_t, n_r) array by (bt, br), ignoring NaN.
+
+    Averaging is done by the CALLER in LINEAR space, before the log10: the mean of logs is a
+    geometric mean, which is biased low on noisy data and would darken the curtain. A block that is
+    entirely NaN stays NaN, so genuine dropouts remain gaps instead of being filled in.
+    The tail rows/columns that do not fill a whole block are averaged over what they have.
+    """
+    if bt == 1 and br == 1:
+        return a
+    n_t = int(np.ceil(a.shape[0] / bt)) * bt
+    n_r = int(np.ceil(a.shape[1] / br)) * br
+    pad = np.full((n_t, n_r), np.nan, dtype=float)
+    pad[:a.shape[0], :a.shape[1]] = a
+    blocks = pad.reshape(n_t // bt, bt, n_r // br, br)
+    with warnings.catch_warnings():                 # an all-NaN block is expected, not an error
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        return np.nanmean(blocks, axis=(1, 3))
+
+
 def _curtain(mat, rng_m, st_target_t=PNG_GRID_T, st_target_r=PNG_GRID_R,
-             vmin=None, vmax=None, crop_km=None) -> dict:
+             vmin=None, vmax=None, crop_km=None, reduce="mean") -> dict:
     """(n_time, n_range) -> quantised, strided curtain block.
 
     Colour limits are the 5th/95th percentile of the FINITE log10 values computed on the FULL field,
@@ -94,20 +115,26 @@ def _curtain(mat, rng_m, st_target_t=PNG_GRID_T, st_target_r=PNG_GRID_R,
     """
     m = np.asarray(mat, dtype=float)
     rng = np.asarray(rng_m, dtype=float)
+    lin = np.where(m > 0, m, np.nan)                # non-positive -> gap, as the PNG does
     with np.errstate(all="ignore"):
-        full = np.log10(np.where(m > 0, m, np.nan))
-    fin = full[np.isfinite(full)]
+        fin = np.log10(lin[np.isfinite(lin)])
     lo = vmin if vmin is not None else (float(np.percentile(fin, 5)) if fin.size else 0.0)
     hi = vmax if vmax is not None else (float(np.percentile(fin, 95)) if fin.size else 6.0)
     if crop_km is not None:
         keep = rng <= float(crop_km) * 1e3
         if keep.any():
-            full, rng = full[:, keep], rng[keep]
-    st_t = max(1, int(np.ceil(full.shape[0] / st_target_t)))
-    st_r = max(1, int(np.ceil(full.shape[1] / st_target_r)))
-    sub = full[::st_t, ::st_r]
+            lin, rng = lin[:, keep], rng[keep]
+    st_t = max(1, int(np.ceil(lin.shape[0] / st_target_t)))
+    st_r = max(1, int(np.ceil(lin.shape[1] / st_target_r)))
+    if reduce == "mean":
+        red = _block_mean(lin, st_t, st_r)          # average IN LINEAR SPACE, then log
+        r_km = _block_mean(rng.reshape(1, -1), 1, st_r).ravel()
+    else:
+        red, r_km = lin[::st_t, ::st_r], rng[::st_r]
+    with np.errstate(all="ignore"):
+        sub = np.log10(red)
     return {"b64": _b64(_quant_u8(sub.T, lo, hi)), "shape": list(sub.T.shape), "lo": lo, "hi": hi,
-            "range_km": _f32(rng[::st_r] * 1e-3), "st_t": st_t, "st_r": st_r}
+            "range_km": _f32(r_km * 1e-3), "st_t": st_t, "st_r": st_r, "reduce": reduce}
 
 
 def _runs(mask: np.ndarray) -> list:
