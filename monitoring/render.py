@@ -27,7 +27,8 @@ _STATIC = Path(__file__).parent / "static"
 # Project JS/CSS that get a cache-busting ?v=<hash> so browsers always pick up changes (Plotly is
 # stable + large -> left unversioned). Same list is used to copy them into the site.
 _VERSIONED_ASSETS = ("style.css", "table-sort.js", "paginate.js", "filter.js", "qcflag.js",
-                     "diag.js", "histlink.js", "search.js", "rangesync.js")
+                     "diag.js", "histlink.js", "search.js", "rangesync.js",
+                     "stationindex.js", "stationnav.js")
 
 
 def _asset_version() -> str:
@@ -39,6 +40,20 @@ def _asset_version() -> str:
         if p.exists():
             h.update(p.read_bytes())
     return h.hexdigest()[:8]
+
+
+def _write_if_changed(path: Path, text: str) -> bool:
+    """Write *text* only when it differs from what is on disk. Returns True if the file was written.
+
+    The publish step rsyncs by timestamp, so rewriting an identical file re-uploads it for nothing;
+    this keeps a data file out of the daily transfer on the days it does not change."""
+    try:
+        if path.exists() and path.read_text(encoding="utf-8") == text:
+            return False
+    except OSError:
+        pass
+    path.write_text(text, encoding="utf-8")
+    return True
 
 
 def _fmt(x, spec="{:.3g}", dash="—"):
@@ -567,6 +582,80 @@ def _load_status(fullcal_dir, key):
     return df
 
 
+def _latest_status_by_key(fullcal_dir, keys) -> dict:
+    """{key: latest daily quality class} from the last line of each ``<key>_status.csv``.
+
+    Reads the header plus the tail of each file rather than parsing it, because this runs once for
+    the whole network (436 files) purely to put a status dot on the neighbour links."""
+    out = {}
+    if not fullcal_dir:
+        return out
+    for k in keys:
+        p = Path(fullcal_dir) / str(k) / f"{k}_status.csv"
+        try:
+            with p.open("rb") as fh:
+                header = fh.readline().decode("utf-8", "replace").strip().split(",")
+                if "quality" not in header:
+                    continue
+                idx = header.index("quality")
+                fh.seek(0, 2)
+                size = fh.tell()
+                fh.seek(max(0, size - 4096))          # the tail always holds the last full row
+                tail = fh.read().decode("utf-8", "replace").strip().splitlines()
+        except OSError:
+            continue
+        for line in reversed(tail):
+            parts = line.split(",")
+            if len(parts) > idx and parts[0][:1].isdigit():   # skip a re-read header line
+                out[str(k)] = parts[idx]
+                break
+    return out
+
+
+def _station_index_records(st, series, fullcal_dir) -> list:
+    """One compact record per station for the client-side station index.
+
+    Feeds three things at once: the nav-bar search panel, the country/instrument filters on a
+    station page, and the previous/next links (which show the neighbour's status and calibration
+    constant). Emitted in the SAME order as the stations table, i.e. the order prev/next walks, so
+    the client never re-sorts and the navigation order is identical to the old server-baked one.
+
+    Keys are short because this file is fetched by every page: k=key, n=name, w=WIGOS id,
+    c=country, t=instrument type, q=latest daily quality, m={method: {...}}."""
+    latest_q = _latest_status_by_key(fullcal_dir, list(st["key"]))
+    by_key: dict = {}
+    for _, r in series.iterrows():
+        by_key.setdefault(str(r["key"]), {})[str(r["method"])] = r
+    out = []
+    for _, r in st.iterrows():
+        k = str(r["key"])
+        itype = str(r.get("itype", "") or "")
+        theo = config.theoretical_cl(itype)
+        methods = {}
+        for m, s in by_key.get(k, {}).items():
+            cl = s.get("median_cl")
+            cl = float(cl) if pd.notna(cl) else None
+            flag = s.get("last_flag")
+            methods[m] = {
+                # raw C_L spans 11 orders of magnitude across types, so the percentage of the
+                # type's nominal value is what makes the number readable in a one-line link
+                "cl": float(f"{cl:.4g}") if cl else None,
+                "pct": round(100.0 * cl / theo, 1) if (cl and theo) else None,
+                "f": float(flag) if pd.notna(flag) else None,
+                "d": str(s.get("last_date") or ""),
+            }
+        out.append({
+            "k": k,
+            "n": str(r.get("name", "") or ""),
+            "w": k.rsplit("_", 1)[0] if "_" in k else k,
+            "c": str(r.get("country", "") or ""),
+            "t": itype,
+            "q": latest_q.get(k, ""),
+            "m": methods,
+        })
+    return out
+
+
 def _load_hk(fullcal_dir, key):
     """Per-stream daily housekeeping (<key>_hk.csv) for the monitoring panel; None if absent/empty."""
     if not fullcal_dir:
@@ -633,6 +722,7 @@ def _render_one_station(key, ctx) -> str:
                     "color": config.CAL_CLASS_COLORS[c]} for c in config.CAL_CLASS_ORDER]
     html = ctx.tmpl.render(base="../", logo=ctx.logo, key=key, meta=meta, cal_classes=cal_classes,
                            blocks=blocks, overlay=overlay, search_json=ctx.search_json,
+                           countries=getattr(ctx, "countries", []), types=getattr(ctx, "types", []),
                            prev_station=prev_station, next_station=next_station,
                            monitoring=monitoring, availability=availability, status_json=status_json,
                            ombsens=ombsens, nc_files=nc_files, ceda_url=ceda_url,
@@ -651,23 +741,30 @@ _WORKER_CTX = None
 
 
 def _render_worker_init(db_path, out_dir, fullcal_dir, opcoeff_csv, oldray_dir, logo,
-                        search_json, periods_json, ceda_json=""):
+                        search_json, periods_json, ceda_json="", stations_v="",
+                        countries_json="", types_json=""):
     global _WORKER_CTX
     if _WORKER_CTX is not None:
         return  # fork (Linux/CSCS): the worker inherited the parent's ctx -> no reload/re-index
     # spawn (Windows): rebuild the read-only context from the pickled paths
     cal, series, st, kal, diag = metrics.load_frames(Path(db_path))
     all_keys = list(st["key"])
+    env = _env()
+    # the parent computed this from the station-index content; a spawned worker must not emit a
+    # different (or empty) cache-busting token than the serial path
+    env.globals["stations_v"] = stations_v or ""
     _WORKER_CTX = SimpleNamespace(
         cal=cal, series=series, st=st, kal=kal,
         diag_by=_diag_index(diag, cal),
         op_all=_load_opcoeff(opcoeff_csv or None),
         oldray_all=_load_oldray(oldray_dir or None),
-        tmpl=_env().get_template("station.html"),
+        tmpl=env.get_template("station.html"),
         out_dir=Path(out_dir), fullcal_dir=(fullcal_dir or None),
         all_keys=all_keys, nav_idx={k: i for i, k in enumerate(all_keys)},
         logo=(logo or None), search_json=search_json,
         ceda_by=(json.loads(ceda_json) if ceda_json else {}),
+        countries=(json.loads(countries_json) if countries_json else []),
+        types=(json.loads(types_json) if types_json else []),
         periods=(json.loads(periods_json) if periods_json else None),
         periods_json=(periods_json or None))
 
@@ -792,6 +889,16 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
     types = [t for t in config.TYPE_ORDER if t in set(st["itype"])] + \
             sorted(set(st["itype"]) - set(config.TYPE_ORDER) - {"Unknown"}) + \
             (["Unknown"] if "Unknown" in set(st["itype"]) else [])
+
+    # Station index written ONCE to data/stations.json and fetched by every page, instead of being
+    # inlined into all 436 of them. Its own content hash is the cache-busting token, so the URL only
+    # changes when the data does. The inline #search-index blob stays for now as the file:// fallback
+    # (a build opened by double-click cannot fetch).
+    stations_json = json.dumps(_station_index_records(st, series, fullcal_dir),
+                               ensure_ascii=False, separators=(",", ":"))
+    (out_dir / "data").mkdir(parents=True, exist_ok=True)
+    _write_if_changed(out_dir / "data" / "stations.json", stations_json)
+    env.globals["stations_v"] = hashlib.md5(stations_json.encode("utf-8")).hexdigest()[:8]
     # --- Time-period set (auto-derived years; active vs frozen) ----------------
     # All-time + each calendar year (first..current) + rolling last-N-day windows. The current year,
     # the rolling windows and all-time are rebuilt every run; a past complete year is built ONCE and
@@ -848,7 +955,8 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
         cal=cal, kal=kal, series=series, st=st, diag_by=diag_by, op_all=op_all,
         oldray_all=oldray_all, tmpl=station_tmpl, out_dir=out_dir, fullcal_dir=fullcal_dir,
         all_keys=all_keys, nav_idx=nav_idx, logo=logo, search_json=search_json,
-        ceda_by=ceda_by, periods=period_list, periods_json=periods_json)
+        ceda_by=ceda_by, countries=countries, types=types,
+        periods=period_list, periods_json=periods_json)
 
     n_workers = int(workers) if workers else 1
     if n_workers > 1 and len(keys) > 1:
@@ -860,7 +968,10 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
         initargs = (str(db_path), str(out_dir), str(fullcal_dir) if fullcal_dir else "",
                     str(opcoeff_csv) if opcoeff_csv else "", str(oldray_dir) if oldray_dir else "",
                     logo or "", search_json, periods_json,
-                    json.dumps(ceda_by, ensure_ascii=False))
+                    json.dumps(ceda_by, ensure_ascii=False),
+                    env.globals.get("stations_v", ""),
+                    json.dumps(countries, ensure_ascii=False),
+                    json.dumps(types, ensure_ascii=False))
         # Expose the parent's ctx so fork()ed workers (Linux/CSCS) inherit it for free; spawn()ed
         # workers (Windows) ignore this and rebuild from initargs in the initializer.
         global _WORKER_CTX

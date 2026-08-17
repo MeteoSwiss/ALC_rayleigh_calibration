@@ -8,7 +8,7 @@ body {
   font: 14px/1.45 -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
 }
 .topbar {
-  display: flex; align-items: center; gap: 12px;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   background: var(--brand); color: #fff; padding: 10px 18px;
   position: sticky; top: 0; z-index: 50;
 }
@@ -36,6 +36,31 @@ body {
 .sr-name { font-weight: 600; color: var(--ink); font-size: 13px; }
 .sr-key { font-size: 11px; color: var(--muted); font-family: ui-monospace, "Cascadia Code", monospace; text-align: right; align-self: center; }
 .sr-meta { grid-column: 1 / -1; font-size: 11px; color: var(--muted); }
+.sr-cl { grid-column: 2; grid-row: 2; font-size: 11px; color: var(--muted); text-align: right; }
+
+/* Daily-status dot, shared by the search panel and the prev/next station links. */
+.ndot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px;
+  vertical-align: middle; }
+.ndot-pass { background: #3cb371; }
+.ndot-warning { background: #f4c430; }
+.ndot-error { background: #e03131; }
+.ndot-nodata { background: #e9ecef; }
+
+/* Previous/next station links: the neighbour's name is truncated so the crowded topbar keeps a
+   fixed width whatever the station is called. */
+.navnb { display: inline-flex; align-items: center; gap: 4px; max-width: 190px; margin-left: 10px; }
+.navnb .nname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.navnb .ncl { color: #a9c7dd; font-size: 11px; flex: none; }
+.navhint { color: #a9c7dd; font-size: 11px; margin-left: 8px; }
+/* The station topbar carries logo + brand + search + flag link + summary link + 2 filters + 2
+   neighbour links + the period selector: past ~1570 px of fixed content it must give ground rather
+   than overflow. The bar wraps (above), and below a laptop width the least useful pieces shrink. */
+@media (max-width: 1500px) {
+  .navsearch input { width: 200px; }
+  .navnb { max-width: 132px; }
+  .navnb .ncl, .navhint { display: none; }
+}
+@media (max-width: 1100px) { .topbar .brand { display: none; } }
 .navlink { color: #d6e6f2; text-decoration: none; font-size: 13px; margin-left: 6px; white-space: nowrap; }
 .navlink:hover { color: #fff; text-decoration: underline; }
 

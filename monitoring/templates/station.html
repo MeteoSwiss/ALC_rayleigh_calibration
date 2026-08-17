@@ -1,14 +1,26 @@
 {% extends "base.html" %}
 {% block title %}{{ key }} — calibration{% endblock %}
 {% block headerextra %}<a class="back" href="{{ base }}index.html">&larr; summary</a>
-{% if prev_station %}<a class="back" href="{{ prev_station }}" title="Previous station (Up arrow)">&uarr; prev station</a>{% endif %}
-{% if next_station %}<a class="back" href="{{ next_station }}" title="Next station (Down arrow)">&darr; next station</a>{% endif %}
+<select id="f-country" class="navfilter" title="Filter the station navigation by country">
+  <option value="">All countries</option>
+  {% for c in countries %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+</select>
+<select id="f-type" class="navfilter" title="Filter the station navigation by instrument type">
+  <option value="">All types</option>
+  {% for t in types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+</select>
+{# The prev/next links are filled in by stationnav.js from data/stations.json: their target depends
+   on the filters above, so it cannot be baked in at build time. Hidden until then to avoid a flash
+   of empty links. #}
+<a class="back navnb" id="nav-prev" href="#" title="Previous station (Up arrow)" hidden></a>
+<a class="back navnb" id="nav-next" href="#" title="Next station (Down arrow)" hidden></a>
+<span class="muted navhint" id="nav-hint" hidden></span>
 {% if periods %}<select id="period-sel" class="navfilter" title="Time window — zooms every chart, the calibration list and the OmB/sensitivity panels">
   {% for p in periods %}<option value="{{ p.key }}"{% if p.key == 'all' %} selected{% endif %}>{{ p.label }}</option>{% endfor %}
 </select>{% endif %}{% endblock %}
 
 {% block content %}
-<div id="station-nav" data-prev="{{ prev_station }}" data-next="{{ next_station }}" hidden></div>
+<div id="station-nav" data-key="{{ key }}" data-prev="" data-next="" hidden></div>
 <h1>{{ key }} <span class="badge">{{ meta.itype }}</span>
   {% for b in blocks %}<span class="mtag mtag-{{ b.method }}">{{ b.label }}</span>{% endfor %}
 </h1>

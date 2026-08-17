@@ -239,6 +239,47 @@ def test_availability_rows_adds_cloud_and_calibration_rows():
     assert cld[9] == order.index("instrument")         # flag -21 = laser energy too low
 
 
+def test_station_index_payload(dash):
+    """data/stations.json carries one record per station, in the navigation order, with the
+    status and the constant the neighbour links display."""
+    p = dash["out"] / "data" / "stations.json"
+    assert p.exists()
+    recs = json.loads(p.read_text(encoding="utf-8"))
+    assert [r["k"] for r in recs] == [f"{s['wmo']}_{s['ident']}" for s in _STATIONS]
+    a = recs[0]
+    assert a["t"] == "CHM15k" and a["n"] == "ALPHA" and a["w"] == "0-20000-0-00001"
+    assert a["q"] == "warning"                       # last row of the synthetic status CSV
+    m = a["m"]["rayleigh"]
+    assert m["d"] == _DATES[-1] and m["f"] == 1.0
+    # the constant is also expressed as a percent of the type's nominal value, which is what the
+    # links show (raw C_L spans 11 orders of magnitude across types)
+    assert 90 <= m["pct"] <= 110
+    # the CL31 station calibrates by cloud, so its record carries that method instead
+    assert "cloud" in recs[2]["m"]
+
+
+def test_station_pages_fetch_the_index_and_defer_navigation(dash):
+    """Station pages ship the filters + an EMPTY prev/next (stationnav.js fills them in), and the
+    index URL carries a cache-busting token."""
+    page = (dash["out"] / "stations" / f"{_STATIONS[1]['wmo']}_{_STATIONS[1]['ident']}.html").read_text(
+        encoding="utf-8")
+    assert 'id="f-country"' in page and 'id="f-type"' in page
+    assert 'data-key="0-20000-0-00002_C"' in page
+    assert 'data-prev=""' in page and 'data-next=""' in page      # filled client-side
+    assert "data/stations.json?v=" in page
+    for asset in ("stationindex.js", "stationnav.js"):
+        assert asset in page and (dash["out"] / "assets" / asset).exists()
+
+
+def test_station_index_url_token_tracks_content(dash, tmp_path):
+    """The ?v= token is the index's own content hash, so an unchanged index keeps its cached URL."""
+    page = (dash["out"] / "index.html").read_text(encoding="utf-8")
+    tok = page.split("data/stations.json?v=")[1].split('"')[0]
+    import hashlib
+    body = (dash["out"] / "data" / "stations.json").read_text(encoding="utf-8")
+    assert tok == hashlib.md5(body.encode("utf-8")).hexdigest()[:8]
+
+
 def test_cal_class_groups_flags():
     """Every documented flag maps to a class, and an unknown flag never reads as a success."""
     assert config.cal_class(1) == "ok" and config.cal_class(0.5) == "ok"

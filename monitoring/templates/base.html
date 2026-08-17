@@ -30,7 +30,8 @@
       {% endif %}
     </a>
     <a class="brand" href="{{ base }}index.html">E-PROFILE · Calibration monitoring</a>
-    <div class="navsearch" data-base="{{ base }}">
+    <div class="navsearch" data-base="{{ base }}"
+         data-index="{{ base }}data/stations.json{% if stations_v %}?v={{ stations_v }}{% endif %}">
       <input id="station-search" type="text" autocomplete="off" spellcheck="false"
              placeholder="Search station — name or WIGOS ID…">
       <div id="search-results" class="search-results" hidden></div>
@@ -53,7 +54,10 @@
   <script src="{{ base }}assets/qcflag.js?v={{ asset_v }}"></script>
   <script src="{{ base }}assets/diag.js?v={{ asset_v }}"></script>
   <script src="{{ base }}assets/histlink.js?v={{ asset_v }}"></script>
+  <!-- Shared station index: must load before its two consumers (search + station navigation). -->
+  <script src="{{ base }}assets/stationindex.js?v={{ asset_v }}"></script>
   <script src="{{ base }}assets/search.js?v={{ asset_v }}"></script>
+  <script src="{{ base }}assets/stationnav.js?v={{ asset_v }}"></script>
   <!-- Period selector: loads last so paginate (_repaginate) + diag (calendar hook) are ready. -->
   <script src="{{ base }}assets/rangesync.js?v={{ asset_v }}"></script>
 </body>

@@ -5,21 +5,23 @@
 (function () {
   var box = document.getElementById("station-search");
   var panel = document.getElementById("search-results");
-  var idxEl = document.getElementById("search-index");
   var wrap = document.querySelector(".navsearch");
-  if (!box || !panel || !idxEl || !wrap) return;
+  if (!box || !panel || !wrap || !window.ALCStations) return;
   var base = wrap.getAttribute("data-base") || "";
-  var records;
-  try { records = JSON.parse(idxEl.textContent); } catch (e) { return; }
-  records.forEach(function (r) {
-    r._s = (r.name + " " + r.wigos + " " + r.key + " " + r.country + " " + r.type).toLowerCase();
+  var records = [];
+  window.ALCStations.load().then(function (recs) {
+    records = (recs || []).map(function (r) {
+      r._s = (r.n + " " + r.w + " " + r.k + " " + r.c + " " + r.t).toLowerCase();
+      return r;
+    });
+    if (box.value.trim()) update();   // the operator may have typed before the fetch landed
   });
   var matches = [], sel = -1;
 
-  function go(rec) { if (rec) window.location.href = base + "stations/" + rec.key + ".html"; }
+  function go(rec) { if (rec) window.location.href = base + "stations/" + rec.k + ".html"; }
 
   function rank(r, q) {  // prefix matches first, then name-contains, then anything
-    var n = r.name.toLowerCase(), w = r.wigos.toLowerCase();
+    var n = (r.n || "").toLowerCase(), w = (r.w || "").toLowerCase();
     if (n.indexOf(q) === 0) return 0;
     if (w.indexOf(q) === 0) return 1;
     if (n.indexOf(q) >= 0) return 2;
@@ -29,10 +31,15 @@
   function render() {
     if (!matches.length) { panel.hidden = true; panel.innerHTML = ""; return; }
     panel.innerHTML = matches.map(function (r, i) {
+      // status dot + constant as a percent of the type's nominal value, so the panel doubles as a
+      // "browse the network" view instead of being search-only
+      var dot = r.q ? '<span class="ndot ndot-' + r.q + '"></span>' : "";
+      var cl = window.ALCStations.clLabel(r, window.ALCStations.bestMethod(r));
       return '<div class="sr' + (i === sel ? " sel" : "") + '" data-i="' + i + '">' +
-        '<span class="sr-name">' + (r.name || r.wigos) + '</span>' +
-        '<span class="sr-key">' + r.key + '</span>' +
-        '<span class="sr-meta">' + [r.type, r.country].filter(Boolean).join(" · ") + '</span></div>';
+        dot + '<span class="sr-name">' + (r.n || r.w) + '</span>' +
+        '<span class="sr-key">' + r.k + '</span>' +
+        '<span class="sr-meta">' + [r.t, r.c].filter(Boolean).join(" · ") + '</span>' +
+        (cl ? '<span class="sr-cl">' + cl + '</span>' : "") + '</div>';
     }).join("");
     panel.hidden = false;
     Array.prototype.forEach.call(panel.querySelectorAll(".sr"), function (el) {
@@ -43,15 +50,33 @@
   function update() {
     var q = box.value.trim().toLowerCase();
     sel = -1;
-    if (!q) { matches = []; render(); return; }
+    if (!q) {
+      // Empty box on focus = "browse the neighbours": show the stations around this one, honouring
+      // the navbar filter if there is one, so browsing and searching are the same panel.
+      matches = neighbourhood();
+      render();
+      return;
+    }
     matches = records.filter(function (r) { return r._s.indexOf(q) >= 0; });
     matches.sort(function (a, b) {
       var ra = rank(a, q), rb = rank(b, q);
       if (ra !== rb) return ra - rb;
-      return (a.name || a.key).localeCompare(b.name || b.key);
+      return (a.n || a.k).localeCompare(b.n || b.k);
     });
     matches = matches.slice(0, 15);
     render();
+  }
+
+  function neighbourhood() {
+    var navEl = document.getElementById("station-nav");
+    var here = navEl && navEl.getAttribute("data-key");
+    var fc = document.getElementById("f-country"), ft = document.getElementById("f-type");
+    var c = fc ? fc.value : "", t = ft ? ft.value : "";
+    var subset = records.filter(function (r) { return (!c || r.c === c) && (!t || r.t === t); });
+    if (!subset.length) return [];
+    var i = here ? subset.findIndex(function (r) { return r.k === here; }) : -1;
+    if (i < 0) return subset.slice(0, 15);
+    return subset.slice(Math.max(0, i - 7), Math.max(0, i - 7) + 15);
   }
 
   box.addEventListener("input", update);

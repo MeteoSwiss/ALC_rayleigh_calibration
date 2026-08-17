@@ -90,6 +90,10 @@
   var fc = document.getElementById("f-country");
   var ft = document.getElementById("f-type");
   if (!fc && !ft) return;
+  // Station pages carry the same two selects, but there they scope the previous/next navigation
+  // (stationnav.js) and there is nothing filterable on the page. Without this guard every change
+  // would run five no-op passes over tables/maps/histograms that do not exist here.
+  if (!document.querySelector("table.filterable")) return;
   var tables = Array.prototype.slice.call(document.querySelectorAll("table.filterable"));
   var count = document.getElementById("filter-count");
   // Per-instrument-type ranked-histogram sections ("Median C_L per station, by type"): when a type
