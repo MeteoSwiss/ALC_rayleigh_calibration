@@ -1100,7 +1100,9 @@ function buildViewSwitch(views) {
     b.addEventListener('click', () => { userView = v; curLogX = null; render(); });
     host.appendChild(b);
   });
-  const eff = curLogX === null ? !!(views[curView] && views[curView].logx) : curLogX;
+  // `views` is null until the day's payload lands (the lazy dashboard renders the shell first), so
+  // this must not dereference it -- it threw on every first paint before the fetch resolved.
+  const eff = curLogX === null ? !!(views && views[curView] && views[curView].logx) : curLogX;
   document.querySelectorAll('#xswitch button').forEach(b =>
     b.className = ((b.dataset.x === 'log') === eff) ? 'on' : '');
 }

@@ -202,6 +202,32 @@ def _write_payloads(key: str, itype: str, days: list, out: Path, force: bool,
     return index
 
 
+def _write_assets(out: Path, stations: list) -> None:
+    """Copy the production static assets and write the search index.
+
+    The chrome is not decoration: the logo is the way back to the overview, the search box is how an
+    operator reaches a station that is not a neighbour of this one, and style.css carries the whole
+    colour scheme. Rebuilding a page without them, as the first version did, silently drops all of
+    that. Plotly is written ONCE here instead of being inlined per page.
+    """
+    adir = out / "assets"
+    adir.mkdir(parents=True, exist_ok=True)
+    src = REPO / "monitoring/static"
+    for f in sorted(src.iterdir()):
+        if f.is_file():
+            adir.joinpath(f.name).write_bytes(f.read_bytes())
+    (adir / "plotly.min.js").write_text(pyo.get_plotlyjs(), encoding="utf-8")
+    # search.js / stationindex.js read this; it is also what feeds the navbar station list.
+    ddir = out / "data"
+    ddir.mkdir(parents=True, exist_ok=True)
+    (ddir / "stations.json").write_text(json.dumps([
+        {"key": s["key"], "wmo": s.get("wmo"), "name": s.get("name"),
+         "country": s.get("country"), "itype": s.get("itype"), "ident": s.get("ident"),
+         "url": f"station_{s['key']}.html"} for s in stations],
+        separators=(",", ":")), encoding="utf-8")
+    print(f"  assets: {len(list(adir.iterdir()))} files + data/stations.json", flush=True)
+
+
 # ============================================================================================ page
 def _fig(fig, div_id):
     return charts.fig_to_div(fig, div_id) if fig is not None else \
@@ -334,10 +360,8 @@ def build_page(key: str, rec: dict, args, index: dict, stations: list) -> str:
             "methods": methods, "dates": dates, "days": {}, "index": index}
     meta = {"n_days": len(dates), "gz_kb": 0, "per_unit_kb": 0, "curated": False, "lazy": True}
 
-    css = (REPO / "monitoring/static/style.css").read_text(encoding="utf-8")
     panel_js = PANEL.PANEL_JS.replace("__META__", json.dumps(meta))
-    return (PAGE.replace("__STYLECSS__", css)
-                .replace("__PANELCSS__", PANEL.PANEL_CSS)
+    return (PAGE.replace("__PANELCSS__", PANEL.PANEL_CSS)
                 .replace("__TITLE__", f"{rec.get('name') or key} — ALC calibration")
                 .replace("__HEADER__", _header(rec))
                 .replace("__BLOCKS__", "\n".join(blocks))
@@ -345,8 +369,7 @@ def build_page(key: str, rec: dict, args, index: dict, stations: list) -> str:
                 .replace("__CURKEY__", json.dumps(key))
                 .replace("__PERIODS__", json.dumps([{"k": k, "l": l} for k, l in PERIODS]))
                 .replace("__PANELJS__", panel_js)
-                .replace("__PAYLOAD__", json.dumps(boot, separators=(",", ":")))
-                .replace("__PLOTLY__", pyo.get_plotlyjs()))
+                .replace("__PAYLOAD__", json.dumps(boot, separators=(",", ":"))))
 
 
 def _header(rec: dict) -> str:
@@ -364,22 +387,27 @@ def _header(rec: dict) -> str:
 PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>__TITLE__</title>
-<script>__PLOTLY__</script>
+<link rel="stylesheet" href="assets/style.css">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<!-- Shared bundle, not inlined: 4.7 MB of Plotly per page x N stations is absurd, and the browser
+     caches one copy across the whole site. -->
+<script src="assets/plotly.min.js" charset="utf-8"></script>
 <style>
-__STYLECSS__
 __PANELCSS__
-/* ---------- page shell + navbar-integrated station controls ---------- */
-body { padding:0 0 40px; background:#f7f9fb; }
-.nav { position:sticky; top:0; z-index:50; display:flex; align-items:center; gap:9px;
-       flex-wrap:wrap; padding:8px 16px; background:#fff; border-bottom:1px solid #dbe3ea;
-       box-shadow:0 1px 4px rgba(20,40,60,.06); }
-.nav select, .nav input { font:inherit; font-size:13px; padding:4px 8px; border:1px solid #c3ceda;
-       border-radius:7px; background:#fff; }
-.nav .sp { flex:1; }
-.nav .cnt { font-size:11.5px; color:#66707a; }
-.kbd { font:11px ui-monospace,Consolas,monospace; background:#eef4fb; border:1px solid #d6e4f2;
-       border-radius:5px; padding:1px 5px; color:#0b3d61; }
-.wrap { padding:0 18px; }
+/* ---------- station controls, added INTO the production topbar ---------- */
+.topbar .stnav { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.topbar .stnav select, .topbar .stnav button { font:inherit; font-size:12.5px; padding:3px 7px;
+       border:1px solid rgba(255,255,255,.35); border-radius:6px; background:rgba(255,255,255,.12);
+       color:#fff; }
+.topbar .stnav select option { color:#12293d; }
+.topbar .stnav button:hover:not(:disabled) { background:rgba(255,255,255,.28); cursor:pointer; }
+.topbar .stnav button:disabled { opacity:.4; }
+.topbar .cnt { font-size:11px; color:rgba(255,255,255,.8); }
+.kbd { font:11px ui-monospace,Consolas,monospace; background:rgba(255,255,255,.16);
+       border:1px solid rgba(255,255,255,.3); border-radius:5px; padding:1px 5px; color:#fff; }
+.kbdbar { font-size:11px; color:#66707a; margin:6px 0 0; }
+.kbdbar .kbd { background:#eef4fb; border-color:#d6e4f2; color:#0b3d61; }
+.wrap { padding:0; }
 h1 { font-size:22px; margin:14px 0 2px; }
 h1 .itype { font-size:14px; font-weight:500; color:#66707a; margin-left:6px; }
 .metainline { color:#66707a; font-size:13px; margin:0 0 10px; }
@@ -413,27 +441,43 @@ h2 { font-size:13px; margin:0 0 8px; text-transform:uppercase; letter-spacing:.0
 @media (max-width:1100px) { .grid2 { grid-template-columns:1fr; } }
 </style></head><body>
 
-<div class="nav">
-  <b style="font-size:13px">ALC calibration</b>
-  <select id="f-country" title="Country filter — also limits the up/down arrows"></select>
-  <select id="f-type" title="Instrument filter — also limits the up/down arrows"></select>
-  <button id="st-prev" title="Previous station (Up arrow)">↑</button>
-  <select id="st-sel" title="Station"></select>
-  <button id="st-next" title="Next station (Down arrow)">↓</button>
-  <span class="cnt" id="st-pos"></span>
-  <span class="sp"></span>
-  <select id="period-sel" title="Time window for the OmB and sensitivity panels"></select>
-  <span class="cnt"><span class="kbd">←→</span> day
-    <span class="kbd">Ctrl ←→</span> any day
-    <span class="kbd">↑↓</span> station
-    <span class="kbd">0</span> flag
-    <span class="kbd">1 2 3</span> quick flag</span>
-</div>
+<!-- The production topbar (monitoring/templates/base.html): logo home-link, brand, station search
+     and the flag reference. The station controls are added INTO it rather than into a second bar of
+     my own, which is what dropped the branding, the search and the way home the first time. -->
+<header class="topbar">
+  <a class="logo" href="index.html" title="EUMETNET E-PROFILE">
+    <img src="assets/eumetnet_logo.png" alt="EUMETNET" height="24">
+  </a>
+  <a class="brand" href="index.html">E-PROFILE · Calibration monitoring</a>
+  <div class="navsearch" data-base="" data-index="data/stations.json">
+    <input id="station-search" type="text" autocomplete="off" spellcheck="false"
+           placeholder="Search station — name or WIGOS ID…">
+    <div id="search-results" class="search-results" hidden></div>
+  </div>
+  <span class="spacer"></span>
+  <div class="stnav">
+    <select id="f-country" title="Country filter — also limits the up/down arrows"></select>
+    <select id="f-type" title="Instrument filter — also limits the up/down arrows"></select>
+    <button id="st-prev" title="Previous station (Up arrow)">↑</button>
+    <select id="st-sel" title="Station"></select>
+    <button id="st-next" title="Next station (Down arrow)">↓</button>
+    <span class="cnt" id="st-pos"></span>
+    <select id="period-sel" title="Time window for the OmB and sensitivity panels"></select>
+  </div>
+  <a class="navlink" href="flags.html">Flag reference</a>
+</header>
 
-<div class="wrap">
+<main class="container wrap">
 __HEADER__
+<p class="kbdbar"><span class="kbd">←→</span> calibrated days ·
+  <span class="kbd">Ctrl ←→</span> every day with a diagnostic ·
+  <span class="kbd">↑↓</span> station ·
+  <span class="kbd">0</span> flag + comment ·
+  <span class="kbd">1 2 3</span> aerosol / cloud / low signal</p>
 __BLOCKS__
-</div>
+</main>
+<footer class="foot">Static dashboard · daily payloads fetched on demand from
+  <code>data/&lt;key&gt;/&lt;date&gt;_&lt;method&gt;.json</code></footer>
 
 <script id="stations" type="application/json">__STATIONS__</script>
 <script id="payload" type="application/json">__PAYLOAD__</script>
@@ -711,12 +755,20 @@ def main() -> None:
         p.write_text(html, encoding="utf-8")
         print(f"  -> {p}  ({p.stat().st_size / 1e6:.1f} MB, {len(index)} indexed days)", flush=True)
 
+    _write_assets(args.out, stations)
     (args.out / "index.html").write_text(
-        "<!doctype html><meta charset='utf-8'><title>ALC stations</title>"
-        "<h1>ALC calibration — stations</h1><ul>" + "".join(
+        "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
+        "<title>E-PROFILE · Calibration monitoring</title>"
+        "<link rel='stylesheet' href='assets/style.css'>"
+        "<link rel='icon' type='image/png' href='assets/favicon.png'></head><body>"
+        "<header class='topbar'><a class='logo' href='index.html'>"
+        "<img src='assets/eumetnet_logo.png' alt='EUMETNET' height='24'></a>"
+        "<a class='brand' href='index.html'>E-PROFILE · Calibration monitoring</a>"
+        "<span class='spacer'></span><a class='navlink' href='flags.html'>Flag reference</a>"
+        "</header><main class='container'><h2>Stations</h2><ul>" + "".join(
             f'<li><a href="station_{k}.html">{by_key[k].get("name") or k} · '
             f'{by_key[k].get("itype")} · unit {by_key[k].get("ident")}</a></li>'
-            for k in args.key) + "</ul>", encoding="utf-8")
+            for k in args.key) + "</ul></main></body></html>", encoding="utf-8")
     print(f"\nindex: {args.out / 'index.html'}")
 
 

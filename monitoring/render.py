@@ -28,7 +28,7 @@ _STATIC = Path(__file__).parent / "static"
 # stable + large -> left unversioned). Same list is used to copy them into the site.
 _VERSIONED_ASSETS = ("style.css", "table-sort.js", "paginate.js", "filter.js", "qcflag.js",
                      "diag.js", "histlink.js", "search.js", "rangesync.js",
-                     "stationindex.js", "stationnav.js")
+                     "stationindex.js", "stationnav.js", "dailypanel.js")
 
 
 def _asset_version() -> str:
@@ -696,6 +696,33 @@ def _load_hk(fullcal_dir, key):
 
 
 # --- per-station page render (shared by the serial + parallel paths) ----------
+def _daily_panel(out_dir: Path, key: str, methods: list) -> dict | None:
+    """The interactive daily-calibration panel, when its payloads have been generated.
+
+    The panel is an ADDITION to this page, never a replacement for it: the per-day index it needs
+    lives in ``<out>/data/<key>/_index.json`` (written by scripts/build_station_dashboard.py), and
+    when that file is absent the section simply does not render and every existing block is
+    untouched. Returns the template variables, or None.
+    """
+    idx = out_dir / "data" / key / "_index.json"
+    if not idx.exists():
+        return None
+    try:
+        index = json.loads(idx.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not index:
+        return None
+    from scripts import mockup_daily_panel as PANEL
+    boot = {"station": {"key": key}, "methods": methods,
+            "dates": sorted(index), "days": {}, "index": index}
+    meta = {"n_days": len(index), "gz_kb": 0, "per_unit_kb": 0, "curated": False, "lazy": True}
+    return {"body": PANEL.PANEL_BODY, "css": PANEL.PANEL_CSS,
+            "js": PANEL.PANEL_JS.replace("__META__", json.dumps(meta)),
+            "payload": json.dumps(boot, separators=(",", ":")),
+            "n_days": len(index)}
+
+
 def _render_one_station(key, ctx) -> str:
     """Render and write one station's HTML page from the shared context *ctx*. Independent of every
     other station (writes only stations/<key>.html and stages that key's own OmB/sens PNGs), so it is
@@ -736,7 +763,9 @@ def _render_one_station(key, ctx) -> str:
     cal_classes = [{"key": c, "label": config.CAL_CLASS_SHORT[c],
                     "title": config.CAL_CLASS_LABELS[c],
                     "color": config.CAL_CLASS_COLORS[c]} for c in config.CAL_CLASS_ORDER]
+    daily_panel = _daily_panel(ctx.out_dir, key, methods)
     html = ctx.tmpl.render(base="../", logo=ctx.logo, key=key, meta=meta, cal_classes=cal_classes,
+                           daily_panel=daily_panel,
                            blocks=blocks, overlay=overlay, search_json=ctx.search_json,
                            countries=getattr(ctx, "countries", []), types=getattr(ctx, "types", []),
                            prev_station=prev_station, next_station=next_station,

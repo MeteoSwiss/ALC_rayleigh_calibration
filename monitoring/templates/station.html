@@ -153,6 +153,21 @@
 </section>
 {% endif %}
 
+{% if daily_panel %}
+{# Interactive daily calibration. Renders ONLY when its per-day payloads exist, so a station without
+   them keeps exactly the page it had before. It sits next to the per-day diagnostic images rather
+   than replacing them: the images are the operational product, this reads the same nights as data. #}
+<style>{{ daily_panel.css | safe }}</style>
+<section class="card" id="daily">
+  <h2>Daily calibration <span class="muted">— drawn in the browser from
+    {{ daily_panel.n_days }} days of per-night data; no PNG involved</span></h2>
+  {{ daily_panel.body | safe }}
+</section>
+<script id="payload" type="application/json">{{ daily_panel.payload | safe }}</script>
+<script>{{ daily_panel.js | safe }}</script>
+<script src="{{ base }}assets/dailypanel.js?v={{ asset_v }}"></script>
+{% endif %}
+
 {% if monitoring %}
 <section class="card">
   <h2>Instrument monitoring <span class="muted">— daily averages: laser power, window transmission, temperatures</span></h2>
