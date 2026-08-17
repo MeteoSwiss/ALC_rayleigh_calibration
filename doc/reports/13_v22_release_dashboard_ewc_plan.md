@@ -147,7 +147,7 @@ this needs no client change.
 Additions to `publish.sh`:
 
 1. `aws s3 sync <site>/data s3://eprofile-alc-dashboard/data --size-only` with
-   `--content-encoding gzip` if the gzip decision is taken. Parallelism matters at 41 000 objects;
+   `--content-encoding gzip` if the gzip decision is taken. Parallelism matters at 235 000 objects;
    set `max_concurrent_requests` in the AWS config rather than looping.
 2. A **prune** rule mirroring the existing diag-PNG prune: payloads older than the window are
    removed from the bucket after a successful sync, if a horizon is adopted (§0 decision 2);
