@@ -65,7 +65,7 @@ since the two stores coexist until the PNG retirement completes.
 
 ---
 
-## OPEN DEFECT found during execution: the sensitivity product is not being produced
+## DEFECT found and FIXED during execution: the sensitivity product
 
 Measured on the release tree while the add-ons job ran:
 
@@ -89,20 +89,37 @@ pre-existing gap. What has been ruled out, with evidence:
 * **not OmB consuming the shared per-day read first** — all 15 streams with sensitivity also have
   OmB, so the two are not mutually exclusive.
 
-What is left, and what the evidence points at: the streams that succeed are the SHORT ones
-(0-20000-0-00202_A has 52 days of L1), while 500-plus-day streams produce nothing — so the suspect
-is the day loop in `_do_sens` over a long window (it accumulates one `SensResult` per day in
-`parts` before writing, unlike OmB which updates its cache per day).
+**Root cause, reproduced.** Re-running the real path on one "failing" stream: a 31-day window
+produced everything (cache, CSV, six period PNGs); the full 2025-2026 window raised
 
-**Impact and decision.** It blocks nothing in this release: the payloads, the constants, the Kalman,
-OmB, classification and every time series are complete. It costs one of the three cards at the
-bottom of the station page. The release therefore proceeds, and:
+```
+File "calibration/sensitivity/network.py", line 80, in sensitivity_over_period
+    dtime_s = (time - time[0]) / np.timedelta64(1, "s")
+IndexError: index 0 is out of bounds for axis 0 with size 0
+```
 
-* **OmB images ARE re-uploaded** (complete and v2.2);
-* **sensitivity images are NOT** — the bucket keeps the operational v2.0 ones rather than a
-  15-station v2.2 patchwork;
-* the fix is a targeted `--sens`-only re-run once the day loop is understood, which touches no
-  calibration value.
+A station can have an L1 file whose slice for a given date holds **zero profiles**. That day reached
+the kernel, which indexed `time[0]`. The runner forces logging to CRITICAL inside `_process_stream`,
+so the exception went to the worker's stdout and never reached the batch log — which is exactly why
+"no `failed:` lines" was misleading evidence, and why this presented as a silent no-op. Short
+windows survived only because they happened to contain no such day.
+
+It is the same empty-day class already fixed in the OmB loop (`np.char.replace` on an empty array);
+the sens loop still checked only `data is not None`, and an empty-but-not-None day passed it.
+
+**Fixed at both layers** (commit `bc4615b`): the kernel returns `None` for an empty day, and the
+runner skips it before calling. A behavioural regression test drives the kernel with an empty day.
+
+**Decision, now that it is fixed.** A sensitivity-only re-run (`alc_v22_sens.sbatch`, job 5124609,
+`--no-cal --sens`, so it cannot change a calibration value) was chained after the OmB pass, and the
+finalize job's dependency extended to wait for it:
+
+```
+scontrol update JobId=5124545 Dependency=afterok:5123654:5124484:5124609
+```
+
+The release therefore ships the COMPLETE sensitivity product, and both OmB and sensitivity images
+refresh with the HTML flip — page and diagnostics share one vintage.
 
 ---
 
