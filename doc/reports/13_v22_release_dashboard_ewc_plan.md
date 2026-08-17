@@ -65,6 +65,47 @@ since the two stores coexist until the PNG retirement completes.
 
 ---
 
+## OPEN DEFECT found during execution: the sensitivity product is not being produced
+
+Measured on the release tree while the add-ons job ran:
+
+| product | streams |
+|---|---|
+| `_omb_cache.npz` | **429** / 434 |
+| `_omb.csv` | 387 |
+| `_sens_cache.npz` | **15** |
+| `_sens.csv` | 15 |
+
+The live bucket carries `_sens.png` for **431** stations, so this is a REGRESSION of this run, not a
+pre-existing gap. What has been ruled out, with evidence:
+
+* **not a crash** — zero `failed:` lines in the job log;
+* **not the Kalman gate** (`if not kmap: return None`) — the failing streams have 556 and 463
+  rayleigh Kalman rows, *more* than a stream that succeeds (41);
+* **not the regression guard** — it fires only when a non-empty `_sens.csv` exists without its
+  cache, and only 15 `_sens.csv` exist at all;
+* **not the kernel** — driven directly on a real day for a failing stream,
+  `sensitivity_over_period` returns a `SensResult` with `dates=1`;
+* **not OmB consuming the shared per-day read first** — all 15 streams with sensitivity also have
+  OmB, so the two are not mutually exclusive.
+
+What is left, and what the evidence points at: the streams that succeed are the SHORT ones
+(0-20000-0-00202_A has 52 days of L1), while 500-plus-day streams produce nothing — so the suspect
+is the day loop in `_do_sens` over a long window (it accumulates one `SensResult` per day in
+`parts` before writing, unlike OmB which updates its cache per day).
+
+**Impact and decision.** It blocks nothing in this release: the payloads, the constants, the Kalman,
+OmB, classification and every time series are complete. It costs one of the three cards at the
+bottom of the station page. The release therefore proceeds, and:
+
+* **OmB images ARE re-uploaded** (complete and v2.2);
+* **sensitivity images are NOT** — the bucket keeps the operational v2.0 ones rather than a
+  15-station v2.2 patchwork;
+* the fix is a targeted `--sens`-only re-run once the day loop is understood, which touches no
+  calibration value.
+
+---
+
 ## 1. Prerequisites (must be true before step 2 starts)
 
 1. **Add-ons job finished** — `ALC_V22_ADDONS_DONE rc=0`, `count(_omb_cache.npz) == count(*_omb.csv)`.
