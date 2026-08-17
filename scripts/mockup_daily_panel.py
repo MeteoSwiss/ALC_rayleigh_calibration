@@ -105,7 +105,11 @@ def _views(rcs, sig, beta, mol_sig, mol_beta) -> dict:
         out["sig"] = {"x": _f32(sig * SCALE), "label": "Signal (Mm⁻¹)", "logx": True,
                       "mol": _f32(mol_sig * SCALE) if mol_sig is not None else None}
     if beta is not None and np.isfinite(beta).any():
-        out["beta"] = {"x": _f32(beta * SCALE), "label": "β_att (Mm⁻¹ sr⁻¹)", "logx": False,
+        # LOG by default, and this is a deliberate departure from the PNG, whose beta_att panel is
+        # linear (plotting.py:900-908) while its cloud counterpart is log. beta_att spans orders of
+        # magnitude between the molecular tail and a cloud, so linear collapses everything below the
+        # peak into the axis; the operator can still flip it. The cloud figure had it right.
+        out["beta"] = {"x": _f32(beta * SCALE), "label": "β_att (Mm⁻¹ sr⁻¹)", "logx": True,
                        "mol": _f32(mol_beta * SCALE) if mol_beta is not None else None}
     return out
 
@@ -225,13 +229,8 @@ def _profile_cloud(data, res, sel: np.ndarray, cal_lo: float, cal_hi: float) -> 
     cbh = np.asarray(getattr(data, "cbh", []), float)
     med_cbh = (float(np.nanmedian(cbh[sel])) if (sel.any() and cbh.size == beta_2d.shape[1]
                                                  and np.isfinite(cbh[sel]).any()) else float("nan"))
-    views = _views(rcs, sig, prof, None, None)
-    # The cloud figure draws its profile on a LOG x axis (plotting.py:176) while the Rayleigh
-    # beta_att panel is linear -- a calibration cloud spans orders of magnitude between the aerosol
-    # below and the cloud peak. So the default follows the METHOD, not the view name; the operator
-    # can still flip it with the linear/log switch.
-    if "beta" in views:
-        views["beta"]["logx"] = True
+    views = _views(rcs, sig, prof, None, None)   # beta already defaults to log, as this method's
+                                                 # own figure does (plotting.py:176)
     out = {"y": _f32(rng * 1e-3), "y_label": "Range (km AGL)", "y_max": y_max,
            "views": views,
            "cal_band": [cal_lo * 1e-3, cal_hi * 1e-3],
@@ -240,9 +239,13 @@ def _profile_cloud(data, res, sel: np.ndarray, cal_lo: float, cal_hi: float) -> 
            "mean_of": ("mean of %d selected profiles" % int(sel.sum())) if sel.any()
                       else "night mean (no profile was selected)"}
     if np.isfinite(med_cbh):
-        out["extra_band"] = [med_cbh * 1e-3, (med_cbh + 300.0) * 1e-3]
-        out["extra_band_label"] = "where B accumulates (CBH → +300 m)"
+        # Only the median cloud base, drawn as a line and labelled as the summary statistic it is.
+        # The PNG also shades a "where B accumulates (CBH -> +300 m)" band there; that band is a
+        # PER-PROFILE truth and this curve is a mean over profiles with DIFFERENT cloud bases, so
+        # the accumulation layer is already smeared across the average. Shading one 300 m slab at
+        # the median asserts a coherence the averaging destroyed, so it is not drawn here.
         out["med_cbh_km"] = med_cbh * 1e-3
+        out["med_cbh_label"] = "median cloud base of the selected profiles"
     return out
 
 
@@ -541,18 +544,43 @@ def _pack_cloud(data, res) -> dict:
             "coeffs": _jsonable(coeffs[np.isfinite(coeffs)]),
             "cal_median": None if not np.isfinite(cal_med) else float(cal_med),
             "cal_std": None if not np.isfinite(cal_std) else float(cal_std)}
-    lines = [f"C_L (Wiegner)   = {g('lidar_constant', float('nan')):.4g}",
-             f"coefficient C   = {cal_med:.4g}",
-             f"std(C)          = {cal_std:.3g}",
-             (f"rel. unc        = {100 * cal_std / cal_med:.1f} %" if cal_med else "rel. unc = —"),
-             f"n profiles used = {g('n_profiles', 0)}",
-             f"theoretical S   = {s_theo:.2f} sr"]
-    for name, d in (("instrument filter", g("filter_stats")), ("cloud filter", g("cloud_stats")),
-                    ("consistency", g("consistency_stats"))):
-        if isinstance(d, dict) and d:
-            lines.append(f"{name} rejections:")
-            lines += [f"   {k}: {v}" for k, v in d.items()]
-    diag["summary"] = lines
+    # A prose description of WHY, in place of the stats dump -- the same treatment the Rayleigh
+    # window gets. The three filters are a funnel, so the useful question is which stage removed
+    # the profiles, not what each counter reads.
+    def _stage(label, what, d):
+        det = {str(k): int(v) for k, v in (d or {}).items()
+               if isinstance(v, (int, float)) and v} if isinstance(d, dict) else {}
+        return {"name": label, "what": what, "removed": int(sum(det.values())), "detail": det}
+
+    stages = [_stage("instrument health", "window transmission, laser energy, quality flag",
+                     g("filter_stats")),
+              _stage("cloud scene", "peak sharpness, ±300 m around the peak, aerosol ratio, "
+                                    "cloud-base range", g("cloud_stats")),
+              _stage("temporal consistency", "N consecutive profiles within ±X % of their mean",
+                     g("consistency_stats"))]
+    remaining, n_used = n_time, int(sel.sum())
+    for s in stages:
+        s["before"] = remaining
+        remaining = max(remaining - s["removed"], 0)
+        s["after"] = remaining
+    worst = max(stages, key=lambda s: s["removed"]) if stages else None
+    s_med = float(np.nanmedian(S_con[sel])) if sel.any() else float("nan")
+    diag["why"] = {
+        "kind": "cloud",
+        "n_total": n_time, "n_used": n_used,
+        "stages": stages,
+        "driver": (worst["name"] if worst and worst["removed"] else None),
+        "gate_km": [cal_lo * 1e-3, cal_hi * 1e-3],
+        "s_theo": float(s_theo),
+        "s_med": None if not np.isfinite(s_med) else s_med,
+        "C": None if not np.isfinite(cal_med) else float(cal_med),
+        "C_std": None if not np.isfinite(cal_std) else float(cal_std),
+        "C_L": (float(g("lidar_constant")) if np.isfinite(g("lidar_constant", float("nan")))
+                else None),
+        "applied": (float(getattr(data, "calibration_constant_applied", float("nan")))
+                    if getattr(data, "calibration_constant_applied", None) else None),
+        "wv": bool(getattr(data, "trans2_wv", None) is not None),
+    }
     prof = _profile_cloud(data, res, sel, cal_lo, cal_hi)
     _share_y(cur, prof)          # already agree for cloud (both AGL, both capped at cal_hi + 1 km)
     return {"kind": "cloud", "curtain": cur, "profile": prof, "diag": diag}
@@ -775,6 +803,7 @@ PANEL_CSS = r"""
  .note { font-size:11.5px; color:var(--dim); }
  .hd { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--dim);
        margin-right:4px; }
+ .axlbl { display:inline-flex; align-items:center; gap:5px; font-size:11px; color:var(--dim); }
  .empty { text-align:center; color:var(--dim); padding:60px 10px; }
  .whycard { margin-top:12px; }
  .wtop { margin:0 0 8px; font-size:13px; }
@@ -836,8 +865,11 @@ PANEL_BODY = r"""<div class="layout">
    <div class="ctrls">
     <b class="hd">Time–height &amp; profile</b>
     <span class="seg" id="vswitch"></span>
-    <span class="seg" id="xswitch">
-      <button data-x="lin">linear</button><button data-x="log">log</button></span>
+    <!-- Scoped to the profile ON PURPOSE: the curtain is quantised in log space and bands on a
+         linear ramp, so it stays log10. Saying so on the control is cheaper than explaining it. -->
+    <label class="axlbl">profile x
+      <span class="seg" id="xswitch">
+        <button data-x="lin">linear</button><button data-x="log">log</button></span></label>
    </div>
    <div class="ctrls"><span class="note" id="curtitle"></span></div>
    <div id="panel"></div>
@@ -899,7 +931,8 @@ const isDate = c => !!c.time;
 // ---------------------------------------------------------------- state
 let curDate = D.dates[0];
 let curMethod = null;
-let curView = 'beta';        // profile selector, persists across days
+let curView = 'beta';        // resolved on every render by buildViewSwitch
+let userView = null;         // set ONLY by an explicit click on the selector
 // null = "follow the view's own default" (RCS is linear, signal is log, exactly as the PNG draws
 // them). An explicit click on the linear/log switch pins it until the view changes again.
 let curLogX = null;
@@ -1025,12 +1058,17 @@ function buildViewSwitch(views) {
   const host = document.getElementById('vswitch');
   host.innerHTML = '';
   const have = VIEW_ORDER.filter(v => views && views[v]);
-  if (!have.includes(curView)) curView = have[have.length-1] || 'beta';
+  // Attenuated backscatter is THE default whenever the night can form it: it is the physical
+  // product and the one view both methods share. It has to be re-preferred rather than remembered,
+  // because a rejected night has no constant and so cannot form it -- without this the selector
+  // would stay stuck on the fallback view after the operator moved back to a calibrated night.
+  curView = (userView && have.includes(userView)) ? userView
+          : (have.includes('beta') ? 'beta' : (have[have.length - 1] || 'beta'));
   have.forEach(v => {
     const b = document.createElement('button');
     b.textContent = views[v].name || VIEW_NAMES[v];
     b.className = v === curView ? 'on' : '';
-    b.addEventListener('click', () => { curView = v; curLogX = null; render(); });
+    b.addEventListener('click', () => { userView = v; curLogX = null; render(); });
     host.appendChild(b);
   });
   const eff = curLogX === null ? !!(views[curView] && views[curView].logx) : curLogX;
@@ -1047,7 +1085,12 @@ document.querySelectorAll('#xswitch button').forEach(b =>
 //     signal   = beta_att / range^2 -> that offset, plus a per-GATE offset
 // so the curtain is transformed in place. Quantisation happened in the base field's log space and
 // both transforms are affine there, so nothing is lost relative to the stored curtain.
-function curtainZ(c, view, useLog) {
+// The curtain is ALWAYS shown on log10. That is not a preference: it is quantised to 254 levels
+// spaced uniformly in LOG space, so a linear ramp puts ~37 of those levels across the top decade
+// and crushes everything below into the first few colours -- it bands visibly. The profile has no
+// such constraint (it ships as float32), which is why the linear/log switch applies to it alone.
+// A genuinely linear curtain would need a second, linearly-quantised payload.
+function curtainZ(c, view) {
   const zz = grid(c), rk = f32(c.range_km);
   const lc = (c.log_c === null || c.log_c === undefined) ? null : +c.log_c;
   let off = 0, byGate = false;
@@ -1055,7 +1098,7 @@ function curtainZ(c, view, useLog) {
   if (view === 'beta') off = (c.base === 'rcs') ? (lc === null ? 0 : -lc) : 0;
   if (view === 'sig') { off = (c.base === 'rcs') ? (lc === null ? 0 : -lc) : 0; byGate = true; }
   let lo = c.lo + off, hi = c.hi + off;    // keep the PNG's own 5-95 percentile limits
-  if (byGate) { lo = Infinity; hi = -Infinity; }
+  const sample = [];
   for (let j = 0; j < zz.length; j++) {
     // rows are range gates; clamp so the first gate cannot give log10(0) = -Infinity
     const extra = byGate ? -2 * Math.log10(Math.max(rk[j] * 1000, 1)) : 0;
@@ -1063,15 +1106,18 @@ function curtainZ(c, view, useLog) {
     for (let i = 0; i < row.length; i++) {
       if (row[i] === null) continue;
       row[i] += off + extra;
-      if (byGate) { if (row[i] < lo) lo = row[i]; if (row[i] > hi) hi = row[i]; }
+      if (byGate && ((i + j) % 7 === 0)) sample.push(row[i]);
     }
   }
-  if (!isFinite(lo) || !isFinite(hi)) { lo = c.lo + off; hi = c.hi + off; }
-  if (!useLog) {
-    for (const row of zz) for (let i = 0; i < row.length; i++)
-      if (row[i] !== null) row[i] = Math.pow(10, row[i]);
-    lo = Math.pow(10, lo); hi = Math.pow(10, hi);
+  if (byGate && sample.length > 20) {
+    // The per-gate shift is not a constant, so the stored percentiles no longer apply. Take fresh
+    // 5/95 percentiles off a subsample rather than min/max -- a single hot gate would otherwise
+    // stretch the scale and posterise the whole panel, which is the same failure in another guise.
+    sample.sort((a, b) => a - b);
+    lo = sample[Math.floor(0.05 * (sample.length - 1))];
+    hi = sample[Math.floor(0.95 * (sample.length - 1))];
   }
+  if (!(hi > lo)) { lo = c.lo + off; hi = c.hi + off; }
   return { z: zz, lo: lo, hi: hi };
 }
 
@@ -1090,13 +1136,12 @@ function drawPanel(p) {
   // curtain either, or the two halves of one card would be showing different quantities.
   const cv = v ? curView : (c.base === 'rcs' ? 'rcs' : 'beta');
   const X = xOf(c), rk = f32(c.range_km);
-  const Z = curtainZ(c, cv, useLog);
+  const Z = curtainZ(c, cv);
 
   const tr = [{ type:'heatmap', z:Z.z, x:X, y:rk, colorscale:'Viridis', zmin:Z.lo, zmax:Z.hi,
       xaxis:'x', yaxis:'y',
-      colorbar:{ title:{ text:(useLog ? 'log₁₀(' + Z_LABEL[cv] + ')' : Z_LABEL[cv]) },
-                 thickness:12, x:0.615, len:0.92 },
-      hovertemplate:'%{x}<br>%{y:.2f} km<br>%{z:.3g}<extra></extra>' }];
+      colorbar:{ title:{ text:'log₁₀(' + Z_LABEL[cv] + ')' }, thickness:12, x:0.615, len:0.92 },
+      hovertemplate:'%{x}<br>%{y:.2f} km<br>log₁₀ %{z:.2f}<extra></extra>' }];
   const shapes = [];
   (c.bands || []).forEach(b => {
     (b.runs || []).forEach(r => shapes.push({ type:'rect', xref:'x', yref:'y domain', y0:0, y1:1,
@@ -1136,17 +1181,16 @@ function drawPanel(p) {
         line:{color:'#1f77b4', width:1.1}, connectgaps:false });
     if (v.mol) tr.push({ x:f32(v.mol), y:y, mode:'lines', xaxis:'x2', yaxis:'y2',
         name:v.mol_name || 'molecular', line:{color:'#d62728', width:1.1, dash:'dash'} });
-    if (pr.extra_band) shapes.push({ type:'rect', xref:'x2 domain', yref:'y2', x0:0, x1:1,
-        y0:pr.extra_band[0], y1:pr.extra_band[1], fillcolor:'rgba(44,160,44,0.22)',
-        line:{width:0}, layer:'below' });
-    if (pr.med_cbh_km !== undefined) shapes.push({ type:'line', xref:'x2 domain', yref:'y2',
-        x0:0, x1:1, y0:pr.med_cbh_km, y1:pr.med_cbh_km,
-        line:{color:'#d62728', width:1.1, dash:'dot'} });
+    if (pr.med_cbh_km !== undefined) {
+      shapes.push({ type:'line', xref:'x2 domain', yref:'y2', x0:0, x1:1,
+          y0:pr.med_cbh_km, y1:pr.med_cbh_km, line:{color:'#d62728', width:1.1, dash:'dot'} });
+      tr.push({ x:[null], y:[null], mode:'lines', xaxis:'x2', yaxis:'y2',
+          line:{color:'#d62728', width:1.4, dash:'dot'},
+          name:pr.med_cbh_label || 'median cloud base' });
+    }
     if (pr.cal_band && !c.layer_km) shapes.push({ type:'rect', xref:'x2 domain', yref:'y2',
         x0:0, x1:1, y0:pr.cal_band[0], y1:pr.cal_band[1], fillcolor:'rgba(255,193,7,0.20)',
         line:{color:'#ffc107', width:1.2}, layer:'below' });
-    if (pr.extra_band) tr.push({ x:[null], y:[null], mode:'lines', xaxis:'x2', yaxis:'y2',
-        line:{color:'rgba(44,160,44,0.6)', width:6}, name:pr.extra_band_label });
     xa2 = { title:{ text:v.label }, domain:[0.72, 1.0], anchor:'y2' };
     if (useLog) { xa2.type = 'log'; xa2.exponentformat = 'e'; }
   }
@@ -1164,7 +1208,8 @@ function drawPanel(p) {
   const el = document.getElementById('curtitle');
   if (el) el.textContent =
     c.shape[1] + ' × ' + c.shape[0] + ' block-averaged from the native grid (' +
-    c.st_t + '×' + c.st_r + ' cells per block) · both panels share one vertical axis' +
+    c.st_t + '×' + c.st_r + ' cells per block) · curtain colour is log₁₀ (it is quantised in log ' +
+    'space) · both panels share one vertical axis' +
     (pr && pr.mean_of ? ' · ' + pr.mean_of : '');
 }
 
@@ -1176,8 +1221,9 @@ function drawPanel(p) {
 function drawWhy(p) {
   const host = document.getElementById('why');
   if (!host) return;
-  const w = p && p.why;
+  const w = (p && p.why) || (p && p.diag && p.diag.why);
   if (!w) { host.innerHTML = ''; return; }
+  if (w.kind === 'cloud') { drawWhyCloud(host, w); return; }
   const sgn = v => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(3);
   const rows = w.terms.map(t => {
     const drive = t.name === w.driver;
@@ -1201,6 +1247,46 @@ function drawWhy(p) {
       <tr class="tot"><td></td><td><b>Q for this window</b></td><td></td>
         <td class="num"><b>${w.total.toFixed(3)}</b></td><td></td></tr></table>
     <div class="gates">${gates}</div></div>`;
+}
+
+// The cloud equivalent: the O'Connor chain stated as a chain, and the three filters shown as the
+// FUNNEL they are. The old panel printed each stage's counter dict, which answers "what did each
+// filter count" when the operator's question is "which stage cost me the night".
+function drawWhyCloud(host, w) {
+  const n = v => (v === null || v === undefined || !isFinite(v)) ? '—' : (+v).toPrecision(4);
+  const rows = w.stages.map(s => {
+    const drive = s.name === w.driver;
+    const det = Object.keys(s.detail || {}).length
+      ? Object.entries(s.detail).map(([k, v]) => `${k}: ${v}`).join(' · ') : '—';
+    return `<tr class="${drive ? 'drive' : ''}">
+      <td>${s.name}${drive ? ' <b>← removed the most</b>' : ''}</td>
+      <td class="wy">${s.what}</td>
+      <td class="num">−${s.removed}</td><td class="num">${s.after}</td>
+      <td class="wy">${det}</td></tr>`;
+  }).join('');
+  const verdict = w.n_used
+    ? `<b>${w.n_used}</b> of ${w.n_total} profiles survived all three filters and set the constant.`
+    : `<b>No profile survived</b> all three filters, so the night produced no constant — the ` +
+      `absence of any green in the panel above IS the rejection.`;
+  host.innerHTML = `<div class="card whycard">
+    <h2>Why this cloud calibration?</h2>
+    <p class="wtop">A fully-attenuating liquid cloud returns a KNOWN integrated backscatter, so the
+      integral over the fixed ${w.gate_km[0].toFixed(2)}–${w.gate_km[1].toFixed(2)} km gate measures
+      the calibration rather than the cloud. ${verdict}</p>
+    <pre class="formula">β corrected for ${w.wv ? 'water vapour (two-way) and ' : ''}multiple scattering η(range)
+S_apparent = 1 / (2 · ∫ β dz)          over the ${w.gate_km[0].toFixed(2)}–${w.gate_km[1].toFixed(2)} km gate
+C          = S_consistent / ${w.s_theo.toFixed(2)} sr      (theoretical S for liquid water)
+C_L        = C_applied / C             (Wiegner, comparable with the Rayleigh constant)</pre>
+    <table class="wtab"><tr><th>filter stage</th><th>what it tests</th><th class="num">removed</th>
+      <th class="num">left</th><th>breakdown</th></tr>${rows}</table>
+    <div class="gates">
+      <span class="gate"><b>median S</b> <span class="gv">${n(w.s_med)} sr</span></span>
+      <span class="gate"><b>theoretical S</b> <span class="gv">${w.s_theo.toFixed(2)} sr</span></span>
+      <span class="gate"><b>C = S/S_theo</b> <span class="gv">${n(w.C)}${
+        w.C_std !== null ? ' ± ' + n(w.C_std) : ''}</span></span>
+      <span class="gate"><b>C applied</b> <span class="gv">${n(w.applied)}</span></span>
+      <span class="gate"><b>C_L = C_applied/C</b> <span class="gv">${n(w.C_L)}</span></span>
+    </div></div>`;
 }
 
 // ---------------------------------------------------------------- diagnostics
@@ -1271,9 +1357,9 @@ function drawDiag(p) {
     }
   } else if (p.kind === 'cloud') {
     const d = p.diag;
+    // No 'Summary' card: its contents are now the "Why this cloud calibration?" description above.
     host.innerHTML = card('Apparent vs consistent lidar ratio','d_S')
-      + card('Coefficient distribution','d_hist')
-      + card('Summary','d_sum');
+      + card('Coefficient distribution','d_hist');
     const dt = d.x && typeof d.x[0] === 'string';
     Plotly.newPlot('d_S', [
       { x:d.x, y:d.S_app, mode:'markers', name:'apparent S',
@@ -1298,8 +1384,6 @@ function drawDiag(p) {
         opacity:0.75, nbinsx:Math.min(30, Math.max(5, Math.floor(d.coeffs.length/2))) }],
       Object.assign({}, LAY, { height:270, shapes:hs, showlegend:false,
         xaxis:{title:{text:'coefficient C (per profile)'}}, yaxis:{title:{text:'count'}} }), CFG);
-    document.getElementById('d_sum').innerHTML =
-      '<pre class="summary">' + (d.summary||[]).join('\n') + '</pre>';
   } else if (p.kind === 'rayleigh_fail') {
     host.innerHTML = '<div class="card" style="grid-column:1/-1"><p class="empty">' +
       'The window search never ran — the night was rejected before a fit was attempted, so there ' +
