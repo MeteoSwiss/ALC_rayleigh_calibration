@@ -537,7 +537,43 @@ _HK_TEMP = {"temp_optics", "temp_internal", "temp_detector"}             # K -> 
 # Per-day Cloudnet-style health for the station-page availability bar. Columns come from
 # calibration.status.decode.DayStatus.to_row() (quality/coverage/gaps/flag counts + summary).
 STATUS_FIELDS = ["date", "quality", "n_profiles", "coverage_pct", "gap_hours",
-                 "n_alarm_h", "n_warn_h", "flags_json", "summary"]
+                 "n_alarm_h", "n_warn_h", "flags_json", "summary",
+                 "mean_cloud_cover", "cloud_cover_n", "cloud_src"]
+
+# --- Daily mean cloud cover (dashboard availability card, row 2) ------------
+# E-PROFILE L1 already carries a per-profile octa value, so this costs one extra 1-D read inside the
+# monitoring pass that has the file open anyway. Two traps, both observed on the real archive:
+#  * the sentinels are -9, -99 and -32767 -- the housekeeping screen `> -990` lets -9/-99 through and
+#    would publish NEGATIVE cloud cover, so the screen here is the physical range 0..8;
+#  * `cloud_amount` may be DECLARED and entirely fill (the Lindenberg CL61 is all -9, and 2-D), so a
+#    stream is only trusted when it reports octas for a fair share of the day, else we fall back to
+#    the fraction of profiles carrying a cloud base -- a different quantity, recorded in cloud_src.
+_OCTA_MIN, _OCTA_MAX = 0.0, 8.0
+_CLOUD_MIN_VALID_FRAC = 0.2
+
+
+def _day_cloud_cover(nc):
+    """{mean_cloud_cover, cloud_cover_n, cloud_src} for one open L1 day, or None."""
+    amount, n_prof = None, 0
+    if "cloud_amount" in nc.variables:
+        a = np.asarray(nc.variables["cloud_amount"][:], dtype=float)
+        if a.ndim > 1:                      # (time, layer) on the CL61 -> the BASE layer is the octa
+            a = a[:, 0]
+        a = a.ravel()
+        n_prof = a.size
+        amount = a[np.isfinite(a) & (a >= _OCTA_MIN) & (a <= _OCTA_MAX)]
+    if amount is not None and n_prof and amount.size >= _CLOUD_MIN_VALID_FRAC * n_prof:
+        return {"mean_cloud_cover": f"{float(amount.mean()):.3f}",
+                "cloud_cover_n": str(int(amount.size)), "cloud_src": "cloud_amount"}
+    if "cloud_base_height" in nc.variables:
+        cbh = np.asarray(nc.variables["cloud_base_height"][:], dtype=float)
+        if cbh.ndim > 1:
+            cbh = cbh[:, 0]
+        ok = np.isfinite(cbh) & (cbh > 0)
+        if ok.size:
+            return {"mean_cloud_cover": f"{float(8.0 * ok.mean()):.3f}",
+                    "cloud_cover_n": str(int(ok.size)), "cloud_src": "cbh"}
+    return None
 # CL61 /status subsystem fields (raw-file names). NOT yet in E-PROFILE L1 -> read
 # opportunistically so the decoder activates automatically if/when they appear as flat vars.
 _CL61_STATUS_VARS = (
@@ -642,6 +678,14 @@ def _do_monitoring(s, start, end):
                                    hk=hk_vals or None)
                 if ds.n_profiles > 0:
                     srow = {"date": row["date"], **ds.to_row()}
+                    # Own try/except: an unexpected dtype in this NEW read must not take out the
+                    # status row (the outer handler discards the whole day).
+                    try:
+                        cc = _day_cloud_cover(nc)
+                    except Exception:  # noqa: BLE001
+                        cc = None
+                    srow.update(cc or {"mean_cloud_cover": "", "cloud_cover_n": "",
+                                       "cloud_src": ""})
             finally:
                 nc.close()
         except Exception:  # noqa: BLE001 - one unreadable file must not kill the stream
