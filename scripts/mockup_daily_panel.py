@@ -75,6 +75,17 @@ def _install_capture() -> None:
     _CAPTURE_INSTALLED = True
     import calibration.plotting as P
     import calibration.rayleigh.calibration as RC
+    # The L1 the run actually loaded. A night that is rejected before any fit draws no figure, but
+    # the curtain does not depend on the calibration succeeding -- it is just the measured field --
+    # and with client-side plots there is no reason to leave the operator with nothing to look at.
+    import calibration.io.data_loader as DL
+    _real_load = DL.load_l1_data
+
+    def _load(*a, **kw):
+        out = _real_load(*a, **kw)
+        CAPTURED.append({"kind": "data", "obj": out})
+        return out
+    DL.load_l1_data = _load
 
     def wrap(real, kind, is_cloud=False):
         def w(*a, **kw):
@@ -397,6 +408,40 @@ def _curtain_cloud(data, sel: np.ndarray, cal_lo: float, cal_hi: float, y_max: f
     return c
 
 
+def _curtain_from_data(obj) -> dict:
+    """A curtain straight from a loaded L1 object, for a night that never reached a fit.
+
+    Deliberately tolerant: this runs on the paths where something already went wrong, so anything
+    missing means "no curtain" rather than an exception.
+    """
+    try:
+        m = np.asarray(getattr(obj, "rcs", None), dtype=float)
+        rng = np.asarray(getattr(obj, "range_alc", None), dtype=float)
+        if m.ndim != 2 or rng.ndim != 1 or not m.size or m.shape[1] != rng.size:
+            return {}
+        c = _curtain(m, rng)
+        st = c["st_t"]
+        c["time"] = _iso(getattr(obj, "time_datetime", None), st)
+        if c["time"] is None:
+            c["hours"] = _jsonable(np.arange(m.shape[0], dtype=float)[::st])
+        c["y_label"] = "Range (km AGL)"
+        c["y_max_km"] = float(rng.max()) * 1e-3
+        c["base"], c["log_c"], c["bands"] = "rcs", None, []
+        cbh = getattr(obj, "cbh", None)
+        if cbh is None:
+            cbh = getattr(obj, "cloud_base_height", None)
+        if cbh is not None:
+            a = np.asarray(cbh, float)
+            a = a[:, 0] if a.ndim > 1 else a
+            a = np.where((a <= 0) | (a == -9.0), np.nan, a)
+            if a.size == m.shape[0] and np.isfinite(a).any():
+                c["cbh"] = [{"y": _jsonable(a[::st] * 1e-3), "name": "cloud base",
+                             "color": "#ffffff", "size": 5}]
+        return c
+    except Exception:                                                        # noqa: BLE001
+        return {}
+
+
 # ================================================================================ per-day payload
 def _share_y(cur: dict, prof: dict) -> None:
     """Put the curtain and the profile on ONE vertical axis.
@@ -640,9 +685,16 @@ def _run_one(rnc, stream: dict, d: datetime, method: str) -> dict:
     plots = [c for c in CAPTURED if c["kind"] != "window"]
     wins = [c for c in CAPTURED if c["kind"] == "window"]
     if not plots:
-        # Some Rayleigh rejections (-4, -10) draw no figure at all. The operator still wants the
-        # verdict, so the day exists in the panel with its flag and message and no plots.
+        # Some rejections (-4, -10) draw no figure at all. Build the curtain from the L1 the run
+        # loaded anyway: the measured field exists regardless of whether a fit was attempted, and
+        # "we plotted nothing" is an artefact of the old PNG pipeline, not a property of the night.
         out = {"kind": "none"}
+        dat = [c for c in CAPTURED if c["kind"] == "data"]
+        for c in reversed(dat):
+            cur = _curtain_from_data(c["obj"])
+            if cur:
+                out = {"kind": "nofit", "curtain": cur, "profile": {}, "diag": {}}
+                break
         out.update(meta)
         return out
     c = plots[-1]
@@ -998,15 +1050,15 @@ const CAL_COL = {
   both:     { bg:'#17a2b8', fg:'#ffffff', lbl:'calibrated — Rayleigh <b>and</b> cloud' },
   rayleigh: { bg:'#1f77b4', fg:'#ffffff', lbl:'calibrated — Rayleigh only' },
   cloud:    { bg:'#2ca02c', fg:'#ffffff', lbl:'calibrated — cloud only' },
-  fig:      { bg:'#d98c00', fg:'#ffffff', lbl:'rejected — you can still open the night',
+  fig:      { bg:'#d98c00', fg:'#ffffff', lbl:'rejected — open it to see why',
               tip:'The night did not calibrate, but a diagnostic was produced: select the day to '
                 + 'see the curtain, the profile and the reason.' },
   // Not the same as amber. These nights stop before any diagnostic is made at all -- typically
   // flag -4 (no usable water-vapour correction, e.g. missing CAMS) or -10. There is nothing to
   // draw, so the panel shows only the flag and the message.
-  none:     { bg:'#b00020', fg:'#ffffff', lbl:'rejected before anything could be plotted',
-              tip:'Stopped too early for a diagnostic (e.g. flag -4: no usable water-vapour '
-                + 'correction). Only the flag and message exist for this night.' },
+  none:     { bg:'#b00020', fg:'#ffffff', lbl:'rejected — no usable measurement',
+              tip:'Rejected with nothing to show: the L1 for this night could not be read or held '
+                + 'no usable profiles. Every other rejected night can be opened.' },
 };
 function dayColour(d) {
   const present = D.methods.map(m => summaryOf(d, m)).filter(Boolean);
