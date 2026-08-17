@@ -1163,10 +1163,20 @@ function buildCal() {
   host.appendChild(g);
   markCal();
 }
+let lastMarkedDate = null;
 function markCal() {
-  // Follow the selected day across month boundaries: the arrows and date links can leave the month
-  // on display, and a highlight that silently is not on screen reads as "nothing selected".
-  if (curDate && curDate.slice(0, 6) !== calMonth) { calMonth = curDate.slice(0, 6); buildCal(); return; }
+  // Follow the selected day across month boundaries ONLY when the day itself changed. markCal also
+  // runs at the end of every buildCal, and snapping to curDate's month unconditionally made the
+  // month buttons bounce straight back -- the calendar flipped to the new month and returned in the
+  // same tick, so browsing any other month was impossible.
+  if (curDate !== lastMarkedDate) {
+    lastMarkedDate = curDate;
+    if (curDate && curDate.slice(0, 6) !== calMonth) {
+      calMonth = curDate.slice(0, 6);
+      buildCal();
+      return;
+    }
+  }
   document.querySelectorAll('.cal .d').forEach(e =>
     e.classList.toggle('cur', e.dataset.ds === curDate));
 }

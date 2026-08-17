@@ -377,3 +377,18 @@ def test_calendar_rail_beside_the_card():
     tpl = (REPO / "monitoring/templates/station.html").read_text(encoding="utf-8")
     assert "dp-rail" in tpl and "daily_panel.rail" in tpl
     assert "no PNG involved" not in tpl
+
+
+def test_calendar_month_navigation_does_not_snap_back():
+    """Regression: the month arrows flipped the calendar and it bounced straight back -- markCal
+    (called at the end of every buildCal) snapped calMonth to the selected day's month
+    unconditionally, so browsing any other month was impossible. The follow-the-day behaviour must
+    trigger only when the DAY changed. Day-click wiring is asserted alongside; the click-through
+    itself is the browser tier's job."""
+    js = _panel().PANEL_JS
+    assert "lastMarkedDate" in js, "markCal needs the day-changed guard"
+    guard = js.index("curDate !== lastMarkedDate")
+    snap = js.index("calMonth = curDate.slice(0, 6)")
+    assert guard < snap, "the month snap-back must sit INSIDE the day-changed guard"
+    assert "#cal-prev" in js and "#cal-next" in js, "month arrows missing"
+    assert "cell.addEventListener('click'" in js, "day cells must be clickable"
