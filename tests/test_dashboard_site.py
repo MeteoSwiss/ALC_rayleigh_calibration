@@ -316,9 +316,13 @@ def test_availability_card_present_with_data():
     for page in _station_pages():
         html = page.read_text(encoding="utf-8", errors="replace")
         assert "Data availability, cloud cover" in html, f"{page.name}: availability card missing"
-        assert 'id="fig-avail"' in html, f"{page.name}: availability figure missing"
-        assert '"heatmap"' in html, f"{page.name}: availability card has no heatmap data"
-        assert 'id="status-index"' in html, f"{page.name}: status index missing"
+        # A stream whose status has not been recorded shows the explicit placeholder -- the card
+        # may never silently vanish, and a page with data must carry real heatmap rows.
+        if 'id="fig-avail"' in html:
+            assert '"heatmap"' in html, f"{page.name}: availability card has no heatmap data"
+            assert 'id="status-index"' in html, f"{page.name}: status index missing"
+        else:
+            assert "No instrument status has been recorded" in html,                 f"{page.name}: neither availability data nor the placeholder"
 
 
 @needs_site

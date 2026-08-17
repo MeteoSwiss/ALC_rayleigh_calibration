@@ -456,7 +456,7 @@ def series_timeseries(g_m: pd.DataFrame, kal_m: pd.DataFrame, method: str,
             marker=dict(size=5, color=color, opacity=0.7),
             error_y=dict(type="data", array=ok["uncertainty"], visible=True,
                          thickness=0.6, width=0, color="rgba(120,120,120,0.3)"),
-            hovertemplate="%{x|%Y-%m-%d}<br>" + vname + "=%{y:.3e}<extra></extra>"))
+            hovertemplate="%{x|%Y-%m-%d}<br>" + vname + "=%{y:.4g}<extra></extra>"))
         kt, ks, kstd = _kalman_xy(ok, kal_m)
         if len(kt):
             fig.add_trace(go.Scatter(
@@ -468,7 +468,7 @@ def series_timeseries(g_m: pd.DataFrame, kal_m: pd.DataFrame, method: str,
                                      name=(f"Kalman estimate ({ver})" if ver
                                            else "Kalman best estimate"),
                                      line=dict(color="#d62728", width=2),
-                                     hovertemplate="%{x|%Y-%m-%d}<br>Kalman=%{y:.3e}<extra></extra>"))
+                                     hovertemplate="%{x|%Y-%m-%d}<br>Kalman=%{y:.4g}<extra></extra>"))
     fig.update_layout(**_LAYOUT, yaxis_title=vname,
                       legend=dict(orientation="h", y=-0.22, x=0.5, xanchor="center", yanchor="top"),
                       title=f"{config.method_label(method)} — {vname} over time + Kalman")
@@ -505,7 +505,7 @@ def monthly_flag_bars(g_m: pd.DataFrame, method: str) -> go.Figure:
     return fig
 
 
-def aux_timeseries(g_m: pd.DataFrame, method: str) -> go.Figure:
+def aux_timeseries(g_m: pd.DataFrame, method: str, alt_m=None) -> go.Figure:
     """Rayleigh -> calibration window (bottom/top); cloud -> number of in-cloud profiles."""
     fig = go.Figure()
     if method == "rayleigh":
@@ -514,21 +514,30 @@ def aux_timeseries(g_m: pd.DataFrame, method: str) -> go.Figure:
             # One VERTICAL SEGMENT per night, bottom to top: the window is an extent, and two
             # disconnected dot clouds ("top" green, "bottom" brown) forced the reader to pair them
             # by eye across the whole plot. None separators keep it a single cheap trace.
+            # bottom/top_height are ASL (fit-window altitudes) but the axis SAID 'm AGL'. With
+            # the station altitude supplied the values are converted so the label is true and the
+            # chart lines up with the daily panel's AGL axis; without it, the label says ASL.
+            b_h, t_h = ok["bottom_height"], ok["top_height"]
+            unit = "m ASL"
+            if alt_m is not None and np.isfinite(alt_m):
+                b_h, t_h = b_h - float(alt_m), t_h - float(alt_m)
+                unit = "m AGL"
             xs, ys = [], []
-            for t, b, tp in zip(ok["datetime"], ok["bottom_height"], ok["top_height"]):
+            for t, b, tp in zip(ok["datetime"], b_h, t_h):
                 xs += [t, t, None]
                 ys += [b, tp, None]
             col = config.METHOD_COLORS.get("rayleigh", "#1f77b4")
             fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines", name="fitted window (bottom–top)",
                                      line=dict(color=col, width=2), hoverinfo="skip"))
-            mid = (ok["bottom_height"] + ok["top_height"]) / 2.0
+            mid = (b_h + t_h) / 2.0
             fig.add_trace(go.Scatter(
                 x=ok["datetime"], y=mid, mode="markers", showlegend=False,
                 marker=dict(size=3, color=col),
-                customdata=np.stack([ok["bottom_height"], ok["top_height"]], axis=1),
+                customdata=np.stack([b_h, t_h], axis=1),
                 hovertemplate="%{x|%Y-%m-%d}<br>%{customdata[0]:.0f}–%{customdata[1]:.0f} m"
                               "<extra></extra>"))
-        fig.update_layout(**{**_LAYOUT, "height": 300}, yaxis_title="height (m AGL)",
+        unit = unit if len(ok) else "m"
+        fig.update_layout(**{**_LAYOUT, "height": 300}, yaxis_title=f"height ({unit})",
                           title="Calibration window", legend=dict(orientation="h", y=1.14))
     else:
         ok = g_m[g_m["success"] == 1].sort_values("datetime")

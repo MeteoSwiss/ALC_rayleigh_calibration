@@ -82,7 +82,8 @@ FLAG_MEANINGS = {
 }
 
 #: Cloud rejection flags (a cloud was present but a filter rejected it). These COUNT as failures in
-#: the success-rate denominator (only no-data 0 and no-opportunity -1 are excluded); kept here for the
+#: the success-rate denominator (EVERY non-success counts, including 0 and -1 -- the rate is the
+#: true daily yield); kept here for the
 #: per-reason outcome breakdown.
 CLOUD_REJECT_FLAGS = (-20, -21, -22, -23, -24, -25, -26)
 
@@ -104,6 +105,7 @@ FLAG_COLORS = {
     -8: "#a50026",
     -9: "#e07b39",
     -10: "#5e3c99",
+    -11: "#e8a838",
     -20: "#fff2cc", -21: "#ffe699", -22: "#ffd966", -23: "#f1c232",
     -24: "#e69138", -25: "#d79b00", -26: "#bf9000",
     -99: "#000000",
@@ -326,7 +328,7 @@ FLAG_DOCS = [
      "recognize": "No point; the Message column reads 'No data'."},
     {"value": -1, "methods": "Both",
      "summary": "Unsuitable conditions — the scene is the wrong type for this method.",
-     "detail": "Rayleigh needs a CLEAR night so the signal can be matched to the molecular backscatter aloft; a cloudy / aerosol-laden night fails this. Cloud needs a fully-attenuating LIQUID cloud in the search window; a clear night legitimately has none. So −1 is expected and benign for the 'off' method, and the dashboard excludes it from success-rate denominators.",
+     "detail": "Rayleigh needs a CLEAR night so the signal can be matched to the molecular backscatter aloft; a cloudy / aerosol-laden night fails this. Cloud needs a fully-attenuating LIQUID cloud in the search window; a clear night legitimately has none. So −1 is expected and benign for the 'off' method. Success rates on this dashboard are computed over ALL days with data — −1 days count in the denominator, so the rate reads as the true daily yield.",
      "recognize": "The most common non-success flag. Cloud → 'No liquid cloud'; Rayleigh → 'Not a clear night'."},
     {"value": -2, "methods": "Rayleigh",
      "summary": "Signal not proportional to molecular backscatter.",
@@ -430,6 +432,20 @@ FLAG_DOCS = [
                "in-cloud profiles did not agree within tolerance, so no stable run of consistent "
                "profiles remained — the cloud field was too variable to calibrate.",
      "recognize": "Message 'Cloud: inconsistent neighbours'."},
+    {"value": -10, "methods": "Both",
+     "summary": "Station outside the CAMS domain",
+     "detail": "The nearest CAMS grid point is too far from the station for the water-vapour / "
+               "molecular reference (distinct from -4, a missing CAMS FILE). Out-of-domain "
+               "stations are served by their own regional CAMS boxes once configured.",
+     "recognize": "Persistent for a station until its regional CAMS box exists; never sporadic."},
+    {"value": -11, "methods": "Rayleigh",
+     "summary": "Rayleigh window contaminated (classification)",
+     "detail": "The eprof_v2.2 pre-fit target-classification mask flagged aerosol/cloud INSIDE "
+               "the chosen molecular window, so the night is rejected rather than calibrated "
+               "against a contaminated reference. An atmospheric rejection, not an instrument "
+               "fault.",
+     "recognize": "Appears with v2.2; the classification curtain for the night shows the layer "
+                  "inside the fitted window."},
     {"value": -99, "methods": "Both",
      "summary": "Exception during calibration.",
      "detail": "The calibration code raised an unexpected error for that day — a driver / IO / edge-case bug rather than a physical rejection. The Message column carries the exception type; these are worth investigating as code issues.",

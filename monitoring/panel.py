@@ -653,10 +653,13 @@ def _pack_cloud(data, res) -> dict:
 
 
 # ============================================================================================ run
-def _flag_label(flag) -> str | None:
+def _flag_label(flag, method="rayleigh") -> str | None:
+    """Method-aware, from the dashboard's single labelling source: the same flag reads differently
+    for Rayleigh and cloud, and the panel used the method-neutral pipeline map while the tables
+    beside it used the method-aware one -- the same flag read differently in two places."""
     try:
-        from calibration.flags import FLAG_MEANINGS
-        return FLAG_MEANINGS.get(float(flag))
+        from monitoring import config as _mcfg
+        return _mcfg.flag_label(float(flag), method)
     except Exception:                                                           # noqa: BLE001
         return None
 
@@ -684,7 +687,7 @@ def _run_one(rnc, stream: dict, d: datetime, method: str) -> dict:
             meta = {"flag": r.get("flag"), "message": r.get("message"),
                     "constant": cv if (np.isfinite(cv) and cv > 0) else None,
                     "uncertainty": r.get("uncertainty")}
-            meta["flag_label"] = _flag_label(meta.get("flag"))
+            meta["flag_label"] = _flag_label(meta.get("flag"), method)
             break
     plots = [c for c in CAPTURED if c["kind"] != "window"]
     wins = [c for c in CAPTURED if c["kind"] == "window"]
