@@ -20,6 +20,16 @@
         "--directory", "C:/Users/hervo/OneDrive/Documents/ALC_rayleigh_calibration/inter-comparison_dashboard"
       ],
       "port": 8741
+    },
+    {
+      "name": "mockups",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m", "http.server", "8747",
+        "--bind", "127.0.0.1",
+        "--directory", "C:/Users/hervo/AppData/Local/Temp/claude/C--Users-hervo-OneDrive-Documents-ALC-rayleigh-calibration/265f36ab-1a40-4592-bae6-6c3550f2fac1/scratchpad"
+      ],
+      "port": 8747
     }
   ]
 }
