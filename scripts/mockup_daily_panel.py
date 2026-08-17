@@ -316,11 +316,15 @@ def _curtain_rayleigh(kw: dict, failed: bool) -> dict:
         if upi is not None and np.size(upi) > 0:
             used[np.asarray(upi, int)] = True
         nu = ~used
+        # Both masks are the SAME screen (calibration.py:797-809: profiles more than ~4 robust
+        # sigma from the night's median range-normalised signal). They are split by whether the
+        # profile also carries a cloud base below the fit window, so the names say which of the two
+        # it is rather than "screened / not used", which described neither.
         c["bands"] = [
-            {"runs": _runs(nu[::st] & flagged[::st]), "color": "rgba(214,39,40,0.28)",
-             "name": "excluded (low cloud)"},
-            {"runs": _runs(nu[::st] & ~flagged[::st]), "color": "rgba(70,70,70,0.26)",
-             "name": "screened / not used"},
+            {"runs": _runs(nu[::st] & flagged[::st]), "color": "rgba(214,39,40,0.42)",
+             "name": "excluded — low cloud below the window"},
+            {"runs": _runs(nu[::st] & ~flagged[::st]), "color": "rgba(90,90,90,0.40)",
+             "name": "excluded — signal outlier, no low cloud"},
         ]
         if cbh0 is not None:
             hc = used & np.isfinite(cbh0) & ~flagged
@@ -364,7 +368,7 @@ def _curtain_cloud(data, sel: np.ndarray, cal_lo: float, cal_hi: float, y_max: f
     cc = getattr(data, "calibration_constant_applied", None)
     c["log_c"] = (float(np.log10(float(cc))) if (cc and np.isfinite(float(cc)) and float(cc) > 0)
                   else None)
-    c["bands"] = [{"runs": _runs(sel[::st]), "color": "rgba(44,160,44,0.20)",
+    c["bands"] = [{"runs": _runs(sel[::st]), "color": "rgba(44,160,44,0.35)",
                    "name": "used for calibration"}]
     c["layer_km"] = [cal_lo * 1e-3, cal_hi * 1e-3]
     c["layer_name"] = "integration gate"
@@ -801,6 +805,7 @@ PANEL_CSS = r"""
           min-height:30px; }
  .ctrls label { font-size:11.5px; color:var(--dim); }
  .note { font-size:11.5px; color:var(--dim); }
+ .notebar { margin:4px 2px 2px; border-top:1px solid #eef2f6; padding-top:6px; }
  .hd { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--dim);
        margin-right:4px; }
  .axlbl { display:inline-flex; align-items:center; gap:5px; font-size:11px; color:var(--dim); }
@@ -871,8 +876,10 @@ PANEL_BODY = r"""<div class="layout">
       <span class="seg" id="xswitch">
         <button data-x="lin">linear</button><button data-x="log">log</button></span></label>
    </div>
-   <div class="ctrls"><span class="note" id="curtitle"></span></div>
    <div id="panel"></div>
+   <!-- Provenance goes BELOW the figure: it describes what was drawn, so above the plot it just
+        pushed the panel down and was read before there was anything to read it about. -->
+   <div class="notebar"><span class="note" id="curtitle"></span></div>
   </div>
 
   <div id="msg"></div>
@@ -1144,11 +1151,20 @@ function drawPanel(p) {
       hovertemplate:'%{x}<br>%{y:.2f} km<br>log₁₀ %{z:.2f}<extra></extra>' }];
   const shapes = [];
   (c.bands || []).forEach(b => {
-    (b.runs || []).forEach(r => shapes.push({ type:'rect', xref:'x', yref:'y domain', y0:0, y1:1,
-        x0:X[r[0]], x1:X[Math.min(r[1]+1, X.length-1)], fillcolor:b.color, line:{width:0},
-        layer:'above' }));
-    if ((b.runs || []).length) tr.push({ x:[null], y:[null], mode:'markers', name:b.name,
-        xaxis:'x', yaxis:'y', marker:{ size:9, color:b.color, symbol:'square' } });
+    const runs = b.runs || [];
+    if (!runs.length) return;
+    // Drawn as a TRACE, not a layout shape. Shapes cannot be legend items, so these masks used to
+    // be a shape plus a dummy null-point trace carrying the name -- and clicking that legend entry
+    // toggled the dummy, leaving the mask on screen. One filled trace per mask makes the legend
+    // click do what it looks like it does. Null separators split it into one polygon per run.
+    const bx = [], by = [], y0 = 0, y1 = c.y_max_km;
+    runs.forEach(r => {
+      const a = X[r[0]], z = X[Math.min(r[1] + 1, X.length - 1)];
+      bx.push(a, z, z, a, a, null);
+      by.push(y0, y0, y1, y1, y0, null);
+    });
+    tr.push({ x:bx, y:by, mode:'lines', fill:'toself', fillcolor:b.color, line:{width:0},
+        xaxis:'x', yaxis:'y', name:b.name, hoverinfo:'skip' });
   });
   if (c.high_cloud_ylo && c.has_high_cloud) {
     // Two gap-free traces: ceiling at y_hi, floor at y_lo (== y_hi outside the mask, so the band
@@ -1210,7 +1226,9 @@ function drawPanel(p) {
     c.shape[1] + ' × ' + c.shape[0] + ' block-averaged from the native grid (' +
     c.st_t + '×' + c.st_r + ' cells per block) · curtain colour is log₁₀ (it is quantised in log ' +
     'space) · both panels share one vertical axis' +
-    (pr && pr.mean_of ? ' · ' + pr.mean_of : '');
+    (pr && pr.mean_of ? ' · ' + pr.mean_of : '') +
+    ((c.bands || []).some(b => (b.runs || []).length)
+      ? ' · click a mask in the legend to hide it' : '');
 }
 
 // ------------------------------------------------------- why THIS window (Rayleigh only)
