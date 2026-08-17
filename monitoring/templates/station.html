@@ -22,19 +22,15 @@
 
 {% block content %}
 <div id="station-nav" data-key="{{ key }}" data-prev="{{ prev_station }}" data-next="{{ next_station }}" hidden></div>
-<h1>{{ key }} <span class="badge">{{ meta.itype }}</span>
+{# ONE line: the availability card and the calibration info must be visible on load, so the
+   header spends a single row. The WMO id is not repeated (the page title IS the WIGOS key) and
+   the institution lives in the tooltip of the site name. #}
+<h1 class="oneline">{{ key }} <span class="badge">{{ meta.itype }}</span>
 {% for b in blocks %}<span class="mtag mtag-{{ b.method }}">{{ b.label }}</span>{% endfor %}
+  <span class="stmeta" title="{{ meta.institution or '' }}">{{ meta.name or "—" }} ·
+    {{ meta.country or "—" }} · {{ meta.lat | fmt('{:.3f}') }}, {{ meta.lon | fmt('{:.3f}') }} ·
+    {{ meta.alt | fmt('{:.0f}') }} m</span>
 </h1>
-<p class="subtitle">
-  {%- set bits = [] -%}
-  {%- if meta.name %}{{ bits.append(meta.name) or "" }}{% endif -%}
-  {%- if meta.country %}{{ bits.append(meta.country) or "" }}{% endif -%}
-  {%- if meta.institution %}{{ bits.append(meta.institution) or "" }}{% endif -%}
-  {% if bits %}{{ bits | join("  ·  ") }}{% else %}<span class="muted">station metadata unavailable</span>{% endif %}
-  <span class="metainline"><b>WMO</b> {{ meta.wmo or "—" }}
-    <b>Lat/Lon</b> {{ meta.lat | fmt('{:.3f}') }}, {{ meta.lon | fmt('{:.3f}') }}
-    <b>Alt</b> {{ meta.alt | fmt('{:.0f}') }} m</span>
-</p>
 
 {% if nc_files or ceda_url %}
 <section class="links">
