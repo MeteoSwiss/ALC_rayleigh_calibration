@@ -83,10 +83,13 @@ from calibration.config import InstrumentType  # noqa: E402
 from calibration.cloud import CloudCalConfig  # noqa: E402
 from calibration.cloud.calibration import (  # noqa: E402
     liquid_cloud_calibration_from_data, set_defaults, build_cloud_input_from_day)
+from calibration.io.classification import (  # noqa: E402
+    classification_files_for_night, read_classification_curtain)
 from calibration.io.data_loader import build_file_paths  # noqa: E402
 from calibration.io.instrument_day import load_instrument_day  # noqa: E402
 from calibration.flags import cloud_flag, flag_label, dominant_cloud_reject_flag  # noqa: E402
-from calibration.io.output import write_calibration_result, strip_calibration_method  # noqa: E402
+from calibration.io.output import (  # noqa: E402
+    VERSION_CODES, version_code, write_calibration_result, strip_calibration_method)  # noqa: E402
 from calibration.plotting import plot_cloud_diagnostics_compact  # noqa: E402
 from monitoring.kalman import kalman_best_estimate  # noqa: E402  (self-contained leaf)
 from monitoring import periods as periods_mod  # noqa: E402  (period set: auto years + active/frozen)
@@ -94,6 +97,14 @@ from monitoring import periods as periods_mod  # noqa: E402  (period set: auto y
 # PLOTS=1 emits a diagnostic PNG per SUCCESSFUL calibration (Rayleigh via plot_main, cloud via
 # plot_cloud_diagnostics_compact). Env-controlled so it propagates to every per-stream subprocess.
 PLOT_ENABLED = os.environ.get("PLOTS", "0") == "1"
+# Candidate-algorithm override for the Rayleigh method (see _do_rayleigh). Empty -> options.json wins,
+# so the operational daily run is unaffected.
+MOLECULAR_METHOD = os.environ.get("ALC_MOLECULAR_METHOD", "").strip()
+try:
+    MOLECULAR_PARAMS = json.loads(os.environ.get("ALC_MOLECULAR_PARAMS", "") or "{}")
+except json.JSONDecodeError:
+    MOLECULAR_PARAMS = {}
+    print("ALC_MOLECULAR_PARAMS is not valid JSON - ignored", flush=True)
 
 # --- Paths / configuration --------------------------------------------------
 # Paths are env-overridable (set them in ops/config.sh on the server); the defaults are the local
@@ -132,8 +143,11 @@ OMB_FIELDS = ["period", "date_start", "date_end", "wavelength", "median_bias_our
 SENS_FIELDS = ["period", "date_start", "date_end", "wavelength", "icao_alt_200", "icao_alt_2000",
                "icao_alt_4000", "sigma_night_3000", "n_days_night", "n_days_day"]
 
+# "version" is the numeric algorithm code (calibration/io/output.py VERSION_CODES: 220 = eprof_v2.2
+# Rayleigh, 1000 = the O'Connor cloud retrieval). Without it in the CSV an archive does not say
+# what produced it, and the dashboard was left ASSERTING a hard-coded "v2.0" over v2.2 numbers.
 CSV_FIELDS = ["date", "method", "flag", "cal_value", "uncertainty",
-              "n_profiles", "bottom_height", "top_height", "message"]
+              "n_profiles", "bottom_height", "top_height", "version", "message"]
 _SUCCESS = (1, 1.0, 0.5)
 _HK_NAN = {k: float("nan") for k in ("laser_life_time", "status_detector", "status_laser",
                                      "temperature_optical_module", "window_transmission",
@@ -288,42 +302,6 @@ def _make_shared_reader(s):
 
 
 # --- Rayleigh (per night) ---------------------------------------------------
-def _classification_contam_profile(key, d):
-    """Per-height contaminated fraction (Cloudnet cloud/ice: droplet/drizzle/ice/supercooled, i.e. NOT
-    clear or aerosol) over the Rayleigh night for date ``d``, from the task-3 classification NetCDFs of
-    ``d-1`` (evening) + ``d`` (morning). Feeds the Rayleigh molecular-window screen (flag -11). Returns
-    an (n_height, 2) array [range_AGL, fraction] or None when neither NetCDF exists (ceiloclass not run
-    -> the screen is a no-op)."""
-    import netCDF4
-    contam_codes = (1, 2, 3, 4)   # droplet, drizzle_or_rain, ice, supercooled (0=clear, 5=aerosol)
-    wmo = key.rsplit("_", 1)[0]
-    grid = None
-    counts = None
-    n_prof = 0
-    for dd in (d - timedelta(days=1), d):
-        ds = dd.strftime("%Y%m%d")
-        f = OUT / key / "classification" / wmo / ds[:4] / f"{key}_{ds}_classification.nc"
-        if not f.is_file():
-            continue
-        try:
-            with netCDF4.Dataset(f) as nc:
-                rng = np.asarray(nc.variables["range"][:], dtype=float)          # AGL
-                tc = np.asarray(nc.variables["target_classification"][:])        # (time, range)
-        except OSError:
-            continue
-        c = np.isin(tc, contam_codes).sum(axis=0).astype(float)                  # per-height contam count
-        if grid is None:
-            grid, counts = rng, c
-        elif rng.shape == grid.shape and np.allclose(rng, grid):
-            counts = counts + c
-        else:                                                                    # rare: different grid
-            counts = counts + np.interp(grid, rng, c / max(tc.shape[0], 1)) * tc.shape[0]
-        n_prof += tc.shape[0]
-    if grid is None or n_prof == 0:
-        return None
-    return np.column_stack([grid, counts / n_prof])
-
-
 def _do_rayleigh(s, start, end, shared=None, screen=False):
     info = _info(s)
     key = _key(s)
@@ -334,6 +312,24 @@ def _do_rayleigh(s, start, end, shared=None, screen=False):
     o.cams_folder = CAMS
     o.plot_all = False
     o.plot_main = PLOT_ENABLED           # PLOTS=1 -> Rayleigh diagnostic PNG per success
+    # Method override, so a candidate algorithm can be run over the network WITHOUT editing the
+    # operational options.json (which the daily cron also reads). ALC_MOLECULAR_PARAMS is a JSON
+    # object merged into molecular_params, e.g. ALC_MOLECULAR_METHOD=eprof_v2.2
+    # ALC_MOLECULAR_PARAMS='{"max_chi2red": 2.5}'.
+    if MOLECULAR_METHOD:
+        o.molecular_method = MOLECULAR_METHOD
+    if MOLECULAR_PARAMS:
+        o.molecular_params = dict(o.molecular_params or {}, **MOLECULAR_PARAMS)
+    # Measured dark-baseline profile (rayleigh_availability/dark_profiles.py). Empty = off.
+    if os.environ.get("ALC_DARK_PROFILE"):
+        o.dark_profile_file = os.environ["ALC_DARK_PROFILE"]
+    # R&D : ALC_WV_DISABLE=1 desactive la correction vapeur d'eau (Rayleigh). Motivation : le
+    # spectre CL61 mesure (910.74 nm, FWHM < 1.5 nm non resolu) est concu pour un creux
+    # d'absorption ("mitigated by design", M212475EN-E) et son signal brut ne montre que ~8 %
+    # de l'absorption modelisee -> variante de constantes "sans WV" pour le dashboard.
+    # Defaut (env absent) : comportement operationnel inchange.
+    if os.environ.get("ALC_WV_DISABLE") == "1":
+        o.apply_wv_correction = False
     rows = []
     for d in _days(start, end):
         if not _l1_file(s["wmo"], s["ident"], d).exists():
@@ -341,14 +337,22 @@ def _do_rayleigh(s, start, end, shared=None, screen=False):
         ds = d.strftime("%Y%m%d")
         try:
             idd = shared(ds) if shared is not None else None
-            contam = _classification_contam_profile(key, d) if screen else None
+            # The full curtain (d-1 + d), not a pre-reduced profile: calibrate_rayleigh selects the
+            # night on the profiles it actually fits, masks the contaminated cells before the window
+            # search, and computes the -11 fraction over that same night.
+            cls = None
+            if screen:
+                cls = read_classification_curtain(
+                    classification_files_for_night(OUT, key, s["wmo"], ds))
             r = calibrate_rayleigh(
                 ds, info, o, preloaded_data=(idd.native if idd is not None else None),
-                contam_profile=contam)
+                classification=cls)
             rows.append(dict(date=ds, method="rayleigh", flag=r.flag, cal_value=r.lidar_constant,
                              uncertainty=r.uncertainty, n_profiles="",
                              bottom_height=r.calibration_bottom_height,
-                             top_height=r.calibration_top_height, message=r.message))
+                             top_height=r.calibration_top_height,
+                             version=version_code(getattr(o, "molecular_method", "")),
+                             message=r.message))
         except Exception as exc:  # noqa: BLE001 - one bad night must not kill the stream
             rows.append(dict(date=ds, method="rayleigh", flag=-99, cal_value=-1, uncertainty=0,
                              n_profiles="", bottom_height=None, top_height=None,
@@ -376,7 +380,9 @@ def _do_cloud(s, start, end, shared=None):
         ds = d.strftime("%Y%m%d")
         try:
             cfg = set_defaults(CloudCalConfig(
-                nc_file=str(fp), instrument=s["type"], apply_wv_correction=True,
+                nc_file=str(fp), instrument=s["type"],
+                # ALC_WV_DISABLE=1 : variante R&D sans correction WV (voir _do_rayleigh)
+                apply_wv_correction=(os.environ.get("ALC_WV_DISABLE") != "1"),
                 apply_transmission_correction=True, aerosol_lidar_ratio=50.0,
                 cams_folder=str(CAMS), abs_cs_lookup_table=str(WV_LUT),
                 cams_folder_fallback=(str(CAMS_FALLBACK) if CAMS_FALLBACK else ""),
@@ -417,6 +423,17 @@ def _do_cloud(s, start, end, shared=None):
                 flag, _reason, _rej = dominant_cloud_reject_flag(
                     getattr(res, "filter_stats", None), getattr(res, "cloud_stats", None),
                     getattr(res, "consistency_stats", None))
+                # The peak-shape filters run on EVERY profile, cloud or not: on a clear day the
+                # "peak" is just the strongest aerosol gate, nothing above it is attenuated, and
+                # above_rejected racks up a count on a day with zero clouds -- so the dominant
+                # counter said -22 "peak not sharp" when the truth is "there was no cloud". The
+                # instrument's own cloud base is the honest discriminator: if it saw no cloud all
+                # day, the day is -1 whatever the shape counters say. Attribution only -- no
+                # constant and no filter behaviour changes.
+                if flag <= -20:
+                    _cbh = np.asarray(getattr(data, "cbh", []), dtype=float)
+                    if not np.any(np.isfinite(_cbh) & (_cbh > 0)):
+                        flag = -1.0
             # Headline value is the lidar constant C_L = applied_constant / C (Wiegner) -- the
             # operationally useful quantity, on the SAME scale as Rayleigh -- NOT the O'Connor
             # coefficient C. C_L's relative uncertainty equals the coefficient's (C_L = const / C).
@@ -439,6 +456,7 @@ def _do_cloud(s, start, end, shared=None):
                     time_end=_epoch_days(d) + 1.0,
                     wavelength_nm=info.instrument_type.wavelength_nm,
                     housekeeping=_HK_NAN, method=1,
+                    version=VERSION_CODES["cloud_oconnor"],
                 )
             # Diagnostic image for successes AND informative rejections (a cloud was present but a
             # filter rejected it: flags -20..-26). Genuine clear sky (-1) / no data (0) get none --
@@ -522,6 +540,10 @@ def _preserve_existing_rows(csv_path, methods, start, end):
 # CHM15k uses status_laser / temperature_optical_module / temperature_detector, Vaisala CL31/51/61
 # use laser_energy / temperature_laser. Temperatures are stored in degC (the L1 files store K).
 HK_FIELDS = ["date", "laser", "window", "temp_optics", "temp_internal", "temp_detector"]
+#: Hourly sidecar (<key>_hk_hourly.csv): same fields keyed by hour. A SEPARATE file on purpose --
+#: the daily _hk.csv merge filters on the "date" string and its readers parse %Y%m%d, so mixing
+#: cadences in one file would corrupt both (the plan's original three reasons).
+HK_HOURLY_FIELDS = ["hour", "laser", "window", "temp_optics", "temp_internal", "temp_detector"]
 _HK_SOURCES = {
     "laser":         ("status_laser", "laser_energy"),                    # laser power / pulse energy (%)
     "window":        ("window_transmission",),                           # window transmission (%)
@@ -535,7 +557,43 @@ _HK_TEMP = {"temp_optics", "temp_internal", "temp_detector"}             # K -> 
 # Per-day Cloudnet-style health for the station-page availability bar. Columns come from
 # calibration.status.decode.DayStatus.to_row() (quality/coverage/gaps/flag counts + summary).
 STATUS_FIELDS = ["date", "quality", "n_profiles", "coverage_pct", "gap_hours",
-                 "n_alarm_h", "n_warn_h", "flags_json", "summary"]
+                 "n_alarm_h", "n_warn_h", "flags_json", "summary",
+                 "mean_cloud_cover", "cloud_cover_n", "cloud_src"]
+
+# --- Daily mean cloud cover (dashboard availability card, row 2) ------------
+# E-PROFILE L1 already carries a per-profile octa value, so this costs one extra 1-D read inside the
+# monitoring pass that has the file open anyway. Two traps, both observed on the real archive:
+#  * the sentinels are -9, -99 and -32767 -- the housekeeping screen `> -990` lets -9/-99 through and
+#    would publish NEGATIVE cloud cover, so the screen here is the physical range 0..8;
+#  * `cloud_amount` may be DECLARED and entirely fill (the Lindenberg CL61 is all -9, and 2-D), so a
+#    stream is only trusted when it reports octas for a fair share of the day, else we fall back to
+#    the fraction of profiles carrying a cloud base -- a different quantity, recorded in cloud_src.
+_OCTA_MIN, _OCTA_MAX = 0.0, 8.0
+_CLOUD_MIN_VALID_FRAC = 0.2
+
+
+def _day_cloud_cover(nc):
+    """{mean_cloud_cover, cloud_cover_n, cloud_src} for one open L1 day, or None."""
+    amount, n_prof = None, 0
+    if "cloud_amount" in nc.variables:
+        a = np.asarray(nc.variables["cloud_amount"][:], dtype=float)
+        if a.ndim > 1:                      # (time, layer) on the CL61 -> the BASE layer is the octa
+            a = a[:, 0]
+        a = a.ravel()
+        n_prof = a.size
+        amount = a[np.isfinite(a) & (a >= _OCTA_MIN) & (a <= _OCTA_MAX)]
+    if amount is not None and n_prof and amount.size >= _CLOUD_MIN_VALID_FRAC * n_prof:
+        return {"mean_cloud_cover": f"{float(amount.mean()):.3f}",
+                "cloud_cover_n": str(int(amount.size)), "cloud_src": "cloud_amount"}
+    if "cloud_base_height" in nc.variables:
+        cbh = np.asarray(nc.variables["cloud_base_height"][:], dtype=float)
+        if cbh.ndim > 1:
+            cbh = cbh[:, 0]
+        ok = np.isfinite(cbh) & (cbh > 0)
+        if ok.size:
+            return {"mean_cloud_cover": f"{float(8.0 * ok.mean()):.3f}",
+                    "cloud_cover_n": str(int(ok.size)), "cloud_src": "cbh"}
+    return None
 # CL61 /status subsystem fields (raw-file names). NOT yet in E-PROFILE L1 -> read
 # opportunistically so the decoder activates automatically if/when they appear as flat vars.
 _CL61_STATUS_VARS = (
@@ -609,7 +667,7 @@ def _do_monitoring(s, start, end):
     import netCDF4  # lazy: only this leaf needs it
     from calibration.status.decode import summarize_day
     itype = s["type"]
-    hk_rows, status_rows = [], []
+    hk_rows, status_rows, hourly_rows = [], [], []
     for d in _days(start, end):
         fp = _l1_file(s["wmo"], s["ident"], d)
         if not fp.exists():
@@ -620,6 +678,7 @@ def _do_monitoring(s, start, end):
         try:
             nc = netCDF4.Dataset(str(fp))
             try:
+                hk_arrays = {}
                 for field, cands in _HK_SOURCES.items():
                     val = float("nan")
                     for nm in cands:
@@ -629,17 +688,47 @@ def _do_monitoring(s, start, end):
                             if np.isfinite(a).any():
                                 m = float(np.nanmean(a))
                                 val = (m - 273.15) if field in _HK_TEMP else m
+                                hk_arrays[field] = (a - 273.15) if field in _HK_TEMP else a
                             break
                     row[field] = "" if val != val else f"{val:.3f}"   # val!=val -> NaN
                     if val == val:
                         hk_vals[field] = val
                 # Decoded status + availability for the day
                 times = _read_time_epoch(nc)
+                # Hourly means from the arrays already in hand -- the whole point of the sidecar is
+                # that it costs no extra read. Only per-profile vectors (len == n_time) can be
+                # binned; scalar HK stays daily-only.
+                if times is not None and np.size(times):
+                    from calibration.status.decode import _hour_of
+                    hrs = np.fromiter((_hour_of(t) for t in np.asarray(times).ravel()),
+                                      dtype=int, count=np.size(times))
+                    for h in sorted(set(hrs.tolist())):
+                        hrow = {"hour": f"{row['date']}{h:02d}"}
+                        got = False
+                        for field, arr in hk_arrays.items():
+                            if np.size(arr) != hrs.size:
+                                continue
+                            v = float(np.nanmean(arr[hrs == h])) if np.isfinite(
+                                arr[hrs == h]).any() else float("nan")
+                            hrow[field] = "" if v != v else f"{v:.3f}"
+                            got = got or (v == v)
+                        if got:
+                            for f2 in HK_HOURLY_FIELDS:
+                                hrow.setdefault(f2, "")
+                            hourly_rows.append(hrow)
                 svals, cl61 = _read_status_values(nc, itype)
                 ds = summarize_day(times, itype, status_values=svals, cl61_status=cl61,
                                    hk=hk_vals or None)
                 if ds.n_profiles > 0:
                     srow = {"date": row["date"], **ds.to_row()}
+                    # Own try/except: an unexpected dtype in this NEW read must not take out the
+                    # status row (the outer handler discards the whole day).
+                    try:
+                        cc = _day_cloud_cover(nc)
+                    except Exception:  # noqa: BLE001
+                        cc = None
+                    srow.update(cc or {"mean_cloud_cover": "", "cloud_cover_n": "",
+                                       "cloud_src": ""})
             finally:
                 nc.close()
         except Exception:  # noqa: BLE001 - one unreadable file must not kill the stream
@@ -648,7 +737,7 @@ def _do_monitoring(s, start, end):
             hk_rows.append(row)
         if srow is not None:
             status_rows.append(srow)
-    return hk_rows, status_rows
+    return hk_rows, status_rows, hourly_rows
 
 
 def _preserve_existing_hk(csv_path, start, end):
@@ -732,6 +821,10 @@ def _op_map(s, start, end):
 def _const_per_profile(time, cmap, fallback):
     """Per-profile calibration constant from a date->constant map (Kalman has all
     days, so gaps are rare; fill with the series median, else the default)."""
+    if np.size(time) == 0:
+        # numpy's char.replace on an EMPTY array runs buffersizes.max() and raises -- one empty day
+        # was enough to abort a stream's whole OmB pass (419 streams in job 5122633).
+        return np.array([], dtype="float64")
     med = float(np.median(list(cmap.values()))) if cmap else fallback
     dates = np.char.replace(
         np.datetime_as_string(time.astype("datetime64[D]")).astype("U10"), "-", "")
@@ -830,8 +923,8 @@ def _do_omb(s, start, end, kalman_rows, shared=None):
         idd = shared(ds8) if shared is not None else None
         data = (idd.slice_to_date(d).to_omb_dict() if idd is not None
                 else _load_l1_window(s, d, d))
-        if data is None:
-            continue
+        if data is None or np.size(data["time"]) == 0:
+            continue                          # a file with zero profiles for the day is a skip
         c_ours = _const_per_profile(data["time"], kmap, default)
         c_op = _const_per_profile(data["time"], op_map, default)
         rcs = data["rcs"].astype("float64")
@@ -901,7 +994,10 @@ def _do_sens(s, start, end, kalman_rows, shared=None):
         idd = shared(ds8) if shared is not None else None
         data = (idd.slice_to_date(d).to_omb_dict() if idd is not None
                 else _load_l1_window(s, d, d))
-        if data is not None:
+        # Same empty-day guard the OmB loop already carries: a day can return a dict whose arrays
+        # are EMPTY (not None), and sensitivity_over_period then indexed time[0]. One such day in
+        # the window lost the whole stream's sensitivity product.
+        if data is not None and np.size(data["time"]):
             c = _const_per_profile(data["time"], kmap, default).astype("float32")
             beta = (data["rcs"] / c[:, None]) * np.float32(1e6)  # Mm^-1 sr^-1
             parts.append(sensitivity_over_period(
@@ -1023,7 +1119,7 @@ def _process_stream(payload):
     sdir.mkdir(parents=True, exist_ok=True)
 
     def _write_monitoring():
-        hk, status = _do_monitoring(s, start, end)
+        hk, status, hourly = _do_monitoring(s, start, end)
         if hk:
             hk += _preserve_existing_hk(sdir / f"{key}_hk.csv", start, end)
             hk.sort(key=lambda r: r["date"])
@@ -1032,6 +1128,21 @@ def _process_stream(payload):
             status += _preserve_existing_status(sdir / f"{key}_status.csv", start, end)
             status.sort(key=lambda r: r["date"])
             _write_csv_atomic(sdir / f"{key}_status.csv", STATUS_FIELDS, status)
+        if hourly:
+            hp = sdir / f"{key}_hk_hourly.csv"
+            keep = []
+            if hp.exists():                     # accumulate history outside the window, like _hk
+                sk, ek = start.strftime("%Y%m%d"), end.strftime("%Y%m%d")
+                try:
+                    with open(hp, newline="", encoding="utf-8") as f:
+                        for r2 in csv.DictReader(f):
+                            if not (sk <= str(r2.get("hour", ""))[:8] <= ek):
+                                keep.append({k: r2.get(k, "") for k in HK_HOURLY_FIELDS})
+                except (OSError, csv.Error):
+                    keep = []
+            hourly += keep
+            hourly.sort(key=lambda r: r["hour"])
+            _write_csv_atomic(hp, HK_HOURLY_FIELDS, hourly)
 
     # Backfill / refresh the monitoring CSVs only (skip everything else) -- cheap.
     if hk_only:
@@ -1074,11 +1185,18 @@ def _process_stream(payload):
         kalman_rows = _kalman_rows(rows) if rows else _read_kalman_csv(sdir / f"{key}_kalman.csv")
         try:
             if do_omb:
-                _do_omb(s, start, end, kalman_rows, shared)
+                try:
+                    _do_omb(s, start, end, kalman_rows, shared)
+                except Exception as exc:  # noqa: BLE001 - OmB must not take sens down with it
+                    import traceback
+                    print(f"{key}: omb failed: {type(exc).__name__}: {exc}", flush=True)
+                    print(traceback.format_exc(limit=6), flush=True)
             if do_sens:
                 _do_sens(s, start, end, kalman_rows, shared)
         except Exception as exc:  # noqa: BLE001 - an add-on failure must not lose the calibration
+            import traceback
             print(f"{key}: sens/omb failed: {type(exc).__name__}: {exc}", flush=True)
+            print(traceback.format_exc(limit=6), flush=True)
 
     return key, s["type"], len(rows), n_ok
 

@@ -14,6 +14,9 @@ Faithful Python port of the validated MATLAB routines:
 """
 from __future__ import annotations
 
+import json
+import logging
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional, Tuple
@@ -43,8 +46,34 @@ def in_water_vapor_band(wavelength_nm: float) -> bool:
     return 900.0 <= wavelength_nm <= 920.0
 
 
+def _env_spectrum_override() -> dict:
+    """Surcharge R&D du spectre laser par la variable d'environnement ``ALC_WV_SPECTRUM``.
+
+    Format JSON : ``{"CL61": [910.55, 1.0]}``. Motivation : la position de raie du CL61 est en
+    arbitrage (spec constructeur 910,55 nm vs mesure Qmini 910,74 ± 0,10) et l'absorption
+    effective differe d'un facteur ~3 entre les deux ; il faut pouvoir produire des calibrations
+    comparables sous les deux hypotheses SANS toucher a la table operationnelle. Variable
+    absente = comportement operationnel strictement inchange.
+    """
+    raw = os.environ.get("ALC_WV_SPECTRUM", "").strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        return {str(k): (float(v[0]), float(v[1])) for k, v in data.items()}
+    except Exception:  # noqa: BLE001 -- une surcharge illisible ne doit jamais casser un run
+        logging.getLogger(__name__).warning("ALC_WV_SPECTRUM illisible, ignore: %r", raw)
+        return {}
+
+
 def laser_spectrum_for(instrument_type: str, fallback_nm: float) -> Tuple[float, float]:
-    """Return (lambda0_nm, fwhm_nm) for an instrument type."""
+    """Return (lambda0_nm, fwhm_nm) for an instrument type.
+
+    Seul point de verite du couple (lambda0, FWHM) qui pilote la correction vapeur d'eau : les
+    chemins Rayleigh ET nuage passent par ici (cf. cloud.calibration.set_defaults)."""
+    over = _env_spectrum_override()
+    if instrument_type in over:
+        return over[instrument_type]
     if instrument_type in LASER_SPECTRUM:
         return LASER_SPECTRUM[instrument_type]
     return (fallback_nm, 3.4)

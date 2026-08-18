@@ -209,15 +209,23 @@ def set_defaults(config: CloudCalConfig) -> CloudCalConfig:
     match the MATLAB ``defaults`` struct one-for-one), so here we only need to fill the
     instrument-dependent wavelength and FWHM, matching the MATLAB ``switch``.
     """
+    # Le couple (lambda0, FWHM) qui pilote la correction vapeur d'eau vient d'UNE seule table,
+    # `water_vapor.LASER_SPECTRUM` (mesures Qmini de Payerne, 2026-06-02) -- il etait duplique
+    # ici en dur. Cela compte : la position de raie du CL61 est en cours d'arbitrage (spec
+    # constructeur 910,55 vs mesure 910,74 ; l'absorption effective differe d'un facteur ~3
+    # entre les deux), et le jour ou elle changera il ne doit y avoir qu'un seul endroit a
+    # editer. NB : deux autres longueurs d'onde CL61 coexistent volontairement dans le code et
+    # ne doivent PAS etre alignees sur celle-ci : 910,0 nm pour le calcul moleculaire
+    # (`InstrumentType.wavelength_nm` ; effet 0,33 % sur C_L, insensible) et 910,55 nm pour la
+    # generation des tables eta de diffusion multiple (`validation/multiple_scattering_eta.py`,
+    # insensible aussi).
+    from ..water_vapor_correction.water_vapor import LASER_SPECTRUM, laser_spectrum_for
+
     inst = config.instrument.upper()
-    if inst == "CL31":
-        wl, fwhm = 909.7, 6.0
-    elif inst == "CL51":
-        wl, fwhm = 910.0, 3.4
-    elif inst == "CL61":
-        wl, fwhm = 910.74, 1.0
-    elif inst == "CHM15K":
-        wl, fwhm = 1064.47, 0.5
+    _canon = {k.upper(): k for k in LASER_SPECTRUM}
+    if inst in _canon:
+        # via laser_spectrum_for : la surcharge ALC_WV_SPECTRUM s'applique aux DEUX methodes
+        wl, fwhm = laser_spectrum_for(_canon[inst], 910.0)
     elif inst in ("MINI-MPL", "MINIMPL", "MINI_MPL", "MPL"):
         # Mini-MPL is a 532 nm system (M. Hervo): far outside the 910 nm water-vapor
         # band, so it must NEVER get the WV correction. Giving it the correct wavelength
@@ -607,6 +615,8 @@ class CloudCalResults:
     time: NDArray = field(default_factory=lambda: np.array([]))
     cbh: NDArray = field(default_factory=lambda: np.array([]))
     all_coefficients: NDArray = field(default_factory=lambda: np.array([]))
+    #: Accepted-scene coefficients, paired element-wise with cbh/time/lidar_ratios (see below).
+    valid_coefficients: NDArray = field(default_factory=lambda: np.array([]))
     altitude_warning: bool = False
     trans2_wv: Optional[NDArray] = None
     config: Optional[CloudCalConfig] = None
@@ -822,6 +832,11 @@ def liquid_cloud_calibration_from_data(data: CeiloData, config: CloudCalConfig) 
     res.time = data.time[valid_idx]
     res.cbh = data.cbh[valid_idx]
     res.all_coefficients = calibration_coefficients
+    # The coefficients of the ACCEPTED scenes only, i.e. paired element-wise with res.cbh / res.time
+    # / res.lidar_ratios. all_coefficients above spans every profile of the day (NaN where no scene
+    # was usable), so it is roughly 30x longer and does NOT pair with cbh -- consumers that want
+    # "C for this cloud base" need this array, not that one.
+    res.valid_coefficients = calibration_coefficients[valid_idx]
     res.config = config
     res.filter_stats = filter_stats
     res.cloud_stats = cloud_stats

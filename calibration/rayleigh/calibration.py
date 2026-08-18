@@ -49,7 +49,7 @@ from .rayleigh_fit import (
     validate_calibration,
     RayleighFitResult,
 )
-from ..io.output import write_calibration_result
+from ..io.output import write_calibration_result, version_code
 from ..io.cams import ensure_cams_file
 from ..plotting import (
     plot_rcs_timeseries,
@@ -124,6 +124,218 @@ class _PerturbationResult:
     beta_att: Optional[NDArray[np.float64]] = None
     beta_tot: Optional[NDArray[np.float64]] = None
     ext_tot: Optional[NDArray[np.float64]] = None
+
+
+def _native_noise(data):
+    """Per-range-gate photon noise sigma of the NATIVE range-normalised signal, or None.
+
+    Uses the temporal first-difference estimator (calibration.sensitivity.noise): differencing
+    consecutive profiles cancels the (slowly varying) atmosphere and leaves the instrument noise,
+    /sqrt(2) for the differencing. Pairs are only formed across contiguous profiles, so the gaps
+    left by the cloud screen do not leak structure into the estimate.
+
+    Returned on the SIGNAL scale (rcs / r^2), the same quantity the molecular window fit consumes,
+    so a chi-square built from it needs no calibration constant -- which matters because the
+    constant is precisely what the fit is solving for.
+
+    Returns dict(sigma, n_pairs, dt_s, range_alc) or None when it cannot be measured.
+    """
+    try:
+        from calibration.sensitivity.noise import first_difference_sigma
+        rng = np.asarray(data.range_alc, float)
+        rcs = np.asarray(data.rcs, float)
+        if rcs.ndim != 2 or rcs.shape[0] < 5 or rng.size != rcs.shape[1]:
+            return None
+        with np.errstate(divide="ignore", invalid="ignore"):
+            sig = rcs / (rng[None, :] ** 2)
+        t_s = np.asarray(data.hours_since_start, float) * 3600.0
+        if t_s.size != sig.shape[0]:
+            return None
+        dt = float(np.median(np.diff(np.sort(t_s))))
+        if not np.isfinite(dt) or dt <= 0:
+            return None
+        sigma, n_pairs = first_difference_sigma(sig, t_s, dt)
+        if sigma is None or not np.any(np.isfinite(sigma)):
+            return None
+        return dict(sigma=np.asarray(sigma, float), n_pairs=np.asarray(n_pairs),
+                    dt_s=dt, range_alc=rng)
+    except Exception:                      # never let a diagnostic break a calibration
+        logger.debug("native noise estimate unavailable", exc_info=True)
+        return None
+
+
+def _sigma_on_fit_grid(sigma_native, range_fit, n_profiles, options):
+    """Propagate the native per-gate sigma onto the binned fit grid and the night-mean profile.
+
+    Two reductions, both white-noise (sqrt(N)) assumptions:
+      * range binning  : each fit gate averages the native gates that fall inside it
+      * time collapse  : the night mean averages n_profiles (a median costs ~1.25x more noise)
+    The white-noise assumption is exactly what Phase 2 must verify against a sigma re-measured on
+    the binned stack; correlated components (afterpulse, background drift) would break it.
+
+    Returns the 1-sigma uncertainty of `signal` (rcs/r^2, night mean) per fit gate, or None.
+    """
+    if not sigma_native:
+        return None
+    try:
+        rf = np.asarray(range_fit, float)
+        rn = np.asarray(sigma_native["range_alc"], float)
+        sn = np.asarray(sigma_native["sigma"], float)
+        if rf.size == 0 or rn.size == 0:
+            return None
+        # native gates per fit gate (edges midway between fit-grid centres)
+        edges = np.empty(rf.size + 1)
+        edges[1:-1] = 0.5 * (rf[1:] + rf[:-1])
+        d0 = rf[1] - rf[0] if rf.size > 1 else 1.0
+        edges[0], edges[-1] = rf[0] - 0.5 * d0, rf[-1] + 0.5 * d0
+        idx = np.searchsorted(edges, rn) - 1
+        out = np.full(rf.size, np.nan)
+        for k in range(rf.size):
+            s = sn[(idx == k) & np.isfinite(sn)]
+            if s.size:
+                out[k] = np.sqrt(np.mean(s ** 2) / s.size)      # RMS then /sqrt(n_gates)
+        if not np.any(np.isfinite(out)):
+            return None
+        n = max(int(n_profiles), 1)
+        out = out / np.sqrt(n)
+        if getattr(options, "time_aggregation", "mean") == "median":
+            out = out * 1.2533                                  # median-of-normal penalty
+        return out
+    except Exception:
+        logger.debug("sigma propagation to the fit grid failed", exc_info=True)
+        return None
+
+
+# Cloudnet target-classification codes (ceiloclass). 0 = clear sky.
+CLASS_DROPLET, CLASS_DRIZZLE, CLASS_ICE, CLASS_SUPERCOOLED, CLASS_AEROSOL = 1, 2, 3, 4, 5
+# The PRE-FIT cell mask removes anything that is not molecular, AEROSOL INCLUDED: a steady elevated
+# layer is exactly what the temporal MAD screen cannot see (it flags cells that stand out from their
+# own altitude's median over the night, so a layer present ALL night defines the median instead of
+# exceeding it). On a single-channel CHM15k class 5 is a residual bucket -- fine for excluding cells
+# from a fit, never for vetoing a night, which is why the -11 veto keeps its own narrower set.
+PREFIT_CONTAM_CODES = (CLASS_DROPLET, CLASS_DRIZZLE, CLASS_ICE, CLASS_SUPERCOOLED, CLASS_AEROSOL)
+VETO_CONTAM_CODES = (CLASS_DROPLET, CLASS_DRIZZLE, CLASS_ICE, CLASS_SUPERCOOLED)
+
+
+def _nearest_index(src, dst, tol):
+    """Index of the nearest ``src`` sample for each ``dst`` point, and whether it is within ``tol``."""
+    if src.size < 2:
+        j = np.zeros(dst.size, int)
+    else:
+        j = np.clip(np.searchsorted(src, dst), 1, src.size - 1)
+        j = np.where(np.abs(src[j] - dst) < np.abs(src[j - 1] - dst), j, j - 1)
+    return j, np.abs(src[j] - dst) <= tol
+
+
+def _any_in_windows(mask, src, lo_vals, hi_vals):
+    """True where any sample of ``mask`` (axis 0, coordinate ``src``) inside [lo, hi) is True.
+
+    ANY, not nearest: a fit profile is the MEAN of the native profiles inside its bin, so one
+    contaminated native profile contaminates the bin. The windows may overlap or leave gaps (the
+    fit profiles are a screened subset of the night), so this uses a cumulative sum rather than
+    ``reduceat``, which would silently run each group up to the next group's start.
+
+    Returns (any_mask, covered) where ``covered`` is False for windows containing no sample.
+    """
+    lo = np.searchsorted(src, lo_vals, "left")
+    hi = np.searchsorted(src, hi_vals, "right")
+    cs = np.concatenate([np.zeros((1,) + mask.shape[1:], np.int32),
+                         np.cumsum(mask, axis=0, dtype=np.int32)], axis=0)
+    return (cs[hi] - cs[lo]) > 0, hi > lo
+
+
+def _classification_on_fit_grid(classification, times_night, range_fit, codes):
+    """Resample a classification curtain onto the (night profile x fit gate) grid.
+
+    ``classification`` = (times, range_agl, target_codes) covering d-1 and d; ``times_night`` are the
+    datetimes of the profiles the Rayleigh fit actually uses. Resampling onto the NIGHT (rather than
+    reducing the two whole days first) is what makes the fraction meaningful: a layer present through
+    a 7 h night is 100 % of the night but only ~15 % of the 48 h the classification files span.
+
+    The classification is typically FINER than the fit grid (30 s x 15 m vs 300 s x 30 m), so each
+    fit cell takes the OR over the classification cells inside it; where a fit cell contains none,
+    it falls back to the nearest sample within tolerance, and stays unmasked if there is none
+    (unknown is not contaminated). Returns bool (len(times_night), len(range_fit)), or None.
+    """
+    try:
+        ct, cr, cc = classification
+        ct = np.asarray(ct, dtype="datetime64[s]").astype("int64").astype(float)
+        cr = np.asarray(cr, float)
+        cc = np.asarray(cc)
+        tt = np.asarray(list(times_night), dtype="datetime64[s]").astype("int64").astype(float)
+        rf = np.asarray(range_fit, float)
+        if ct.size == 0 or cr.size == 0 or cc.shape != (ct.size, cr.size) or tt.size == 0:
+            return None
+        order = np.argsort(ct)
+        ct, cc = ct[order], cc[order]
+        contam = np.isin(cc, np.asarray(codes))
+
+        dt_c = float(np.median(np.diff(ct))) if ct.size > 1 else 60.0
+        dz_c = float(np.median(np.diff(cr))) if cr.size > 1 else 30.0
+        dz_f = abs(float(np.median(np.diff(rf)))) if rf.size > 1 else 30.0
+        dt_f = float(np.median(np.diff(tt))) if tt.size > 1 else 300.0
+        if not np.isfinite(dt_f) or dt_f <= 0:
+            dt_f = 300.0
+
+        # range first (it shrinks the array), then time
+        m_r, cov_r = _any_in_windows(contam.T, cr, rf - 0.5 * dz_f, rf + 0.5 * dz_f)
+        if not np.all(cov_r):
+            ri, r_ok = _nearest_index(cr, rf, max(dz_c, dz_f))
+            fill = ~cov_r
+            m_r[fill] = contam.T[ri[fill]] & r_ok[fill, None]
+        m_t, cov_t = _any_in_windows(m_r.T, ct, tt - 0.5 * dt_f, tt + 0.5 * dt_f)
+        if not np.all(cov_t):
+            ti, t_ok = _nearest_index(ct, tt, max(2.0 * dt_c, dt_f))
+            fill = ~cov_t
+            m_t[fill] = m_r.T[ti[fill]] & t_ok[fill, None]
+        return m_t
+    except Exception:                          # a bad classification must never lose a calibration
+        logger.debug("classification resampling failed", exc_info=True)
+        return None
+
+
+_DARK_CACHE: dict = {}
+
+
+def _dark_on_grid(options, info, range_alc):
+    """Measured baseline b(z) for this unit, resampled onto the fit grid (or None).
+
+    File format: npz holding "<ident>_range" (m) and "<ident>_b_rcs" (in rcs_0 units, i.e. the
+    range-corrected counts themselves), as produced by rayleigh_availability/dark_profiles.py from
+    the covered-telescope campaign. Counts are the natural unit: divided by z^2 the baseline blows
+    up near the ground and any range smoothing drags that blow-up upward. Missing file, missing
+    unit, or a grid that does not overlap -> None, and the calibration is untouched: a diagnostic
+    must never cost a calibration.
+    """
+    path = str(getattr(options, "dark_profile_file", "") or "")
+    if not path:
+        return None
+    key = (path, str(getattr(info, "identifier", "")))
+    if key not in _DARK_CACHE:
+        entry = None
+        try:
+            p = Path(path)
+            if p.exists():
+                with np.load(p) as z:
+                    ident = str(getattr(info, "identifier", ""))
+                    if f"{ident}_b_rcs" in z:
+                        entry = (np.asarray(z[f"{ident}_range"], float),
+                                 np.asarray(z[f"{ident}_b_rcs"], float))
+        except Exception:
+            logger.debug("dark profile unreadable", exc_info=True)
+            entry = None
+        _DARK_CACHE[key] = entry
+    entry = _DARK_CACHE[key]
+    if entry is None:
+        return None
+    rd, bd = entry
+    ok = np.isfinite(rd) & np.isfinite(bd)
+    if ok.sum() < 5:
+        return None
+    b = np.interp(np.asarray(range_alc, float), rd[ok], bd[ok], left=np.nan, right=np.nan)
+    if not np.any(np.isfinite(b)):
+        return None
+    return np.nan_to_num(b, nan=0.0)          # outside the measured range: no correction
 
 
 def _compute_cl_for_perturbation(
@@ -244,6 +456,7 @@ def calibrate_rayleigh(
     fit_inputs_out: Optional[dict] = None,
     preloaded_data: Optional[CeilometerData] = None,
     contam_profile: Optional[NDArray] = None,
+    classification: Optional[tuple] = None,
 ) -> CalibrationResult:
     """
     Perform Rayleigh calibration for a single instrument on a single date.
@@ -268,6 +481,14 @@ def calibrate_rayleigh(
         Calibration options.
     std_atm_file : Path, optional
         Path to standard atmosphere file.
+    contam_profile : array (n_height, 2), optional
+        [range_AGL, contaminated fraction] for the -11 screen, precomputed by the caller.
+    classification : (times, range_agl, target_codes), optional
+        A Cloudnet target-classification curtain spanning the night (typically d-1 + d). Used two
+        ways, with DIFFERENT code sets: contaminated cells (aerosol included) are excluded from the
+        fit before the window search, and the cloud/ice fraction over the night feeds the -11 screen
+        (so its denominator is the night, not the whole classification file). Takes precedence over
+        ``contam_profile`` for -11 when both are given.
 
     Returns
     -------
@@ -417,6 +638,12 @@ def calibrate_rayleigh(
         avg_time_s = getattr(options, "l1_grid_time_s", 300.0)
         avg_range_m = getattr(options, "l1_grid_range_m", 30.0)
         logger.info("L1 native grid -> binning to the L2 grid (%.0f s x %.0f m)", avg_time_s, avg_range_m)
+    # Per-gate photon noise, measured on the NATIVE cloud-screened profiles (i.e. here, before the
+    # binning below destroys it by sqrt(N)). Consecutive-profile differencing cancels the
+    # atmosphere and leaves the instrument noise, so this is a per-night SNR measurement, not a
+    # model -- which is what lets the gates adapt to an ageing laser instead of assuming a healthy
+    # one. Cheap (~0.1 s) and gap-safe (pairs are only formed across contiguous profiles).
+    sigma_native = _native_noise(data)
     data = average_ceilometer_data(data, average_time_s=avg_time_s, average_range_m=avg_range_m)
     if avg_time_s or avg_range_m:
         logger.info("Averaged Rayleigh input to %s profiles x %s range bins",
@@ -582,6 +809,17 @@ def calibrate_rayleigh(
                     logger.info(f"Outlier screen: kept {keep_idx.size}/{data.rcs.shape[0]} profiles")
     rcs_use = data.rcs[keep_idx]
 
+    # MEASURED electronic baseline removed HERE, on the range-corrected counts themselves, so every
+    # downstream consumer sees the same corrected signal: the molecular fit, the pointwise C_L in
+    # calculate_lidar_constant (which re-derives signal from rcs_mean) and the whole perturbation
+    # ensemble. Correcting only the fit input would leave the two C_L estimators disagreeing and the
+    # night would be rejected with flag -3. Unlike `subtract_background` (fitted intercept, shown to
+    # be atmosphere in disguise), this profile is measured with the telescope covered.
+    dark_b = _dark_on_grid(options, info, data.range_alc)
+    if dark_b is not None:
+        rcs_use = rcs_use - dark_b[None, :]              # dark_b is already in rcs_0 units
+        logger.info("Dark baseline subtracted (mean %.3e counts)", np.nanmean(dark_b))
+
     # Collapse the kept profiles in time. Mean is efficient for the weak-signal photon
     # noise at 3-6 km; "median" is robust but ~1.5x noisier there (set via options).
     _agg = np.nanmedian if getattr(options, "time_aggregation", "mean") == "median" else np.nanmean
@@ -599,16 +837,47 @@ def calibrate_rayleigh(
     # Range-normalized signal (night mean) + per-profile stack. The stack feeds the
     # E-PROF v2 ("optimal") method's temporal-variability aerosol rejection (molecular is
     # steady in time; aerosol fluctuates).
+    # rcs_use / rcs_mean already carry the dark subtraction (see above), so signal does too.
     signal = rcs_mean / (data.range_alc ** 2)
     signal_stack = rcs_use / (data.range_alc[None, :] ** 2)
 
     # Optional capture hook (used by the method-comparison harness): expose the prepared
     # fit inputs so every method can be evaluated on the identical profile.
+    # Photon noise of the collapsed night profile, on the binned fit grid: the native per-gate
+    # sigma (measured before binning) reduced by the averaging actually performed. Exposed for the
+    # noise-aware gates and for the offline sweep harness, which must be able to reproduce them
+    # from fit_inputs alone.
+    sigma_signal = _sigma_on_fit_grid(sigma_native, data.range_alc, rcs_use.shape[0], options)
+
+    # Classification screening, on the profiles the fit will actually use. The pre-fit mask joins the
+    # temporal MAD screen (union, never replacing it); the veto profile is rebuilt over the same night
+    # so the -11 fraction means "of this night" -- see _classification_on_fit_grid.
+    extra_cell_mask = None
+    if classification is not None:
+        t_night = [data.time_datetime[i] for i in np.asarray(keep_idx).tolist()]
+        # The -11 veto repair (fraction over THIS night, not the 48 h file) applies whenever a
+        # classification is supplied; use_classification_mask only switches the pre-fit CELL mask
+        # below. The two are separate decisions -- gating both on one flag silently reverted the
+        # veto denominator fix when the mask was disabled.
+        veto = _classification_on_fit_grid(
+            classification, t_night, data.range_alc, VETO_CONTAM_CODES)
+        if veto is not None:
+            contam_profile = np.column_stack([np.asarray(data.range_alc, float),
+                                              veto.mean(axis=0)])
+        if getattr(options, "use_classification_mask", True):
+            extra_cell_mask = _classification_on_fit_grid(
+                classification, t_night, data.range_alc, PREFIT_CONTAM_CODES)
+            if extra_cell_mask is not None:
+                logger.info(
+                    f"Classification mask: {100 * extra_cell_mask.mean():.1f}% of cells excluded")
+
     if fit_inputs_out is not None:
         fit_inputs_out.update(
             signal=signal, p_mol=mol_props.p_mol, range_alc=data.range_alc,
             altitude=data.altitude, signal_stack=signal_stack,
             hours=np.asarray(data.hours_since_start)[keep_idx],
+            sigma_signal=sigma_signal, sigma_native=sigma_native, n_profiles=rcs_use.shape[0],
+            extra_cell_mask=extra_cell_mask,
         )
 
     fit_result = find_optimal_molecular_window(
@@ -624,6 +893,9 @@ def calibrate_rayleigh(
         max_rel_error=options.max_window_rel_error,
         method=getattr(options, "molecular_method", "eprof_v2"),
         signal_stack=signal_stack,
+        method_params=getattr(options, "molecular_params", None) or None,
+        sigma_signal=sigma_signal,
+        extra_cell_mask=extra_cell_mask,
     )
 
     # Update altitude values
@@ -962,7 +1234,10 @@ def calibrate_rayleigh(
         band = (h >= fit_result.range_start_m) & (h <= fit_result.range_end_m)
         wfrac = (float(np.nanmean(np.asarray(contam_profile[:, 1], dtype=float)[band]))
                  if np.any(band) else 0.0)
-        if wfrac > 0.30:   # >30 % of the fit-window height classified ice/cloud over the night
+        # Rejected when this fraction of the fit window is classified ice/cloud over the night. When
+        # the caller passes a classification curtain the fraction is computed over the NIGHT the fit
+        # used; a precomputed contam_profile carries whatever denominator its caller chose.
+        if wfrac > float(getattr(options, "classification_veto_fraction", 0.30)):
             logger.warning(f"Rayleigh window contaminated (classification {wfrac * 100:.0f}%)")
             qc_flag, qc_message = -11, (f"Rayleigh window contaminated "
                                         f"(classification {wfrac * 100:.0f}% ice/cloud)")
@@ -1092,6 +1367,9 @@ def calibrate_rayleigh(
         time_end=time_end,
         wavelength_nm=info.instrument_type.wavelength_nm,
         housekeeping=housekeeping,
+        # tag the row with the molecular method that actually produced it, so a series spanning an
+        # algorithm upgrade stays interpretable
+        version=version_code(getattr(options, "molecular_method", "eprof_v2")),
     )
 
     logger.info(f"Results written to {output_path}")

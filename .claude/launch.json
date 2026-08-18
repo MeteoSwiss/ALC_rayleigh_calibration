@@ -1,0 +1,35 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "caldash",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m", "http.server", "8732",
+        "--bind", "127.0.0.1",
+        "--directory", "C:/DATA/Projects/202606_E-PROFILE_calibration/dashboard_l1_2026"
+      ],
+      "port": 8732
+    },
+    {
+      "name": "intercomp",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m", "http.server", "8741",
+        "--bind", "127.0.0.1",
+        "--directory", "C:/Users/hervo/OneDrive/Documents/ALC_rayleigh_calibration/inter-comparison_dashboard"
+      ],
+      "port": 8741
+    },
+    {
+      "name": "mockups",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m", "http.server", "8747",
+        "--bind", "127.0.0.1",
+        "--directory", "C:/Users/hervo/AppData/Local/Temp/claude/C--Users-hervo-OneDrive-Documents-ALC-rayleigh-calibration/265f36ab-1a40-4592-bae6-6c3550f2fac1/scratchpad"
+      ],
+      "port": 8747
+    }
+  ]
+}

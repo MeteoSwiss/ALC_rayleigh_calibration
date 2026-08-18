@@ -1,0 +1,72 @@
+# Continuous integration for the E-PROFILE ALC calibration pipeline.
+#
+# Runs on every pull request and on pushes to main. The test job is the hard
+# gate; lint / format / type-check are advisory for now (continue-on-error)
+# because ruff and mypy have not yet been run across the whole codebase. Once
+# the tree is clean, flip the relevant `continue-on-error: true` lines to make
+# them blocking.
+#
+# Adapted from the MeteoSwiss Open-Source-Template CI_test workflow, retargeted
+# from Poetry/pylint to this repo's hatchling + ruff + mypy + pytest stack.
+
+name: CI_test
+
+on:
+  pull_request:
+    branches: ['**']
+  push:
+    branches: ['main']
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref (e.g. successive pushes to a PR).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # requires-python is >=3.12, matching .python-version and the deployment.
+        # Add newer versions here to test forward compatibility.
+        python-version: ['3.12']
+    env:
+      MPLBACKEND: Agg   # headless matplotlib (calibration.plotting / test_plotting_time_axis)
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install package with dev + dashboard extras
+        # 'download' (cdsapi/cfgrib) is intentionally omitted: those are lazily
+        # imported inside functions, so collection and the offline tests do not
+        # need them, and skipping them avoids the eccodes wheel build.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,dashboard]"
+
+      - name: Ruff lint (advisory)
+        continue-on-error: true
+        run: ruff check calibration monitoring
+
+      - name: Ruff format check (advisory)
+        continue-on-error: true
+        run: ruff format --check calibration monitoring
+
+      - name: Mypy type check (advisory)
+        continue-on-error: true
+        run: mypy calibration
+
+      - name: Run tests
+        # Data-, credential- and MATLAB-dependent tests self-skip when their
+        # inputs are absent (skipif / importorskip), so the suite is green in a
+        # clean CI checkout with only the bundled sample fixtures.
+        run: pytest

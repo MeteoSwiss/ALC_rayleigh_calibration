@@ -197,6 +197,23 @@ class CalibrationOptions:
     screen_profile_outliers: bool = True
     profile_outlier_nmad: float = 4.0
 
+    # Per-method gate overrides for the pluggable molecular selectors (eprof_v2 and later).
+    # These methods ignore min_window_start_m / min_window_r2 / max_window_rel_error above -- those
+    # are read only by the in-line eprof_v1.2 path -- so this dict is the ONLY way to tune their
+    # gates from configuration. Empty = each method's registered DEFAULT_PARAMS.
+    molecular_params: dict = field(default_factory=dict)
+    # Flag -9 ("another layer with lower signal"): reject when the chosen window's slope exceeds
+    # the 10th percentile of clean-window slopes by more than this factor. Was previously read via
+    # getattr with a hard-coded 2.0 and existed in neither the dataclass nor options.json.
+    aerosol_qc_enabled: bool = True
+    aerosol_scattering_threshold: float = 2.0
+    # Target-classification screening, active only when a classification curtain is passed to
+    # calibrate_rayleigh (no classification -> both are no-ops). The mask excludes contaminated
+    # CELLS before the window search; the threshold is the fraction of the SELECTED window's height
+    # classified cloud/ice over the night above which the night is rejected with flag -11.
+    use_classification_mask: bool = True
+    classification_veto_fraction: float = 0.30
+
     # Plotting flags. plot_main -> the single compact Rayleigh diagnostics dashboard only.
     # plot_all -> additionally emit the simple per-step RCS plots (time-series + annotated).
     plot_main: bool = False
@@ -212,6 +229,15 @@ class CalibrationOptions:
     calc_ext_above_molecular: bool = False
     subtract_background: bool = False
     consider_points_lower_than_molecular: bool = True
+    # Path to a MEASURED electronic-baseline profile b(z), in `rcs_0 / z^2` units, subtracted from
+    # the signal before the molecular fit (npz with "<ident>_range" / "<ident>_b"). Empty = off.
+    # This is NOT subtract_background: that one removes the FITTED intercept, which a forward-model
+    # study showed is mostly atmosphere in disguise (a modest haze reproduces it with b_true = 0)
+    # and which makes the altitude gradient worse. A dark-campaign profile, measured with the
+    # telescope covered, contains no atmosphere by construction. Applying it changes C_L itself
+    # (-16 to -17 % at Payerne), so it must be used CONSISTENTLY: a profile corrected with it and a
+    # constant computed without it do not belong together.
+    dark_profile_file: str = ""
 
     # Quality thresholds
     threshold_quality: float = 15.0
@@ -296,6 +322,11 @@ class CalibrationOptions:
             l1_grid_range_m=float(data.get("l1_grid_range_m", 30.0)),
             screen_profile_outliers=bool(data.get("screen_profile_outliers", 1)),
             profile_outlier_nmad=float(data.get("profile_outlier_nmad", 4.0)),
+            molecular_params=dict(data.get("molecular_params", {}) or {}),
+            aerosol_qc_enabled=bool(data.get("aerosol_qc_enabled", 1)),
+            aerosol_scattering_threshold=float(data.get("aerosol_scattering_threshold", 2.0)),
+            use_classification_mask=bool(data.get("use_classification_mask", 1)),
+            classification_veto_fraction=float(data.get("classification_veto_fraction", 0.30)),
             plot_main=bool(data.get("plot_main", 0)),
             plot_all=bool(data.get("plot_all", 0)),
             z_low_cloud=float(data.get("z_low_cloud", 4000)),
@@ -305,6 +336,7 @@ class CalibrationOptions:
             calc_ext_above_molecular=bool(data.get("calc_ext_above_molecular", 0)),
             subtract_background=bool(data.get("subtract_background", 0)),
             consider_points_lower_than_molecular=bool(data.get("consider_points_lower_than_molecular", 1)),
+            dark_profile_file=str(data.get("dark_profile_file", "") or ""),
             threshold_quality=float(data.get("threshold_quality", 15)),
             use_std_atm=bool(data.get("use_std_atm", 1)),
             molecular_source=str(data.get("molecular_source", "standard")),

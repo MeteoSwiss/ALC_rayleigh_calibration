@@ -1,0 +1,1036 @@
+[
+ {
+  "wmo": "0-20000-0-01311",
+  "ident": "A",
+  "type": "CHM15k",
+  "site": "FLESLAND",
+  "lat": 60.290000915527344,
+  "lon": 5.21999979019165,
+  "alt": 49.0,
+  "label": "FLESLAND_CHM15k_A",
+  "group": "CHM15k",
+  "split": "tune",
+  "reason": "base24",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 30.7,
+  "v2_clear_nights": 127
+ },
+ {
+  "wmo": "0-20000-0-01492",
+  "ident": "A",
+  "type": "CHM15k",
+  "site": "OSLO",
+  "lat": 59.94200134277344,
+  "lon": 10.720000267028809,
+  "alt": 96.0,
+  "label": "OSLO_CHM15k_A",
+  "group": "CHM15k",
+  "split": "holdout",
+  "reason": "base24",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 13.3,
+  "v2_clear_nights": 143
+ },
+ {
+  "wmo": "0-20000-0-03838",
+  "ident": "A",
+  "type": "CHM15k",
+  "site": "EXETER",
+  "lat": 50.72800064086914,
+  "lon": -3.4749999046325684,
+  "alt": 27.0,
+  "label": "EXETER_CHM15k_A",
+  "group": "CHM15k",
+  "split": "tune",
+  "reason": "tail(68%)",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 68.4,
+  "v2_clear_nights": 136
+ },
+ {
+  "wmo": "0-20000-0-06240",
+  "ident": "A",
+  "type": "CHM15k",
+  "site": "AMSTERDAM_AP_SCHIPHOL",
+  "lat": 52.31700897216797,
+  "lon": 4.8036699295043945,
+  "alt": -4.0,
+  "label": "AMSTERDAM_AP_SCHIP_CHM15k_A",
+  "group": "CHM15k",
+  "split": "holdout",
+  "reason": "amsterdam_quad",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 11.4,
+  "v2_clear_nights": 176
+ },
+ {
+  "wmo": "0-20000-0-06240",
+  "ident": "B",
+  "type": "CHM15k",
+  "site": "AMSTERDAM_AP_SCHIPHOL",
+  "lat": 52.31700897216797,
+  "lon": 4.8036699295043945,
+  "alt": -4.0,
+  "label": "AMSTERDAM_AP_SCHIP_CHM15k_B",
+  "group": "CHM15k",
+  "split": "tune",
+  "reason": "amsterdam_quad",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 10.7,
+  "v2_clear_nights": 177
+ },
+ {
+  "wmo": "0-20000-0-06240",
+  "ident": "C",
+  "type": "CHM15k",
+  "site": "AMSTERDAM_AP_SCHIPHOL",
+  "lat": 52.31700897216797,
+  "lon": 4.8036699295043945,
+  "alt": -4.0,
+  "label": "AMSTERDAM_AP_SCHIP_CHM15k_C",
+  "group": "CHM15k",
+  "split": "holdout",
+  "reason": "amsterdam_quad",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 21.8,
+  "v2_clear_nights": 170
+ },
+ {
+  "wmo": "0-20000-0-06240",
+  "ident": "D",
+  "type": "CHM15k",
+  "site": "AMSTERDAM_AP_SCHIPHOL",
+  "lat": 52.31700897216797,
+  "lon": 4.8036699295043945,
+  "alt": -4.0,
+  "label": "AMSTERDAM_AP_SCHIP_CHM15k_D",
+  "group": "CHM15k",
+  "split": "tune",
+  "reason": "amsterdam_quad",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 17.0,
+  "v2_clear_nights": 171
+ },
+ {
+  "wmo": "0-20000-0-06610",
+  "ident": "A",
+  "type": "CHM15k",
+  "site": "PAYERNE",
+  "lat": 46.813690185546875,
+  "lon": 6.942546844482422,
+  "alt": 490.0,
+  "label": "PAYERNE_CHM15k_A",
+  "group": "CHM15k",
+  "split": "holdout",
+  "reason": "base24",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 74.8,
+  "v2_clear_nights": 210
+ },
+ {
+  "wmo": "0-20000-0-10140",
+  "ident": "0",
+  "type": "CHM15k",
+  "site": "HAMBURG",
+  "lat": 53.650001525878906,
+  "lon": 10.109999656677246,
+  "alt": 35.0,
+  "label": "HAMBURG_CHM15k_0",
+  "group": "CHM15k",
+  "split": "tune",
+  "reason": "base24",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 8.4,
+  "v2_clear_nights": 179
+ },
+ {
+  "wmo": "0-20000-0-10210",
+  "ident": "0",
+  "type": "CHM15k",
+  "site": "FRIESOYTHE",
+  "lat": 53.04999923706055,
+  "lon": 7.900000095367432,
+  "alt": 5.699999809265137,
+  "label": "FRIESOYTHE_CHM15k_0",
+  "group": "CHM15k",
+  "split": "holdout",
+  "reason": "tail(86%)",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 85.8,
+  "v2_clear_nights": 169
+ },
+ {
+  "wmo": "0-20000-0-10393",
+  "ident": "0",
+  "type": "CHM15k",
+  "site": "LINDENBERG",
+  "lat": 52.209999084472656,
+  "lon": 14.119999885559082,
+  "alt": 123.0,
+  "label": "LINDENBERG_CHM15k_0",
+  "group": "CHM15k",
+  "split": "tune",
+  "reason": "base24",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 13.6,
+  "v2_clear_nights": 213
+ },
+ {
+  "wmo": "0-20000-0-10818",
+  "ident": "0",
+  "type": "CHM15k",
+  "site": "KLIPPENECK",
+  "lat": 48.11000061035156,
+  "lon": 8.760000228881836,
+  "alt": 973.4000244140625,
+  "label": "KLIPPENECK_CHM15k_0",
+  "group": "CHM15k",
+  "split": "holdout",
+  "reason": "tail(67%)",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 67.0,
+  "v2_clear_nights": 230
+ },
+ {
+  "wmo": "0-20000-0-10872",
+  "ident": "0",
+  "type": "CHM15k",
+  "site": "GOTTFRIEDING",
+  "lat": 48.65999984741211,
+  "lon": 12.539999961853027,
+  "alt": 350.3999938964844,
+  "label": "GOTTFRIEDING_CHM15k_0",
+  "group": "CHM15k",
+  "split": "tune",
+  "reason": "tail(89%)",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 88.8,
+  "v2_clear_nights": 178
+ },
+ {
+  "wmo": "0-20000-0-10962",
+  "ident": "0",
+  "type": "CHM15k",
+  "site": "HOHENPEISSENBERG",
+  "lat": 47.79999923706055,
+  "lon": 11.010000228881836,
+  "alt": 977.0,
+  "label": "HOHENPEISSENBERG_CHM15k_0",
+  "group": "CHM15k",
+  "split": "holdout",
+  "reason": "base24",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 7.6,
+  "v2_clear_nights": 211
+ },
+ {
+  "wmo": "0-20000-0-78990",
+  "ident": "A",
+  "type": "CHM15k",
+  "site": "BONAIRE_FLAMINGO_AP",
+  "lat": 12.129579544067383,
+  "lon": -68.27581024169922,
+  "alt": 2.0,
+  "label": "BONAIRE_FLAMINGO_A_CHM15k_A",
+  "group": "CHM15k",
+  "split": "tune",
+  "reason": "tail(89%)",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 89.2,
+  "v2_clear_nights": 65
+ },
+ {
+  "wmo": "0-20008-0-INO",
+  "ident": "A",
+  "type": "CHM15k",
+  "site": "MAGURELE",
+  "lat": 44.34479904174805,
+  "lon": 26.012300491333008,
+  "alt": 70.0,
+  "label": "MAGURELE_CHM15k_A",
+  "group": "CHM15k",
+  "split": "holdout",
+  "reason": "base24",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 14.8,
+  "v2_clear_nights": 229
+ },
+ {
+  "wmo": "0-20008-0-MSA",
+  "ident": "A",
+  "type": "CHM15k",
+  "site": "MONTSEC",
+  "lat": 42.02000045776367,
+  "lon": 0.7400000095367432,
+  "alt": 800.0,
+  "label": "MONTSEC_CHM15k_A",
+  "group": "CHM15k",
+  "split": "tune",
+  "reason": "tail(74%)",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 74.0,
+  "v2_clear_nights": 285
+ },
+ {
+  "wmo": "0-20008-0-UGR",
+  "ident": "A",
+  "type": "CHM15k",
+  "site": "GRANADA",
+  "lat": 37.15999984741211,
+  "lon": -3.5799999237060547,
+  "alt": 680.0,
+  "label": "GRANADA_CHM15k_A",
+  "group": "CHM15k",
+  "split": "holdout",
+  "reason": "base24",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 26.3,
+  "v2_clear_nights": 327
+ },
+ {
+  "wmo": "0-250-1001-07151",
+  "ident": "B",
+  "type": "CHM15k",
+  "site": "PALAISEAU",
+  "lat": 48.718101501464844,
+  "lon": 2.20740008354187,
+  "alt": 156.0,
+  "label": "PALAISEAU_CHM15k_B",
+  "group": "CHM15k",
+  "split": "tune",
+  "reason": "base24",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 44.8,
+  "v2_clear_nights": 230
+ },
+ {
+  "wmo": "0-348-1-72618",
+  "ident": "A",
+  "type": "CHM15k",
+  "site": "VASAROSNAMAONY",
+  "lat": 48.130001068115234,
+  "lon": 22.299999237060547,
+  "alt": 110.0,
+  "label": "VASAROSNAMAONY_CHM15k_A",
+  "group": "CHM15k",
+  "split": "holdout",
+  "reason": "tail(90%)",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 89.6,
+  "v2_clear_nights": 268
+ },
+ {
+  "wmo": "0-380-5-1",
+  "ident": "0",
+  "type": "CHM15k",
+  "site": "SAINT-CHRISTOPHE_AOSTA",
+  "lat": 45.7421989440918,
+  "lon": 7.35699987411499,
+  "alt": 560.0,
+  "label": "SAINT-CHRISTOPHE_A_CHM15k_0",
+  "group": "CHM15k",
+  "split": "tune",
+  "reason": "base24",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 15.5,
+  "v2_clear_nights": 251
+ },
+ {
+  "wmo": "0-724-60000-000000000UGRA001",
+  "ident": "A",
+  "type": "CHM15k",
+  "site": "GUADIANA_UGR",
+  "lat": 37.915008544921875,
+  "lon": -3.227570056915283,
+  "alt": 368.0,
+  "label": "GUADIANA_UGR_CHM15k_A",
+  "group": "CHM15k",
+  "split": "holdout",
+  "reason": "tail(73%)",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 72.8,
+  "v2_clear_nights": 261
+ },
+ {
+  "wmo": "0-20000-0-03808",
+  "ident": "C",
+  "type": "CL61",
+  "site": "CAMBORNE",
+  "lat": 50.218299865722656,
+  "lon": -5.327499866485596,
+  "alt": 87.0,
+  "label": "CAMBORNE_CL61_C",
+  "group": "CL61",
+  "split": "tune",
+  "reason": "base24",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 36.9,
+  "v2_clear_nights": 65
+ },
+ {
+  "wmo": "0-20000-0-06418",
+  "ident": "B",
+  "type": "CL61",
+  "site": "ZEEBRUGGE",
+  "lat": 51.34722137451172,
+  "lon": 3.2016665935516357,
+  "alt": 7.0,
+  "label": "ZEEBRUGGE_CL61_B",
+  "group": "CL61",
+  "split": "holdout",
+  "reason": "base24",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 52.9,
+  "v2_clear_nights": 51
+ },
+ {
+  "wmo": "0-20000-0-06447",
+  "ident": "B",
+  "type": "CL61",
+  "site": "UCCLE",
+  "lat": 50.79690170288086,
+  "lon": 4.3582000732421875,
+  "alt": 100.0,
+  "label": "UCCLE_CL61_B",
+  "group": "CL61",
+  "split": "tune",
+  "reason": "base24",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 91.5,
+  "v2_clear_nights": 47
+ },
+ {
+  "wmo": "0-20000-0-11538",
+  "ident": "B",
+  "type": "CL61",
+  "site": "TEMELIN",
+  "lat": 49.19778060913086,
+  "lon": 14.342220306396484,
+  "alt": 500.0,
+  "label": "TEMELIN_CL61_B",
+  "group": "CL61",
+  "split": "holdout",
+  "reason": "base24",
+  "years": [
+   2026
+  ],
+  "periods": [
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 24.4,
+  "v2_clear_nights": 45
+ },
+ {
+  "wmo": "0-20008-0-BIR",
+  "ident": "A",
+  "type": "CL61",
+  "site": "BIRKENES",
+  "lat": 58.383331298828125,
+  "lon": 8.25,
+  "alt": 190.0,
+  "label": "BIRKENES_CL61_A",
+  "group": "CL61",
+  "split": "tune",
+  "reason": "base24",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 27.8,
+  "v2_clear_nights": 18
+ },
+ {
+  "wmo": "0-20008-0-EDT",
+  "ident": "B",
+  "type": "CL61",
+  "site": "EDMONTON",
+  "lat": 53.54999923706055,
+  "lon": -114.0999984741211,
+  "alt": 766.0,
+  "label": "EDMONTON_CL61_B",
+  "group": "CL61",
+  "split": "holdout",
+  "reason": "base24",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 0.0,
+  "v2_clear_nights": 62
+ },
+ {
+  "wmo": "0-20008-0-LAU",
+  "ident": "A",
+  "type": "CL61",
+  "site": "LAUDER",
+  "lat": -45.03799819946289,
+  "lon": 169.6840057373047,
+  "alt": 370.0,
+  "label": "LAUDER_CL61_A",
+  "group": "CL61",
+  "split": "tune",
+  "reason": "base24",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 11.6,
+  "v2_clear_nights": 147
+ },
+ {
+  "wmo": "0-203-10-LNG",
+  "ident": "A",
+  "type": "CL61",
+  "site": "LANZHOT",
+  "lat": 48.704200744628906,
+  "lon": 16.92620086669922,
+  "alt": 150.0,
+  "label": "LANZHOT_CL61_A",
+  "group": "CL61",
+  "split": "holdout",
+  "reason": "base24",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 16.2,
+  "v2_clear_nights": 148
+ },
+ {
+  "wmo": "0-380-5-1",
+  "ident": "B",
+  "type": "CL61",
+  "site": "SAINT-CHRISTOPHE_AOSTA",
+  "lat": 45.7421989440918,
+  "lon": 7.35699987411499,
+  "alt": 560.0,
+  "label": "SAINT-CHRISTOPHE_A_CL61_B",
+  "group": "CL61",
+  "split": "tune",
+  "reason": "base24",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 12.9,
+  "v2_clear_nights": 124
+ },
+ {
+  "wmo": "0-756-4-EERLCL61",
+  "ident": "A",
+  "type": "CL61",
+  "site": "SION_EPFL_ALPOLE",
+  "lat": 46.22454833984375,
+  "lon": 7.360690116882324,
+  "alt": 485.0,
+  "label": "SION_EPFL_ALPOLE_CL61_A",
+  "group": "CL61",
+  "split": "holdout",
+  "reason": "base24",
+  "years": [
+   2026
+  ],
+  "periods": [
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 27.7,
+  "v2_clear_nights": 65
+ },
+ {
+  "wmo": "0-20000-0-07014",
+  "ident": "A",
+  "type": "Mini-MPL",
+  "site": "LILLE",
+  "lat": 50.609100341796875,
+  "lon": 3.1327099800109863,
+  "alt": 44.150001525878906,
+  "label": "LILLE_Mini-MPL_A",
+  "group": "Mini-MPL",
+  "split": "tune",
+  "reason": "base24",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 28.2,
+  "v2_clear_nights": 71
+ },
+ {
+  "wmo": "0-20000-0-07110",
+  "ident": "A",
+  "type": "Mini-MPL",
+  "site": "BREST",
+  "lat": 48.44430160522461,
+  "lon": -4.412300109863281,
+  "alt": 93.44000244140625,
+  "label": "BREST_Mini-MPL_A",
+  "group": "Mini-MPL",
+  "split": "holdout",
+  "reason": "base24",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 59.5,
+  "v2_clear_nights": 74
+ },
+ {
+  "wmo": "0-20000-0-07617",
+  "ident": "A",
+  "type": "Mini-MPL",
+  "site": "MINI_MPL_MOBILE",
+  "lat": 43.57789993286133,
+  "lon": 1.3738700151443481,
+  "alt": 154.63999938964844,
+  "label": "MINI_MPL_MOBILE_Mini-MPL_A",
+  "group": "Mini-MPL",
+  "split": "tune",
+  "reason": "base24",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 6.7,
+  "v2_clear_nights": 193
+ },
+ {
+  "wmo": "0-20000-0-07774",
+  "ident": "A",
+  "type": "Mini-MPL",
+  "site": "ALERIA",
+  "lat": 42.129798889160156,
+  "lon": 9.496330261230469,
+  "alt": 44.65999984741211,
+  "label": "ALERIA_Mini-MPL_A",
+  "group": "Mini-MPL",
+  "split": "holdout",
+  "reason": "base24",
+  "years": [
+   2025,
+   2026
+  ],
+  "periods": [
+   [
+    "20250101",
+    "20251231"
+   ],
+   [
+    "20260101",
+    "20260713"
+   ]
+  ],
+  "v2_minus2_pct_clear": 9.6,
+  "v2_clear_nights": 156
+ }
+]

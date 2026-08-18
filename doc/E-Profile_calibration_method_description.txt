@@ -1,0 +1,403 @@
+
+===== PAGE 1 =====
+E-PROFILE algorithm description
+April 28, 2026
+Table of Contents
+1 Loading L1 lidar data from NetCDF files .............................................. 1
+2 Filtering to nighttime and cloud-free profiles ........................................... 1
+3 Loading atmospheric model (standard or ECMWF) ..................................... 2
+4 Calculating molecular scattering properties............................................. 2
+5 Finding optimal molecular window via Rayleigh fit ...................................... 3
+6 Performing Klett inversion for extinction with a sensitivity analysis ....................... 5
+7 Calculating lidar constant............................................................ 6
+8 Writing results to NetCDF ........................................................... 9
+The primary routine for the complete calibration is the function calibrate rayleigh() defined in
+calibration.py. The calibration is performed separately for each night within the specified date range.
+1 Loading L1 lidar data from NetCDF files
+Lidar data need to be stored as NetCDF files in the hierarchy folder root/WMO/yyyy/mm/ where
+folder root is defined in options.json, and WMO is the station identifier (e.g. 0-20000-0-07617 for the
+miniMPL Toulouse mobile system).
+Foreachnightthescriptloadsthedailyfilesforthenight-endingdatetheprecedingday,guaranteeing
+coverage of the full night. This is performed using load l1 data() from data loader.py. The night is
+labelled by the date on which it ends (e.g. the night labelled 15/01/2025 spans from 14/01/2025 to
+15/01/2025).
+ThefunctionreturnsaCeilometerDataobjectcontainingtherange-correctedsignal(RCS),cloud-base
+height, metadata, and other relevant fields.
+2 Filtering to nighttime and cloud-free profiles
+The loaded lidar data are first filtered to nighttime using filter time range() from data loader.py)
+(local solar time, 20:00 of the previous solar day to 04:00 of the current solar day).
+→FIGURE 1’RCS’(plot rcs timeseries()):RCStime-seriesforthewholenightwiththecloud
+detection indicators (before cloud filtering).
+
+===== PAGE 2 =====
+2
+Next, filter cloudy profiles() from data loader.py removes cloud-contaminated profiles. The
+script does the following procedure:
+1. Discardprofilescontaininglowclouds(altitude< z low cloud,default6000m,definedinoptions.json).
+2. Remove all profiles within a ±15 min window around each low-cloud detection.
+3. For the remaining high-cloud cases, mask the signal from 500 m below the cloud base upward.
+After each step the algorithm checks whether the number of remaining profiles is above the minimum
+required duration min time range (hours) from options.json. If it is not the case, the calibration
+constant is not computed.
+3 Loading atmospheric model (standard or ECMWF)
+Depending on the chosen model, the script calls either load standard atmosphere() or load ecmwf
+profile() from atmosphere.py.
+– Standard atmosphere: Returns temperature and pressure profiles from the US Standard Atmo-
+sphere 1976 (file standard atmosphere US 1976 50km.csv) interpolated onto the lidar range grid.
+– ECMWF:Retrievesthenearestgridpointusingtheinstrumentlatitudeandlongitude,interpolates
+the first time step onto the lidar grid, and fills NaNs at the bottom of the profile with the nearest
+valid value.
+4 Calculating molecular scattering properties
+Using the atmospheric profile, calculate molecular properties() from atmosphere.py computes the
+following molecular properties: β (r) (beta mol), α (r) (alpha mol), βatt(r) (beta att mol), P (r)
+m m m m
+(p mol), and T (r) (transmission).
+m
+The total molecular backscatter coefficient (i.e. the total Rayleigh volume-scattering coefficient) is
+computed following Bucholtz (1995):
+24π3(m2−1)2(6+3ρ ) N T P(z)
+β (r)= m 0 0
+m,TOT λ4N2(m2+2)2(6−7ρ ) P T(z)
+0 m 0
+Thefirstfactorcorrespondstoσ (λ)(thetotalRayleigh-scatteringcrosssectionpermolecule)andthe
+air
+second to N(z), the molecular number-density profile. Here, ρ is the depolarization ratio of dry air;
+m
+m is the refractive index, computed with calculate refractive index() from atmosphere.py using
+the wavelength-dependent Edl´en formula; and N , P , and T are the standard-atmosphere values at
+0 0 0
+sea level for molecular number density, pressure, and temperature. P(z) and T(z) are the pressure and
+temperature profiles from the atmospheric model.
+
+===== PAGE 3 =====
+E-PROFILE algorithm description 3
+The molecular backscatter coefficient β (r) is obtained from the phase function p(Θ) evaluated at
+m
+Θ =π (180°):
+β (r)
+β (r)= m,TOT .
+m 4πp(π)
+Thephase-functionvalueiscomputedwithcalculate rayleigh phase function()fromatmosphere.py.
+Using the molecular lidar ratio S =8π/3sr, the extinction coefficient α (r) is computed as
+m m
+α (r)=β (r)×S
+m m m
+The (two-way) transmission T2(r) is then computed as
+m
+(cid:110) (cid:90) r (cid:111)
+T2(r)=exp −2 σ (r′)dr′
+m m
+0
+The molecular attenuated backscatter coefficient is
+βatt(r)=β (r)T2(r)
+m m m
+Finally, the molecular power P (r) (range-normalized signal) is computed as
+m
+βatt (r)
+P (r)= mol
+m r2
+5 Finding optimal molecular window via Rayleigh fit
+The script computes the mean RCS profile over night (rcs mean) from the filtered data, and uses it for
+the rest of the computations. Then, it is converted to a range-normalised signal (signal) as
+RCS(r)
+S(r)=
+r2
+To find the optimal molecular window, the script uses the Rayleigh fit method implemented in
+the function find optimal molecular window() in rayleigh fit.py. The function searches over different
+center positions and window sizes to find the region where the signal (S(r) or signal) best matches
+theoretical molecular scattering (P (r) or p mol) following the linear relation:
+m
+S(r)=slope×P (r)+intercept
+m
+Therefore, from the RCS equation:
+RCS(r)=C (β (r)+β (r))T2(r)T2(r)
+L m a m a
+the slope corresponds to C T2(r), with T2(r) the two-way aerosol transmission, as β (r) ≈ 0 in the
+L a a a
+molecular window.
+A grid search is performed over:
+– Window centre:fromrange start mtorange end m(step=8bins≈240mforminiMPL,defined
+in config.py).
+– Window size: half-lengths given by half length options m (250 m to 2000 m in 240 m steps, also
+from config.py).
+For each combination a linear regression S(r) = aP (r)+b is computed, yielding slope a, intercept b,
+m
+R2, standard error, and p-value. The optimal window is selected by:
+(cid:80)
+1. Choosing the centre with the smallest |b| across all window sizes.
+2. Within that centre, picking the window size with the highest R2.
+The resulting parameters (slope, intercept, window limits, etc.) are stored in a RayleighFitResult.
+
+===== PAGE 4 =====
+4
+Computation of the time subsets and sensitivity range for sensitivity analysis
+Forthesensitivityanalysis,thescriptcreatesN =4randomsubsets,eachretainingafrac-
+TIMESAMPLES
+tion TIME SUBSET FRACTION = 0.7 of the profiles (defined in calibration.py). Altitude shifts are defined
+by ALT SHIFTS M = (-200, -100, 0, +100, +200) m, also in calibration.py. The sensitivity range is the
+optimal window plus/minus the maximum altitude shift.
+→ FIGURE 2 ”RCS + Calibration Regions” (plot rcs timeseries()): filtered RCS time series
+for the whole night with molecular window annotation (light blue line), the sensitivity range (orange
+dotted lines), and the selected random time subsets (colored dots).
+→ FIGURE 3 ”Window Search” (plot rayleigh window search()) (only if plot all is set to 1
+in options.json): four panels displaying (1) fit slope, (2) fit intercept, (3) sum of absolute intercepts per
+centre (red line marks the minimum), and (4) R2 values with the optimum marked by a red cross.
+
+===== PAGE 5 =====
+E-PROFILE algorithm description 5
+Validate Rayleigh fit
+The fit is considered valid only if:
+1. The slope is positive and smaller than the absolute value of the intercept.
+2. Therelativeerrorδα = |slope−medianofratio|×100isbelowthequalitythresholddefinedinoptions.json
+r medianofratio
+(with median of ratio being the median of S(r) ).
+Pm(r)
+If either condition fails, the calibration constant is not computed and an informative error message is
+logged.
+6 Performing Klett inversion for extinction with a sensitivity analysis
+Based on the previous results, the script runs the Klett inversion and computes the calibration constant
+C for the entire night across the following parameter combinations:
+L
+– Lidar ratios - LR = 52 (defined in config.py) with the sensitivity shifts specified by LR DELTAS
+aer
+= (-20, -10, 0, +10, +20) in calibration.py.
+– Altitude shifts - the optimal molecular window shifted by ALT SHIFTS M = (-200, -100, 0,
++100, +200)(also in calibration.py).
+– Time subsets - all profiles plus the various time subsets described in Section 5.
+Thescriptemploysthefunction compute cl for pertubation()toobtainthecalibrationresultfor
+each combination separately. Its inputs include:
+– The mean RCS profile for the selected time sample (RCS ).
+t
+– The lidar ratio and the altitude shift for the current combination (among other parameters).
+The function first checks whether the shifted molecular window lies outside the valid range; if so,
+it returns None. Otherwise, it determines the start and end indices of the shifted molecular window
+(i start molandi end mol).ItthennormalizesthemeanRCSand,if substract backgroundisTrue,
+removes the residual background noise.
+– When substract background is False, the attenuated backscatter is:
+RCS (r)
+βatt(r)= t (1)
+slope
+– When substract background is True, the attenuated backscatter becomes:
+RCSt(r) −intercept
+βatt(r)= r2 ×r2 (2)
+slope
+The function also calculates a reference value that serves as the constant of integration for the Klett
+inversion.AccordingtotheKlettmethod,thisconstantisc=
+βatt(Rc)
+withR beingthereference
+βa(Rc)+βm(Rc) c
+point. Since it is assumed that there are no aerosols in the molecular window, β (R ) = 0. Therefore,
+a c
+the constant of integration is computed as:
+βatt(R )
+c= c
+β (R )
+m c
+This constant is computed vectorially for every point in the shifted molecular window, and the final
+reference valueistakenasthemeanofthesevalues.Thereferenceindex(reference idx)corresponds
+to the centre of the shifted window.
+The inversion is then performed by the function klett inversion() in atmosphere.py using the
+computed parameters. Different indexes are used:
+– i start – start of the inversion range (set to 0, i.e., ground level).
+– i end – end of the inversion range (top of the shifted molecular window).
+– reference idx – reference point R (centre of the shifted molecular window).
+c
+
+===== PAGE 6 =====
+6
+The algorithm computes separately the numerator NUM(R) and the denominator DEN(R):
+(cid:110) (cid:90) Rc (cid:111)
+NUM(R)=βatt(R) exp −2 β (r)∆Sdr ,
+m
+R
+where ∆S = S −S , with S the lidar ratio and S the molecular lidar ratio (so that ∆S > 0). The
+a m a m
+range R spans from i start to i end. Over this interval, the integral term is positive between i start
+and reference idx, and negative above reference idx (since i end > reference idx).
+The denominator is defined as
+DEN(R)= (cid:40) c+2 (cid:82) R Rcβatt(r)exp (cid:110) −2 (cid:82) r Rcβ m (r′) ∆S dr′ (cid:111) S a dr if R between i start and reference idx,
+c otherwise (i.e., [reference idx ; i end])
+Finally, using NUM(R) and DEN(R), the algorithm derives the quantities of interest for R between
+i start and i end:
+NUM(R)
+β (R)= −β (R), (3)
+a DEN(R) m
+β(R)=β (R)+β (R), (4)
+a m
+(cid:40)
+β (R)S , if β (R)>0,
+a a a
+σ (R)= (5)
+a
+0, if β (R)≤0.
+a
+(Note that, in principle, β (R) should always be positive; however, instrumental noise may occasion-
+a
+ally result in computed negative values.)
+7 Calculating lidar constant
+Within the compute cl for perturbation() function, the total extinction coefficient is obtained by
+adding the aerosol extinction to the molecular contribution:
+σ(r)=σ (r)+β (r)S . (6)
+a m m
+ABooleanoption,consider points lower than molecular(defaultTrue),controlswhetherpoints
+below the molecular profile are retained. If set to False, any β(r) that falls below β (r) is raised to the
+m
+molecular value, and both β (r) and σ (r) are forced to zero.
+a a
+Thelidarconstantisthenderivedinthefunctioncalculate lidar constant()locatedinrayleigh fit.py.
+The steps are:
+1. Background correction - If substract background is True, the mean RCS profile is corrected as
+(cid:16)RCS (r) (cid:17)
+RCS (r)= t −intercept ×r2
+corrected r2
+Otherwise (substract background = False)
+RCS (r)=RCS (r)
+corrected t
+2. Cumulative optical depth – The optical depth at each range bin from the surface to the top of the
+molecular window is calculated by cumulative trapezoidal integration from the surface :
+(cid:90) r
+τ(r)= σ(r′)dr′
+0
+3. Transmission factor - The inverse of the two-way transmission is
+1
+=e2 τ(r)
+T2(r)
+4. Lidar constant – Using the Wiegner-and-Geiss (2012) formulation, the calibration constant up to
+the top of the shifted molecular window is
+RCS (r) 1
+C (r)= corrected , (7)
+L β(r) T2(r)
+
+===== PAGE 7 =====
+E-PROFILE algorithm description 7
+with the constraint β(r)>0; otherwise a NaN is assigned.
+5. Final value – The lidar constant for the window is taken as the median of C (r) over the shifted
+L
+molecular window:
+C
+L
+median =median (cid:8) C
+L
+(r) (cid:12) (cid:12)r ∈window (cid:9) . (8)
+6. Uncertainty – For each combination the uncertainty is estimated as
+uncertainty = (cid:104) std (cid:8) C (r ) (cid:9) + slopestderrorS (cid:105) ×2, (9)
+i L window slope a
+where the slope standard error originates from the Rayleigh fit and is stored in the fit results.
+All combinations are processed, and for each the following results are saved: the lidar constant, its
+uncertainty, the constant profile across the window, and the molecular-window boundaries.
+Statistics
+Robust statistics are computed on the resulting calibration constants C :
+L
+– Median value (retained constant):
+Cmedian =median (cid:0) C (cid:1)
+L L
+– First quartile (25%): Q1(C )
+L
+– Third quartile (75%): Q3(C )
+L
+– Inter-quartile range:
+IQR(C )=Q3(C )−Q1(C )
+L L L
+– Median absolute deviation:
+(cid:0) (cid:1)
+MAD(C )=median |C −median(C )|
+L L L
+– Robust uncertainty (95% confidence interval):
+Uncertainty=2σ
+robust
+where
+(cid:0) (cid:1)
+σ =max σ , σ
+robust IQR MAD
+IQR MAD
+σ = σ =
+IQR 1.349 MAD 0.6745
+Validation: Slope-Method Comparison
+The slope-method provides an independent check on the lidar constant. The procedure is the following:
+1. Attenuated backscatter – Compute βatt(r) from the slope obtained in the Rayleigh fit:
+RCS(r)
+If substract background=False: βatt(r)= ,
+slope
+RCS(r) −intercept
+If substract background=True: βatt(r)= r2 ×r2.
+slope
+2.Reference–Definesthereferenceindexref idx checkasthecenterofthenominalmolecularwin-
+dow,andcomputestheintegrationconstantreference valueasthemeanofβatt(R )/β (R )evaluated
+c m c
+over that nominal molecular window.
+3. Extinction profile – Obtain σ (r) from the Klett inversion via klett inversion() and form the
+a
+total extinction
+σ(r)=σ (r)+β (r)S .
+a m m
+Steps 1 to 3 mirrors the calculations performed in compute cl for perturbation().
+4. Transmission factor (scalar) – Compute the inverse of the two-way transmission at the reference
+range r taken as the start of the nominal molecular window:
+ref
+1 (cid:110) (cid:90) rref (cid:111)
+=exp 2 σ(r)dr
+T2(r )
+ref 0
+
+===== PAGE 8 =====
+8
+5. Slope-method lidar constant – Combine the Rayleigh slope with the transmission factor:
+1
+Cslope =slope×
+L T2(r )
+ref
+6. Relative error – Compare the two estimates:
+(cid:12) (cid:12)
+(cid:12)Cslope−Cmedian (cid:12)
+error=(cid:12) L L ×100(cid:12)
+(cid:12) Cmedian (cid:12)
+(cid:12) L (cid:12)
+If the error exceeds the threshold defined in options.json the result is flagged as invalid (error message:
+’Method disagreement’).
+7.Uncertaintycheck–IftherobustuncertaintyfromthestatisticssectionexceedsCmedian,theresult
+L
+is also deemed invalid (error message: ’Uncertainty exceeds value’).
+→ FIGURE 4 ’Molecular Fit’ (plot molecular fit()): three panels with altitude on the y-axis
+showing(1)meanRCS,(2)normalizedsignalfornominalconditions(blue)– RCS(r) or RCS(r)/r2−intercept
+r2slope slope
+when background subtraction is enabled – and the molecular reference profile P (r) (red dotted), (3)
+m
+retrieved βatt(r) (blue) and the molecular βatt(r) (red dotted). The yellow box marks the molecular
+m
+window selected from the Rayleigh fit.
+→FIGURE 5’Lidarconstant’(plot lidar constant()):bluecurveshowstheC profileuptothe
+L
+top of the molecular window for the nominal configuration (obtained from section 7 at step 4); the red
+line indicates Cmedian; the pink box represents the median ± robust uncertainty (2σ ); the yellow
+L robust
+box again marks the molecular window; the green line displays Cslope.
+L
+
+===== PAGE 9 =====
+E-PROFILE algorithm description 9
+→ FIGURE 6 ’Sensitivity’ (plot sensitivity analysis()): three panels – (1) heatmap of the
+deviationofC fromthemedianforeachlidar-ratio/altitudecombination(matrixcl matrix)withcells
+L
+annotated by the median over time samples, (2) overall boxplot of all lidar-ratio/altitude/time-sample
+combinations (cube cl cube) with the red line for Cmedian and pink box for the median ± robust
+L
+uncertainty, (3) per-time-sample boxplots with Cmedian shown as a red dotted line and the uncertainty
+L
+as the pink box.
+8 Writing results to NetCDF
+Thecalibrationresultsarewritten(orappended)toayearlyNetCDFfilebythefunctionwrite calibration
+result() in output.py. The following variables are stored:
+– calibration method: identifier of the calibration type (0 for Rayleigh calibration).
+– time: date corresponding to the end of the night used for the calibration.
+– start time and end time: timestamps of the first and last profiles of the night used.
+– lidar constant: the median lidar constant Cmedian.
+L
+– lidar constant uncertainty: the robust uncertainty 2σ .
+robust
+– calibration bottom heightandcalibration top height:lowerandupperboundsofthecalibra-
+tion window selected by the Rayleigh fit.
+– laser wavelength: laser wavelength (determined from the instrument type).
+– housekeepingvariables:laser life time,status detector,status laser,temperature optical
+module, window transmission, and optical module id.
+If results for the same day and the same calibration method already exist, the entry is overwritten.
+If the calibration method differs, the new results are appended.

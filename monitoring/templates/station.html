@@ -1,24 +1,36 @@
 {% extends "base.html" %}
 {% block title %}{{ key }} — calibration{% endblock %}
 {% block headerextra %}<a class="back" href="{{ base }}index.html">&larr; summary</a>
-{% if prev_station %}<a class="back" href="{{ prev_station }}" title="Previous station (Up arrow)">&uarr; prev station</a>{% endif %}
-{% if next_station %}<a class="back" href="{{ next_station }}" title="Next station (Down arrow)">&darr; next station</a>{% endif %}
+<select id="f-country" class="navfilter" title="Filter the station navigation by country">
+  <option value="">All countries</option>
+  {% for c in countries %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+</select>
+<select id="f-type" class="navfilter" title="Filter the station navigation by instrument type">
+  <option value="">All types</option>
+  {% for t in types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+</select>
+{# The prev/next links are filled in by stationnav.js from data/stations.json, because their target
+   depends on the filters above. Hidden until then to avoid a flash of empty links; #station-nav
+   below still carries the server-baked UNFILTERED neighbours so the Up/Down keys work in the
+   moments before the index arrives (stationnav.js overwrites both attributes once it does). #}
+<a class="back navnb" id="nav-prev" href="#" title="Previous station (Up arrow)" hidden></a>
+<a class="back navnb" id="nav-next" href="#" title="Next station (Down arrow)" hidden></a>
+<span class="muted navhint" id="nav-hint" hidden></span>
 {% if periods %}<select id="period-sel" class="navfilter" title="Time window — zooms every chart, the calibration list and the OmB/sensitivity panels">
   {% for p in periods %}<option value="{{ p.key }}"{% if p.key == 'all' %} selected{% endif %}>{{ p.label }}</option>{% endfor %}
 </select>{% endif %}{% endblock %}
 
 {% block content %}
-<div id="station-nav" data-prev="{{ prev_station }}" data-next="{{ next_station }}" hidden></div>
-<h1>{{ key }} <span class="badge">{{ meta.itype }}</span>
-  {% for b in blocks %}<span class="mtag mtag-{{ b.method }}">{{ b.label }}</span>{% endfor %}
+<div id="station-nav" data-key="{{ key }}" data-prev="{{ prev_station }}" data-next="{{ next_station }}" hidden></div>
+{# ONE line: the availability card and the calibration info must be visible on load, so the
+   header spends a single row. The WMO id is not repeated (the page title IS the WIGOS key) and
+   the institution lives in the tooltip of the site name. #}
+<h1 class="oneline">{{ key }} <span class="badge">{{ meta.itype }}</span>
+{% for b in blocks %}<span class="mtag mtag-{{ b.method }}">{{ b.label }}</span>{% endfor %}
+  <span class="stmeta" title="{{ meta.institution or '' }}">{{ meta.name or "—" }} ·
+    {{ meta.country or "—" }} · {{ meta.lat | fmt('{:.3f}') }}, {{ meta.lon | fmt('{:.3f}') }} ·
+    {{ meta.alt | fmt('{:.0f}') }} m</span>
 </h1>
-<p class="subtitle">
-  {%- set bits = [] -%}
-  {%- if meta.name %}{{ bits.append(meta.name) or "" }}{% endif -%}
-  {%- if meta.country %}{{ bits.append(meta.country) or "" }}{% endif -%}
-  {%- if meta.institution %}{{ bits.append(meta.institution) or "" }}{% endif -%}
-  {% if bits %}{{ bits | join("  ·  ") }}{% else %}<span class="muted">station metadata unavailable</span>{% endif %}
-</p>
 
 {% if nc_files or ceda_url %}
 <section class="links">
@@ -29,38 +41,106 @@
 </section>
 {% endif %}
 
-<section class="metabar">
-  <span><b>WMO</b> {{ meta.wmo or "—" }}</span>
-  <span><b>Lat/Lon</b> {{ meta.lat | fmt('{:.3f}') }}, {{ meta.lon | fmt('{:.3f}') }}</span>
-  <span><b>Alt</b> {{ meta.alt | fmt('{:.0f}') }} m</span>
-</section>
-
-{% if availability %}
 <section class="card availcard">
-  <h2>Data availability &amp; instrument status
-    <span class="muted">— per day, decoded from the instrument status strings; click a day to load its diagnostic below</span></h2>
+  <h2>Data availability, cloud cover &amp; calibration
+    <span class="muted">— per day; click a day to load its diagnostic below</span></h2>
+  {% if availability %}
   <div class="avail-legend">
+    <b>Status</b>
     <span class="ak ak-pass"></span> Pass
     <span class="ak ak-warning"></span> Warning
     <span class="ak ak-error"></span> Error
     <span class="ak ak-nodata"></span> No data
+    <span class="legsep"></span>
+    <b>Cloud cover</b>
+    <span class="ak ak-cc0"></span> 0
+    <span class="ak ak-cc4"></span> 4
+    <span class="ak ak-cc8"></span> 8 octas
+    <span class="legsep"></span>
+    <b>Calibration</b>
+    {% for c in cal_classes %}<span class="ak" style="background:{{ c.color }}" title="{{ c.title }}"></span> {{ c.label }}{% endfor %}
   </div>
   {{ availability | safe }}
+  {% else %}
+  <p class="muted">No instrument status has been recorded for this stream yet — the daily runner
+    writes <code>&lt;key&gt;_status.csv</code> on its next pass, and this card fills in.</p>
+  {% endif %}
 </section>
 {% if status_json %}<script type="application/json" id="status-index">{{ status_json | safe }}</script>{% endif %}
+
+{% if overlay or cl_tiles %}
+<section class="card">
+  {% if overlay %}{{ overlay | safe }}
+  <p class="muted">Both retrievals on one axis — a systematic offset between them likely reflects
+    electronic distortion of the signal, not the water-vapour correction. Click a legend entry to
+    isolate one method; the tiles below follow the selection.</p>{% endif %}
+  {% if cl_tiles %}
+  <div class="tiles" id="cl-tiles">
+    {% for t in cl_tiles %}
+    <div class="tile"><div class="tl">{{ t.label }}</div>
+      <div class="tv" style="color:{{ t.color }}">{{ t.value }}</div>
+      <div class="tn">{{ t.note }}</div></div>
+    {% endfor %}
+  </div>
+  {% if cl_stats_json %}<script type="application/json" id="cl-tiles-data">{{ cl_stats_json | safe }}</script>
+  <script src="{{ base }}assets/cltiles.js?v={{ asset_v }}"></script>{% endif %}
+  {% endif %}
+</section>
 {% endif %}
 
-{% if overlay %}
-<section class="card">{{ overlay | safe }}</section>
+
+
+{% for b in blocks %}
+<section class="card">
+  <h2><span class="mtag mtag-{{ b.method }}">{{ b.label }}</span> — calibration constant over time
+    <span class="muted">{{ b.meta.success_rate | fmt('{:.0f}') }}% success ·
+    {{ b.meta.n_success or 0 }}/{{ b.meta.n_dates or 0 }} ·
+    median {{ b.meta.median_cl | fmt('{:.4g}') }}</span></h2>
+  {{ b.figs.ts | safe }}
+</section>
+{% endfor %}
+
+{# Pooled C-vs-cloud-base density. It is DATA, not a rendered figure: the panel draws it as the
+   third card of the cloud diagnostics row, beside the coefficient histogram it is the 2-D version
+   of. Emitted BEFORE the panel script so it is in the DOM when the first night renders. #}
+{% if hopkin %}<script id="hopkin-data" type="application/json">{{ hopkin | safe }}</script>{% endif %}
+
+{% if daily_panel %}
+{# Interactive daily calibration. Renders ONLY when its per-day payloads exist, so a station without
+   them keeps exactly the page it had before. It sits next to the per-day diagnostic images rather
+   than replacing them: the images are the operational product, this reads the same nights as data. #}
+<style>{{ daily_panel.css | safe }}</style>
+{# The calendar is NAVIGATION: it stands beside the card (#cal-toggle collapses it; narrow screens
+   start collapsed), and the card's title row comes from the panel so the date and day arrows sit
+   next to the title. #}
+<div class="dp-wrap">
+  <aside class="dp-rail">{{ daily_panel.rail | safe }}</aside>
+  <section class="card" id="daily">
+    {{ daily_panel.body | safe }}
+  </section>
+</div>
+<script id="payload" type="application/json">{{ daily_panel.payload | safe }}</script>
+{# Explicit handshake: the host owns the keyboard (diag.js + dailypanel.js). Must run BEFORE the
+   inline panel script -- DOM sniffing for viewer sections was defeated by page composition. #}
+<script>window.__panelEmbedded = true;
+{%- if img_base %}
+// The per-day payloads are far too large for the web VM's disk, so the public site serves them from
+// the image bucket. The base is baked in HERE rather than recovered from some <img> on the page: a
+// station with no diagnostic and no OmB image has no such <img>, and its panel would then have no
+// way to reach its payloads at all.
+window.__payloadBase = "{{ img_base }}data/";
+{%- endif %}
+</script>
+<script>{{ daily_panel.js | safe }}</script>
+<script src="{{ base }}assets/dailypanel.js?v={{ asset_v }}"></script>
 {% endif %}
 
 {% for b in blocks %}
 <section class="methodblock">
   <h2><span class="mtag mtag-{{ b.method }}">{{ b.label }}</span>
     <span class="muted">{{ b.meta.success_rate | fmt('{:.0f}') }}% success · {{ b.meta.n_success or 0 }}/{{ b.meta.n_dates or 0 }} ·
-    median {{ b.meta.median_cl | fmt('{:.3e}') }} · rel. unc {{ b.meta.median_rel_unc | fmt('{:.0f}') }}%</span></h2>
-  <div class="card">{{ b.figs.ts | safe }}</div>
-
+    median {{ b.meta.median_cl | fmt('{:.4g}') }} · rel. unc {{ b.meta.median_rel_unc | fmt('{:.0f}') }}%
+    {% if daily_panel %}· click a point to open that night{% endif %}</span></h2>
   {% if b.diags %}
   <section class="diag card" id="diag-{{ b.method }}" data-ts="fig-ts-{{ b.method }}"
            data-key="{{ key }}" data-method="{{ b.method }}" data-itype="{{ meta.itype }}" tabindex="0">
@@ -92,6 +172,7 @@
   </div>
   <h3 class="muted">All {{ b.label }} calibrations ({{ b.recent | length }}) —
     <span class="muted">click a date to load its diagnostic, click a flag for its meaning</span></h3>
+  <div class="tablewrap">
   <table class="stationtable paginated" data-page-size="15">
     <thead><tr><th>Date</th><th>Flag</th><th>C_L</th><th>Uncertainty</th><th>Extra</th><th>Message</th></tr></thead>
     <tbody>
@@ -101,7 +182,7 @@
         <td><span class="dot" style="background:{{ flag_color(r.flag) }}"></span>
             <a class="flaglink" href="{{ base }}flags.html#flag-{{ flag_anchor(r.flag) }}">{{ r.flag }}</a>
             <span class="muted">{{ flag_label(r.flag, b.method) }}</span></td>
-        <td>{{ r.cal_value | fmt('{:.3e}') if r.success else "—" }}</td>
+        <td>{{ r.cal_value | fmt('{:.4g}') if r.success else "—" }}</td>
         <td>{{ r.uncertainty | fmt('{:.2e}') if r.success else "—" }}</td>
         <td>{% if b.method == 'cloud' %}{{ r.n_profiles | fmt('{:.0f}') }} prof{% elif r.bottom_height == r.bottom_height %}{{ r.bottom_height | fmt('{:.0f}') }}–{{ r.top_height | fmt('{:.0f}') }} m{% else %}—{% endif %}</td>
         <td class="msg">{{ r.message }}</td>
@@ -109,13 +190,39 @@
     {% endfor %}
     </tbody>
   </table>
+  </div>
 </section>
 {% endfor %}
 
-{% if class_diags %}
-<section class="block">
+
+
+<section class="card">
+  <h2>Instrument monitoring <span class="muted">— daily averages: laser power, window transmission, temperatures</span></h2>
+  {% if monitoring %}{{ monitoring | safe }}
+  {% else %}<p class="muted">No housekeeping has been recorded for this stream yet — the daily
+    runner writes <code>&lt;key&gt;_hk.csv</code> on its next pass.</p>{% endif %}
+</section>
+
+{# The three operational products close every station page, in this order, ALWAYS. A stream whose
+   product is missing says so in place -- a section that silently vanishes reads as a broken page,
+   not as an absent product. #}
+<section class="card" id="sec-omb">
+  <h2>Observation &#8722; Background (CAMS) <span class="muted">— calibrated backscatter vs CAMS model over the selected window</span></h2>
+  {% if ombsens and ombsens.omb %}
+  <a href="{{ ombsens.omb }}" target="_blank" rel="noopener"><img class="diag-img" data-period-img
+       src="{{ ombsens.omb }}" data-src-all="{{ ombsens.omb }}"
+       {%- if ombsens.omb_periods %}{% for pk, url in ombsens.omb_periods.items() %} data-src-{{ pk }}="{{ url }}"{% endfor %}{% endif %}
+       alt="Observation minus background (CAMS) diagnostic" style="max-width:100%;height:auto;"></a>
+  {% else %}
+  <p class="muted">Not produced for this stream — the OmB comparison is written by the operational
+    run (<code>--omb</code>) and appears here once its CSV exists.</p>
+  {% endif %}
+</section>
+
+<section class="block" id="sec-classification">
   <h2>Cloudnet target classification
     <span class="muted">— {{ class_diags | length }} day{{ 's' if class_diags | length != 1 else '' }} · aerosol / cloud / drizzle / ice / supercooled (ceiloclass, driven by CAMS T)</span></h2>
+  {% if class_diags %}
   <section class="diag card" id="diag-classification" data-key="{{ key }}" data-method="classification"
            data-itype="{{ meta.itype }}" tabindex="0">
     <h3>Classification — <span class="diag-date muted">latest</span>
@@ -131,33 +238,21 @@
     </div>
     <script type="application/json" class="diag-data">{{ class_diags | tojson }}</script>
   </section>
+  {% else %}
+  <p class="muted">No Cloudnet target-classification curtains for this stream.</p>
+  {% endif %}
 </section>
-{% endif %}
 
-{% if monitoring %}
-<section class="card">
-  <h2>Instrument monitoring <span class="muted">— daily averages: laser power, window transmission, temperatures</span></h2>
-  {{ monitoring | safe }}
-</section>
-{% endif %}
-
-{% if ombsens and ombsens.omb %}
-<section class="card">
-  <h2>Observation &#8722; Background (CAMS) <span class="muted">— calibrated backscatter vs CAMS model over the selected window</span></h2>
-  <a href="{{ ombsens.omb }}" target="_blank" rel="noopener"><img class="diag-img" data-period-img
-       src="{{ ombsens.omb }}" data-src-all="{{ ombsens.omb }}"
-       {%- if ombsens.omb_periods %}{% for pk, url in ombsens.omb_periods.items() %} data-src-{{ pk }}="{{ url }}"{% endfor %}{% endif %}
-       alt="Observation minus background (CAMS) diagnostic" style="max-width:100%;height:auto;"></a>
-</section>
-{% endif %}
-
-{% if ombsens and ombsens.sens %}
-<section class="card">
+<section class="card" id="sec-sens">
   <h2>Instrument sensitivity / detection limit <span class="muted">— ICAO detection altitude &amp; nighttime noise floor</span></h2>
+  {% if ombsens and ombsens.sens %}
   <a href="{{ ombsens.sens }}" target="_blank" rel="noopener"><img class="diag-img" data-period-img
        src="{{ ombsens.sens }}" data-src-all="{{ ombsens.sens }}"
        {%- if ombsens.sens_periods %}{% for pk, url in ombsens.sens_periods.items() %} data-src-{{ pk }}="{{ url }}"{% endfor %}{% endif %}
        alt="Instrument sensitivity / detection limit diagnostic" style="max-width:100%;height:auto;"></a>
+  {% else %}
+  <p class="muted">Not produced for this stream — the sensitivity product is written by the
+    operational run (<code>--sens</code>) and appears here once its CSV exists.</p>
+  {% endif %}
 </section>
-{% endif %}
 {% endblock %}

@@ -90,6 +90,10 @@
   var fc = document.getElementById("f-country");
   var ft = document.getElementById("f-type");
   if (!fc && !ft) return;
+  // Station pages carry the same two selects, but there they scope the previous/next navigation
+  // (stationnav.js) and there is nothing filterable on the page. Without this guard every change
+  // would run five no-op passes over tables/maps/histograms that do not exist here.
+  if (!document.querySelector("table.filterable")) return;
   var tables = Array.prototype.slice.call(document.querySelectorAll("table.filterable"));
   var count = document.getElementById("filter-count");
   // Per-instrument-type ranked-histogram sections ("Median C_L per station, by type"): when a type
@@ -176,6 +180,9 @@
 
   function apply() {
     var c = val(fc), t = val(ft);
+    // Same sessionStorage key stationnav.js uses, so one filter follows the operator in BOTH
+    // directions between the summary and the station pages instead of resetting at each hop.
+    try { sessionStorage.setItem("alc-filter", JSON.stringify({ c: c, t: t })); } catch (e) {}
     filterTables(c, t);
     filterMap(c, t);
     filterHistograms(c, t);
@@ -184,4 +191,16 @@
   }
   if (fc) fc.addEventListener("change", apply);
   if (ft) ft.addEventListener("change", apply);
+  // Restore a filter carried over from a station page. Deferred to the next tick so the Plotly
+  // figure divs the map/histogram passes need are already in the DOM.
+  setTimeout(function () {
+    var f;
+    try { f = JSON.parse(sessionStorage.getItem("alc-filter") || "{}"); } catch (e) { f = {}; }
+    if (!f || (!f.c && !f.t)) return;
+    if (fc && f.c) fc.value = f.c;
+    if (ft && f.t) ft.value = f.t;
+    if (fc && fc.selectedIndex < 0) fc.value = "";     // a value this build no longer offers
+    if (ft && ft.selectedIndex < 0) ft.value = "";
+    if (val(fc) || val(ft)) apply();
+  }, 0);
 })();

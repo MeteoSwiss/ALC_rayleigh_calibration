@@ -46,15 +46,28 @@ def daily_name(date_str: str, region: Optional[str] = None) -> str:
     return f"CAMS_Beta_{_region_prefix(region)}{date_str[:8]}.nc"
 
 
+def _folders(cams_folder: _PathLike) -> List[Path]:
+    """``cams_folder`` may be ONE folder or a ``;``-separated list, searched in order.
+
+    Motivation: the 0.4 deg archive lives in two places (monthly files up to the last complete
+    month, daily files beyond), and pointing at a single merged folder invited exactly the mixup
+    this guards against -- a merged folder that silently held 1 deg monthlies, whose grid-point
+    orography at Payerne is 894 m too high and truncates the water-vapour column by ~26 %.
+    """
+    return [Path(p) for p in str(cams_folder).split(";") if str(p).strip()]
+
+
 def candidate_cams_files(cams_folder: _PathLike, date_str: str,
                          region: Optional[str] = None) -> List[Path]:
     """Candidate CAMS paths for the night ending on *date_str* (YYYYMMDD), in
-    preference order: monthly first, then daily. *region* selects the regional box
+    preference order: monthly first, then daily, within each folder of ``cams_folder``
+    (which may be a ``;``-separated list). *region* selects the regional box
     (``None``/``'europe'`` = the default Europe box). Existence is **not** checked here."""
-    folder = Path(cams_folder)
-    cands = [folder / monthly_name(date_str, region)]
-    if len(date_str) >= 8:
-        cands.append(folder / daily_name(date_str, region))
+    cands: List[Path] = []
+    for folder in _folders(cams_folder):
+        cands.append(folder / monthly_name(date_str, region))
+        if len(date_str) >= 8:
+            cands.append(folder / daily_name(date_str, region))
     return cands
 
 
@@ -161,7 +174,7 @@ def ensure_cams_file(
     else:
         if not auto_download:
             return None
-        folder = Path(cams_folder)
+        folder = _folders(cams_folder)[0]          # downloads land in the FIRST listed folder
         folder.mkdir(parents=True, exist_ok=True)
         if scope == "month":
             out_path = folder / monthly_name(date_str, region)

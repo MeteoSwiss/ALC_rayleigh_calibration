@@ -397,6 +397,31 @@ def cl_median_iqr_by_station(d: pd.DataFrame, itype: str) -> go.Figure:
 
 # --- Station-page figures (one set per method) ------------------------------
 
+#: Numeric algorithm code -> the label an operator recognises (calibration/io/output.py
+#: VERSION_CODES). Used to name the series from the DATA rather than from a constant.
+_VERSION_NAMES = {25: "v0.25", 90: "main", 95: "improved", 100: "v1.0", 110: "v1.1", 120: "v1.2",
+                  200: "v2.0", 205: "v2.0p", 220: "v2.2", 300: "earlinet", 310: "bellini",
+                  1000: "O'Connor"}
+
+
+def version_label(g_m: pd.DataFrame) -> str:
+    """The algorithm vintage actually present in these rows, or "" when the archive does not say.
+
+    This label used to be the literal string "v2.0", written when the pipeline ran eprof_v2 -- so a
+    v2.2 archive was displayed, in the legend and in the Kalman trace, as v2.0. Deriving it from the
+    data means the page cannot misreport the release; an archive predating the `version` column gets
+    no version claim at all, which is honest rather than convenient.
+    """
+    if "version" not in g_m.columns:
+        return ""
+    v = pd.to_numeric(g_m["version"], errors="coerce").dropna()
+    if not len(v):
+        return ""
+    codes = sorted(set(int(x) for x in v))
+    names = [_VERSION_NAMES.get(c, f"code {c}") for c in codes]
+    return " + ".join(names)
+
+
 def series_timeseries(g_m: pd.DataFrame, kal_m: pd.DataFrame, method: str,
                       op_df: pd.DataFrame | None = None,
                       oldray_df: pd.DataFrame | None = None) -> go.Figure:
@@ -410,6 +435,7 @@ def series_timeseries(g_m: pd.DataFrame, kal_m: pd.DataFrame, method: str,
     vname = _value_name(method)
     color = config.METHOD_COLORS.get(method, "#1f77b4")
     ok = g_m[g_m["success"] == 1].sort_values("datetime")
+    ver = version_label(ok if len(ok) else g_m)
     fig = go.Figure()
     if op_df is not None and len(op_df):
         od = op_df.sort_values("datetime")
@@ -426,11 +452,11 @@ def series_timeseries(g_m: pd.DataFrame, kal_m: pd.DataFrame, method: str,
     if len(ok):
         fig.add_trace(go.Scatter(
             x=ok["datetime"], y=ok["cal_value"], mode="markers",
-            name=("v2.0" if method == "rayleigh" else f"{vname} (per cal)"),
+            name=(f"{vname} · {ver}" if ver else f"{vname} (per cal)"),
             marker=dict(size=5, color=color, opacity=0.7),
             error_y=dict(type="data", array=ok["uncertainty"], visible=True,
                          thickness=0.6, width=0, color="rgba(120,120,120,0.3)"),
-            hovertemplate="%{x|%Y-%m-%d}<br>" + vname + "=%{y:.3e}<extra></extra>"))
+            hovertemplate="%{x|%Y-%m-%d}<br>" + vname + "=%{y:.4g}<extra></extra>"))
         kt, ks, kstd = _kalman_xy(ok, kal_m)
         if len(kt):
             fig.add_trace(go.Scatter(
@@ -439,9 +465,10 @@ def series_timeseries(g_m: pd.DataFrame, kal_m: pd.DataFrame, method: str,
                 fill="toself", fillcolor="rgba(214,39,40,0.12)", line=dict(width=0),
                 hoverinfo="skip", showlegend=False))
             fig.add_trace(go.Scatter(x=kt, y=ks, mode="lines",
-                                     name=("v2.0 Kalman estimate" if method == "rayleigh" else "Kalman best estimate"),
+                                     name=(f"Kalman estimate ({ver})" if ver
+                                           else "Kalman best estimate"),
                                      line=dict(color="#d62728", width=2),
-                                     hovertemplate="%{x|%Y-%m-%d}<br>Kalman=%{y:.3e}<extra></extra>"))
+                                     hovertemplate="%{x|%Y-%m-%d}<br>Kalman=%{y:.4g}<extra></extra>"))
     fig.update_layout(**_LAYOUT, yaxis_title=vname,
                       legend=dict(orientation="h", y=-0.22, x=0.5, xanchor="center", yanchor="top"),
                       title=f"{config.method_label(method)} — {vname} over time + Kalman")
@@ -478,18 +505,39 @@ def monthly_flag_bars(g_m: pd.DataFrame, method: str) -> go.Figure:
     return fig
 
 
-def aux_timeseries(g_m: pd.DataFrame, method: str) -> go.Figure:
+def aux_timeseries(g_m: pd.DataFrame, method: str, alt_m=None) -> go.Figure:
     """Rayleigh -> calibration window (bottom/top); cloud -> number of in-cloud profiles."""
     fig = go.Figure()
     if method == "rayleigh":
         ok = g_m[(g_m["success"] == 1) & g_m["bottom_height"].notna()].sort_values("datetime")
         if len(ok):
-            fig.add_trace(go.Scatter(x=ok["datetime"], y=ok["top_height"], mode="markers",
-                                     name="top", marker=dict(size=4, color="#2ca02c")))
-            fig.add_trace(go.Scatter(x=ok["datetime"], y=ok["bottom_height"], mode="markers",
-                                     name="bottom", fill="tonexty", fillcolor="rgba(44,160,44,0.12)",
-                                     marker=dict(size=4, color="#8c564b")))
-        fig.update_layout(**{**_LAYOUT, "height": 300}, yaxis_title="height (m AGL)",
+            # One VERTICAL SEGMENT per night, bottom to top: the window is an extent, and two
+            # disconnected dot clouds ("top" green, "bottom" brown) forced the reader to pair them
+            # by eye across the whole plot. None separators keep it a single cheap trace.
+            # bottom/top_height are ASL (fit-window altitudes) but the axis SAID 'm AGL'. With
+            # the station altitude supplied the values are converted so the label is true and the
+            # chart lines up with the daily panel's AGL axis; without it, the label says ASL.
+            b_h, t_h = ok["bottom_height"], ok["top_height"]
+            unit = "m ASL"
+            if alt_m is not None and np.isfinite(alt_m):
+                b_h, t_h = b_h - float(alt_m), t_h - float(alt_m)
+                unit = "m AGL"
+            xs, ys = [], []
+            for t, b, tp in zip(ok["datetime"], b_h, t_h):
+                xs += [t, t, None]
+                ys += [b, tp, None]
+            col = config.METHOD_COLORS.get("rayleigh", "#1f77b4")
+            fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines", name="fitted window (bottom–top)",
+                                     line=dict(color=col, width=2), hoverinfo="skip"))
+            mid = (b_h + t_h) / 2.0
+            fig.add_trace(go.Scatter(
+                x=ok["datetime"], y=mid, mode="markers", showlegend=False,
+                marker=dict(size=3, color=col),
+                customdata=np.stack([b_h, t_h], axis=1),
+                hovertemplate="%{x|%Y-%m-%d}<br>%{customdata[0]:.0f}–%{customdata[1]:.0f} m"
+                              "<extra></extra>"))
+        unit = unit if len(ok) else "m"
+        fig.update_layout(**{**_LAYOUT, "height": 300}, yaxis_title=f"height ({unit})",
                           title="Calibration window", legend=dict(orientation="h", y=1.14))
     else:
         ok = g_m[g_m["success"] == 1].sort_values("datetime")
@@ -501,62 +549,142 @@ def aux_timeseries(g_m: pd.DataFrame, method: str) -> go.Figure:
 
 
 def cl_overlay(by_method: dict) -> go.Figure:
-    """Overlay the lidar constant C_L of each method (CL61) on one axis -- a direct cross-check.
+    """Both retrievals of C_L on ONE axis, with the per-night uncertainty and the median band.
 
-    Both methods estimate the SAME C_L (Wiegner), so the Rayleigh and cloud points should
-    agree; no normalization, the absolute C_L is the useful comparison.
+    The two methods estimate the SAME Wiegner constant, so the comparison is absolute -- no
+    normalisation. Bare markers made a drift or a step hard to see, so this adds three things that
+    carry the reading: the per-night uncertainty as error bars, the median with a +/-10 % band (a
+    stable instrument sits inside it), and a shaded 15-day window at the right so the drift quoted
+    in the headline tiles can be seen rather than taken on trust.
     """
     fig = go.Figure()
+    ref, all_ok = None, []
     for method, g_m in by_method.items():
         ok = g_m[g_m["success"] == 1].sort_values("datetime")
         if not len(ok):
             continue
-        fig.add_trace(go.Scatter(x=ok["datetime"], y=ok["cal_value"], mode="markers",
-                                 name=config.method_label(method),
-                                 marker=dict(size=5, color=config.METHOD_COLORS.get(method, "#888"),
-                                             opacity=0.8),
-                                 hovertemplate="%{x|%Y-%m-%d}<br>C_L=%{y:.3e}<extra></extra>"))
+        all_ok.append((method, ok))
+        # The reference for the median band is the method with the most calibrated nights: its
+        # median is the better-determined one (cloud typically runs on far more nights).
+        if ref is None or len(ok) > len(ref[1]):
+            ref = (method, ok)
+    for method, ok in all_ok:
+        col = config.METHOD_COLORS.get(method, "#888")
+        unc = ok["uncertainty"] if "uncertainty" in ok.columns else None
+        fig.add_trace(go.Scatter(
+            x=ok["datetime"], y=ok["cal_value"], mode="markers",
+            name=config.method_label(method),
+            marker=dict(size=5, color=col, opacity=0.85),
+            error_y=(dict(type="data", array=unc.fillna(0.0), visible=True, color=col,
+                          thickness=0.9, width=0) if unc is not None else None),
+            hovertemplate="%{x|%Y-%m-%d}<br>C_L=%{y:.4g}<extra></extra>"))
+    if ref is not None:
+        med = float(ref[1]["cal_value"].median())
+        if np.isfinite(med) and med:
+            fig.add_hrect(y0=med * 0.9, y1=med * 1.1, fillcolor="rgba(70,130,140,0.10)",
+                          line_width=0, layer="below")
+            fig.add_hline(y=med, line=dict(color="#2a6b73", width=1.2))
+            fig.add_trace(go.Scatter(x=[None], y=[None], mode="markers",
+                                     name="±10 % of median",
+                                     marker=dict(size=9, symbol="square",
+                                                 color="rgba(70,130,140,0.25)")))
+        last = ref[1]["datetime"].max()
+        # The shaded band is WHERE the 15-day drift tile is computed (its median against the 45
+        # days before it); the red line is the last calibrated night. Both get legend entries --
+        # an unlabelled orange region on a time axis reads as "something happened here".
+        fig.add_vrect(x0=last - pd.Timedelta(days=15), x1=last,
+                      fillcolor="rgba(240,173,78,0.16)", line_width=0, layer="below")
+        fig.add_vline(x=last, line=dict(color="#d9534f", width=1.2))
+        fig.add_trace(go.Scatter(x=[None], y=[None], mode="markers",
+                                 name="15-day drift window",
+                                 marker=dict(size=9, symbol="square",
+                                             color="rgba(240,173,78,0.45)")))
+        fig.add_trace(go.Scatter(x=[None], y=[None], mode="lines",
+                                 name="last calibrated night",
+                                 line=dict(color="#d9534f", width=2)))
+    # Legend BELOW the axis: at y=1.14 it sat on top of the title text.
     fig.update_layout(**_LAYOUT, title="Rayleigh vs cloud — lidar constant C_L",
-                      yaxis_title="C_L", legend=dict(orientation="h", y=1.14))
+                      yaxis_title="C_L",
+                      legend=dict(orientation="h", y=-0.22, x=0.5, xanchor="center",
+                                  yanchor="top"))
     fig.update_yaxes(exponentformat="e")
     return fig
 
 
 def monitoring_timeseries(hk_df: pd.DataFrame, itype: str | None = None) -> go.Figure:
-    """Instrument monitoring: daily-mean laser power/energy & window transmission (%) on the left
-    axis and temperatures (degC) on the right axis, over time. Plots only the housekeeping fields the
-    stream actually reports (others are blank in <key>_hk.csv and skipped); gaps are real downtime."""
+    """Instrument monitoring: mean laser power/energy & window transmission (%) on the left axis and
+    temperatures (degC) on the right axis, over time. Plots only the housekeeping fields the stream
+    actually reports (others are blank in <key>_hk.csv and skipped); gaps are real downtime.
+
+    The series are reindexed onto a complete uniform time grid and shipped as ``x0``/``dx`` instead of
+    an explicit x array: with an explicit x, EVERY trace serialises its own full ISO-datetime string
+    array, which measures 82.7 kB for five daily traces over a year (and would be 1.77 MB at hourly
+    resolution). x0/dx + float32 y brings the same daily data to 19.7 kB and makes hourly resolution
+    affordable (~252 kB). ``connectgaps=False`` keeps real downtime readable as a gap."""
     fig = go.Figure()
     has_temp = False
+    t = pd.to_datetime(hk_df["datetime"])
+    step = t.diff().dropna().min() if len(t) > 1 else pd.Timedelta(days=1)
+    if pd.isna(step) or step <= pd.Timedelta(0):
+        step = pd.Timedelta(days=1)
+    grid = pd.date_range(t.min(), t.max(), freq=step)
+    d = hk_df.set_index(t).reindex(grid)            # missing days -> NaN -> a real gap in the line
+    x0 = float(grid[0].value // 10**6)              # epoch ms, as Plotly expects for a date axis
+    dx = float(step.value // 10**6)
     for field, label, unit, group in config.HK_PANEL:
-        if field not in hk_df.columns:
+        if field not in d.columns:
             continue
-        y = pd.to_numeric(hk_df[field], errors="coerce")
+        y = pd.to_numeric(d[field], errors="coerce")
         if not y.notna().any():
             continue
         if group == "temp":
             has_temp = True
         fig.add_trace(go.Scatter(
-            x=hk_df["datetime"], y=y, mode="lines", name=f"{label} [{unit}]",
+            x0=x0, dx=dx, y=y.to_numpy(dtype="float32"), mode="lines", name=f"{label} [{unit}]",
             line=dict(color=config.HK_COLORS.get(field), width=1.4),
             yaxis=("y2" if group == "temp" else "y"), connectgaps=False,
             hovertemplate="%{x|%Y-%m-%d}<br>" + label + "=%{y:.1f} " + unit + "<extra></extra>"))
-    lay = {**_LAYOUT, "height": 300, "title": "Instrument monitoring — daily averages",
-           "legend": dict(orientation="h", y=1.16), "yaxis": dict(title="laser / window [%]")}
+    # No Plotly title: the station page already has an <h2> above this card.
+    lay = {**_LAYOUT, "height": 300, "margin": dict(l=56, r=56, t=10, b=34),
+           "legend": dict(orientation="h", y=1.16), "yaxis": dict(title="laser / window [%]"),
+           "xaxis": dict(type="date")}
     if has_temp:
         lay["yaxis2"] = dict(title="temperature [degC]", overlaying="y", side="right", showgrid=False)
     fig.update_layout(**lay)
     return fig
 
 
-def daily_availability_bar(status_df: pd.DataFrame) -> go.Figure | None:
-    """Cloudnet-style daily instrument-health strip: one cell per day over the whole record, coloured
-    by quality (pass / warning / error), with record gaps shown as 'no data'. Hover gives the day's
-    decoded reporting string; clicking a day drives the diagnostic viewer (wired in diag.js via the
-    'fig-avail' id). Returns None when the stream has no decoded status history.
+def _discrete_colorscale(colors):
+    """Piecewise-constant Plotly colorscale over z = 0..len(colors)-1 (each class gets a flat band)."""
+    n = len(colors)
+    out = []
+    for i, c in enumerate(colors):
+        out.append([i / n, c])
+        out.append([(i + 1) / n, c])
+    return out
 
-    Built from <key>_status.csv (date, quality, summary). The bar spans the full record (not the
-    period selector) so it reads like Cloudnet's multi-year availability strip."""
+
+def daily_availability_rows(status_df: pd.DataFrame, cal_df: pd.DataFrame | None = None,
+                            methods=None) -> go.Figure | None:
+    """Cloudnet-style daily strip, stacked: instrument status, mean cloud cover, and one calibration
+    row per method (CL61 carries both Rayleigh and liquid-cloud, so it gets four rows).
+
+    One cell per day over the whole record; record gaps read as 'no data'. Hover gives the decoded
+    status string / the octa value / the exact calibration flag. Clicking a day drives the diagnostic
+    viewer (wired in diag.js via the 'fig-avail' id) -- that contract reads only ``points[0].x``, so
+    it is unaffected by the extra rows. Returns None when the stream has no decoded status history.
+
+    Rows are separate ``go.Heatmap`` traces, NOT bars: a bar trace makes rangesync.js force
+    ``yaxis.autorange`` on every period change (rangesync.js hasBars), which would scramble a fixed
+    row stack, and Plotly allows only one colorscale per trace while the rows need three different
+    ones. Each trace is placed with ``y0``/``dy`` on a NUMERIC axis that is then labelled by
+    tickvals/ticktext: a one-row heatmap declaring a single value on a *category* axis has no
+    defined cell height and Plotly draws nothing at all (verified -- the card came out blank).
+
+    Built from ``<key>_status.csv`` (date, quality, summary, and -- once the producer ships it --
+    mean_cloud_cover / cloud_cover_n / cloud_src) plus the station's ``<key>_cal.csv`` rows. The
+    strip spans the full record (not the period selector) so it reads like Cloudnet's multi-year
+    availability bar."""
     if status_df is None or not len(status_df):
         return None
     d = status_df.copy()
@@ -564,22 +692,99 @@ def daily_availability_bar(status_df: pd.DataFrame) -> go.Figure | None:
     d = d.dropna(subset=["dt"]).sort_values("dt")
     if not len(d):
         return None
+
+    # The x axis must span status AND calibration dates: a stream can carry calibration rows for days
+    # with no decoded status (and vice versa), and clipping to the status range would silently drop
+    # part of the calibration history.
+    lo, hi = d["dt"].min(), d["dt"].max()
+    cal_by_method = {}
+    for m in (methods or []):
+        if cal_df is None or not len(cal_df):
+            continue
+        c = cal_df[cal_df["method"] == m]
+        if not len(c):
+            continue
+        c = c.assign(dt=pd.to_datetime(c["date"].astype(str), format="%Y%m%d", errors="coerce"))
+        c = c.dropna(subset=["dt"])
+        if not len(c):
+            continue
+        cal_by_method[m] = c
+        lo, hi = min(lo, c["dt"].min()), max(hi, c["dt"].max())
+    full = pd.date_range(lo, hi, freq="D")
+
+    rows, traces = [], []
+
+    # --- row 1: instrument status (unchanged semantics and palette) --------------------------------
     qmap = dict(zip(d["dt"], d["quality"].astype(str)))
     smap = (dict(zip(d["dt"], d["summary"].astype(str))) if "summary" in d.columns else {})
-    full = pd.date_range(d["dt"].min(), d["dt"].max(), freq="D")   # fill gaps -> nodata
+    q_order = ["pass", "warning", "error", "nodata"]
+    q_idx = {q: i for i, q in enumerate(q_order)}
     quals = [qmap.get(t, "nodata") or "nodata" for t in full]
-    colors = [config.quality_color(q) for q in quals]
-    labels = [config.QUALITY_LABELS.get(q, q) for q in quals]
-    summ = [(smap.get(t, "") if t in qmap else "No data") or "" for t in full]
-    fig = go.Figure(go.Bar(
-        x=list(full), y=[1] * len(full), width=86400000.0,   # 1 day in ms -> contiguous cells
-        marker=dict(color=colors, line=dict(width=0)),
-        customdata=[[lab, ss] for lab, ss in zip(labels, summ)],
-        hovertemplate="%{x|%Y-%m-%d}<br><b>%{customdata[0]}</b><br>%{customdata[1]}<extra></extra>"))
-    fig.update_layout(**{**_LAYOUT, "height": 130, "margin": dict(l=10, r=10, t=36, b=34)},
-                      title="Daily data availability & instrument status",
-                      bargap=0, showlegend=False,
-                      yaxis=dict(visible=False, range=[0, 1], fixedrange=True),
+    rows.append("Instrument status")
+    traces.append(go.Heatmap(
+        x=list(full), y0=0, dy=1,
+        z=[[q_idx.get(q, 3) for q in quals]],
+        customdata=[[[config.QUALITY_LABELS.get(q, q),
+                      (smap.get(t, "") if t in qmap else "No data") or ""]
+                     for q, t in zip(quals, full)]],
+        colorscale=_discrete_colorscale([config.QUALITY_COLORS[q] for q in q_order]),
+        zmin=0, zmax=len(q_order), showscale=False,
+        hovertemplate="%{x|%Y-%m-%d}<br><b>%{customdata[0]}</b>"
+                      "<br>%{customdata[1]}<extra></extra>"))
+
+    # --- row 2: mean cloud cover (octas) -----------------------------------------------------------
+    # Absent until the producer writes mean_cloud_cover into <key>_status.csv; the row is simply not
+    # drawn rather than drawn empty, so an old archive looks unchanged instead of looking broken.
+    if "mean_cloud_cover" in d.columns:
+        cc = pd.to_numeric(d["mean_cloud_cover"], errors="coerce")
+        cmap = dict(zip(d["dt"], cc))
+        src = (dict(zip(d["dt"], d["cloud_src"].astype(str))) if "cloud_src" in d.columns else {})
+        vals = [cmap.get(t) for t in full]
+        vals = [None if (v is None or not pd.notna(v)) else float(v) for v in vals]
+        if any(v is not None for v in vals):
+            traces.append(go.Heatmap(
+                x=list(full), y0=len(rows), dy=1, z=[vals],
+                customdata=[[[("cbh fraction" if src.get(t) == "cbh" else "cloud_amount")]
+                             for t in full]],
+                colorscale=config.CLOUD_COVER_SCALE, zmin=0, zmax=8, showscale=False,
+                hovertemplate="%{x|%Y-%m-%d}<br><b>%{z:.1f} octas</b>"
+                              "<br>%{customdata[0]}<extra></extra>"))
+            rows.append("Mean cloud cover")
+
+    # --- rows 3..N: one calibration outcome row per method ----------------------------------------
+    cls_order = config.CAL_CLASS_ORDER
+    cls_idx = {c: i for i, c in enumerate(cls_order)}
+    cls_scale = _discrete_colorscale([config.CAL_CLASS_COLORS[c] for c in cls_order])
+    for m, c in cal_by_method.items():
+        # one row per (date, method); keep the last row if a day somehow carries duplicates
+        fmap = {t: f for t, f in zip(c["dt"], c["flag"])}
+        z, cd = [], []
+        for t in full:
+            f = fmap.get(t)
+            if f is None or not pd.notna(f):
+                z.append(None)
+                cd.append(["—", "no calibration row"])
+                continue
+            k = config.cal_class(f)
+            z.append(cls_idx[k])
+            cd.append([config.CAL_CLASS_LABELS[k], config.flag_label(f, m)])
+        traces.append(go.Heatmap(
+            x=list(full), y0=len(rows), dy=1, z=[z], customdata=[cd],
+            colorscale=cls_scale, zmin=0, zmax=len(cls_order), showscale=False,
+            hovertemplate="%{x|%Y-%m-%d}<br><b>%{customdata[0]}</b>"
+                          "<br>%{customdata[1]}<extra></extra>"))
+        rows.append(f"Calibration — {config.method_label(m)}")
+
+    fig = go.Figure(traces)
+    # The HTML card already carries an <h2>; a Plotly title here would duplicate it.
+    # Descending range = row 0 on top, without relying on autorange="reversed" (which the period
+    # selector would fight over).
+    fig.update_layout(**{**_LAYOUT, "height": 44 * len(rows) + 46,
+                         "margin": dict(l=136, r=10, t=8, b=34)},
+                      showlegend=False,
+                      yaxis=dict(tickmode="array", tickvals=list(range(len(rows))), ticktext=rows,
+                                 range=[len(rows) - 0.5, -0.5], fixedrange=True,
+                                 showgrid=False, zeroline=False, ticksuffix="  "),
                       xaxis=dict(title="", type="date"))
     return fig
 
@@ -598,3 +803,192 @@ def sparkline_svg(values, width: int = 110, height: int = 26, color: str = "#1f7
            for i, y in enumerate(v)]
     return (f'<svg class="spark" width="{width}" height="{height}" viewBox="0 0 {width} {height}">'
             f'<polyline fill="none" stroke="{color}" stroke-width="1.2" points="{" ".join(pts)}"/></svg>')
+
+
+# ---------------------------------------------------------------- cloud: C vs cloud-base height ---
+#: Heatmap grid, same convention as the research Hopkin panels: x = C as a PERCENTAGE of the
+#: station median (the absolute C is instrument-dependent and would make every station a different
+#: axis), y = cloud base in km AGL. Altitude on Y, always.
+HOPKIN_X = np.arange(40.0, 160.01, 2.5)
+HOPKIN_Y = np.arange(0.0, 3.0001, 0.1)
+HOPKIN_BAND = 0.3          # m AGL band height for the overlaid mean +- sd profile
+
+
+def _cluster_ols(x, y, day):
+    """OLS slope of y on x with standard error clustered BY DAY.
+
+    Scenes from one night are not independent -- the same cloud field is sampled many times -- so a
+    naive OLS standard error is optimistic by roughly sqrt(scenes per night). Clustering on the day
+    label is what the research Hopkin analysis used, and it is what makes "is the slope different
+    from zero" an honest question here.
+    """
+    x = np.asarray(x, "f8")
+    y = np.asarray(y, "f8")
+    day = np.asarray(day)
+    n = x.size
+    if n < 10:
+        return float("nan"), float("nan"), 0
+    X = np.column_stack([np.ones(n), x])
+    try:
+        beta, *_ = np.linalg.lstsq(X, y, rcond=None)
+        XtX_inv = np.linalg.inv(X.T @ X)
+    except np.linalg.LinAlgError:
+        return float("nan"), float("nan"), 0
+    resid = y - X @ beta
+    meat = np.zeros((2, 2))
+    days = np.unique(day)
+    for d in days:
+        m = day == d
+        u = X[m].T @ resid[m]
+        meat += np.outer(u, u)
+    cov = XtX_inv @ meat @ XtX_inv
+    se = float(np.sqrt(max(cov[1, 1], 0.0)))
+    return float(beta[1]), se, int(days.size)
+
+
+def cloud_cbh_cells(scenes: dict) -> dict | None:
+    """Per-day sparse occupancy of the C-vs-cloud-base grid, for a client that re-pools on demand.
+
+    ``{"x": centres, "y": centres, "nx", "ny", "days": {"YYYYMMDD": [cell, count, ...]}}`` with
+    ``cell = iy * nx + ix``. Shipping per-day counts rather than one finished grid is what lets the
+    period selector re-pool the card: any date window is an exact sum of the days it contains.
+
+    The percentage axis is normalised on the ALL-TIME median, deliberately: if each window
+    renormalised on its own median, a drift in the constant would silently recentre the picture and
+    a genuinely shifted period would look identical to a stable one.
+    """
+    cbh = np.asarray(scenes.get("cbh", []), "f8") / 1000.0      # -> km AGL
+    cs = np.asarray(scenes.get("c", []), "f8")
+    day = np.asarray(scenes.get("day", []), dtype=str)
+    ok = np.isfinite(cbh) & np.isfinite(cs) & (cs > 0)
+    if day.size != cs.size:
+        return None
+    cbh, cs, day = cbh[ok], cs[ok], day[ok]
+    if cbh.size < 30:
+        return None
+    pct = 100.0 * cs / np.median(cs)
+    nx, ny = len(HOPKIN_X) - 1, len(HOPKIN_Y) - 1
+    ix = np.digitize(pct, HOPKIN_X) - 1
+    iy = np.digitize(cbh, HOPKIN_Y) - 1
+    keep = (ix >= 0) & (ix < nx) & (iy >= 0) & (iy < ny)
+    ix, iy, day = ix[keep], iy[keep], day[keep]
+    if ix.size == 0:
+        return None
+    cell = iy * nx + ix
+    days: dict[str, list[int]] = {}
+    for d in np.unique(day):
+        m = day == d
+        vals, counts = np.unique(cell[m], return_counts=True)
+        flat: list[int] = []
+        for v, n in zip(vals.tolist(), counts.tolist()):
+            flat.append(int(v))
+            flat.append(int(n))
+        days[str(d)] = flat
+    return {
+        "x": [round(float(v), 3) for v in 0.5 * (HOPKIN_X[:-1] + HOPKIN_X[1:])],
+        "y": [round(float(v), 3) for v in 0.5 * (HOPKIN_Y[:-1] + HOPKIN_Y[1:])],
+        "nx": int(nx), "ny": int(ny), "band": float(HOPKIN_BAND), "days": days,
+    }
+
+
+def cloud_cbh_grid(scenes: dict) -> dict | None:
+    """Pooled C-vs-cloud-base density as plain data, for the browser to draw.
+
+    Returns the 2-D histogram on the fixed HOPKIN_X/HOPKIN_Y grid plus the per-band mean profile and
+    the day-clustered slope. Sending the grid (~1.4 kB) rather than the scenes keeps the page small
+    however many nights the station has, and keeps the binning identical to the research panels.
+    """
+    cbh = np.asarray(scenes.get("cbh", []), "f8") / 1000.0      # -> km AGL
+    cs = np.asarray(scenes.get("c", []), "f8")
+    day = np.asarray(scenes.get("day", []))
+    ok = np.isfinite(cbh) & np.isfinite(cs) & (cs > 0)
+    if day.size != cs.size:
+        day = np.zeros(cs.size)
+    cbh, cs, day = cbh[ok], cs[ok], day[ok]
+    if cbh.size < 30:
+        return None
+    pct = 100.0 * cs / np.median(cs)
+    inwin = (pct >= HOPKIN_X[0]) & (pct <= HOPKIN_X[-1]) & (cbh <= HOPKIN_Y[-1])
+    slope, se, ndays = _cluster_ols(cbh[inwin], 100.0 * np.log(cs[inwin]), day[inwin])
+    H, _, _ = np.histogram2d(pct, cbh, bins=[HOPKIN_X, HOPKIN_Y])
+    edges = np.arange(HOPKIN_Y[0], HOPKIN_Y[-1] + 1e-9, HOPKIN_BAND)
+    bands = []
+    for lo, hi in zip(edges[:-1], edges[1:]):
+        v = pct[inwin & (cbh >= lo) & (cbh < hi)]
+        if v.size >= 5:
+            bands.append([round(float((lo + hi) / 2), 3), round(float(v.mean()), 2),
+                          round(float(v.std()), 2), int(v.size)])
+    return {
+        "x": [round(float(v), 3) for v in 0.5 * (HOPKIN_X[:-1] + HOPKIN_X[1:])],
+        "y": [round(float(v), 3) for v in 0.5 * (HOPKIN_Y[:-1] + HOPKIN_Y[1:])],
+        "z": [[int(v) for v in H[:, j]] for j in range(H.shape[1])],      # z[y][x]
+        "bands": bands, "n": int(cbh.size), "ndays": int(ndays),
+        "slope": None if not np.isfinite(slope) else round(float(slope), 2),
+        "se": None if not np.isfinite(se) else round(float(se), 2),
+    }
+
+
+def cloud_cbh_heatmap(scenes: dict, div_height: int = 430) -> "go.Figure | None":
+    """Hopkin-style density of the per-scene O'Connor coefficient against cloud-base height.
+
+    ``scenes`` = {"cbh": [m], "c": [-], "day": [YYYYMMDD]} pooled over the station's nights. A
+    calibration that is free of a cloud-base dependence shows a VERTICAL ridge at 100 %; a tilted
+    ridge is the dC/dCBH signature (multiple scattering / water-vapour mis-correction), which is why
+    the fitted slope is quoted with a day-clustered standard error rather than left to the eye.
+    """
+    cbh = np.asarray(scenes.get("cbh", []), "f8") / 1000.0      # -> km AGL
+    cs = np.asarray(scenes.get("c", []), "f8")
+    day = np.asarray(scenes.get("day", []))
+    ok = np.isfinite(cbh) & np.isfinite(cs) & (cs > 0)
+    if day.size != cs.size:
+        day = np.zeros(cs.size)
+    cbh, cs, day = cbh[ok], cs[ok], day[ok]
+    if cbh.size < 30:
+        return None
+    pct = 100.0 * cs / np.median(cs)
+    # Slope in %/km comes from log C (a multiplicative bias per km is what the physics predicts),
+    # fitted on the scenes INSIDE the drawn window so the number matches what the operator sees.
+    inwin = (pct >= HOPKIN_X[0]) & (pct <= HOPKIN_X[-1]) & (cbh <= HOPKIN_Y[-1])
+    slope, se, ndays = _cluster_ols(cbh[inwin], 100.0 * np.log(cs[inwin]), day[inwin])
+
+    H, _, _ = np.histogram2d(pct, cbh, bins=[HOPKIN_X, HOPKIN_Y])
+    xc = 0.5 * (HOPKIN_X[:-1] + HOPKIN_X[1:])
+    yc = 0.5 * (HOPKIN_Y[:-1] + HOPKIN_Y[1:])
+    z = H.T                                                     # z[y][x]
+    z = np.where(z == 0, np.nan, z)                             # empty cells stay page-coloured
+
+    traces = [go.Heatmap(x=xc, y=yc, z=z, colorscale="Greens", hoverongaps=False,
+                         colorbar=dict(title="scenes", thickness=12, len=0.85),
+                         hovertemplate="C %{x:.0f} %<br>base %{y:.2f} km<br>%{z:.0f} scenes"
+                                       "<extra></extra>", name="density")]
+    # Band means: the quantitative read of the same picture, on top of the density.
+    edges = np.arange(HOPKIN_Y[0], HOPKIN_Y[-1] + 1e-9, HOPKIN_BAND)
+    bx, by, bsd = [], [], []
+    for lo, hi in zip(edges[:-1], edges[1:]):
+        v = pct[inwin & (cbh >= lo) & (cbh < hi)]
+        if v.size >= 5:
+            bx.append(float(v.mean()))
+            by.append(float((lo + hi) / 2))
+            bsd.append(float(v.std()))
+    if bx:
+        traces.append(go.Scatter(
+            x=bx, y=by, mode="lines+markers", name="band mean ± sd",
+            line=dict(color="#c0392b", width=2), marker=dict(size=7, color="#c0392b"),
+            error_x=dict(type="data", array=bsd, color="rgba(192,57,43,0.45)", thickness=1.4,
+                         width=0),
+            hovertemplate="base %{y:.2f} km<br>mean C %{x:.1f} %<extra></extra>"))
+
+    fig = go.Figure(traces)
+    fig.add_vline(x=100.0, line=dict(color="#444", width=1, dash="dash"))
+    txt = f"{int(cbh.size)} scenes · {ndays} nights"
+    if np.isfinite(slope):
+        txt += f" · slope {slope:+.1f} ± {se:.1f} %/km"
+    fig.add_annotation(x=0.5, y=1.045, xref="paper", yref="paper", showarrow=False,
+                       text=txt, font=dict(size=11, color="#555"))
+    fig.update_layout(**{**_LAYOUT, "height": div_height,
+                         "margin": dict(l=64, r=20, t=48, b=44),
+                         "legend": dict(orientation="h", y=-0.16, x=0.5, xanchor="center")})
+    fig.update_xaxes(title_text="per-scene C, % of station median", range=[HOPKIN_X[0],
+                                                                          HOPKIN_X[-1]])
+    fig.update_yaxes(title_text="cloud base (km AGL)", range=[HOPKIN_Y[0], HOPKIN_Y[-1]])
+    return fig

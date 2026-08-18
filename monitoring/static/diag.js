@@ -130,6 +130,14 @@
 
   // The station-level availability bar (fig-avail) drives EVERY method viewer: clicking a day loads
   // that day's diagnostic + highlights it in the calendar(s) below + updates the status field.
+  // Jump every diagnostic viewer to a day. wireAvail did this inline for the availability card;
+  // exported so the C_L time series (owned by dailypanel.js) can move the viewers too.
+  window.__diagJump = function (ds) {
+    if (!ds) return;
+    viewers.forEach(function (v) { v.jumpNearest(ds); });
+    if (viewers.length) active = viewers[0];
+  };
+
   function wireAvail(id, tries) {
     var gd = document.getElementById(id);
     if (!gd) return;
@@ -256,12 +264,15 @@
 
   document.addEventListener("keydown", function (e) {
     if (window.QCFlags && window.QCFlags.isDialogOpen && window.QCFlags.isDialogOpen()) return;  // dialog owns the keyboard
-    if (!active || e.target.tagName === "SELECT" || e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+    if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+    // Station paging is handled BEFORE the viewer check: a station with no diagnostic images has no
+    // active viewer, and used to have no working Up/Down keys either.
+    if (e.key === "ArrowUp") { if (navStation(-1)) e.preventDefault(); return; }
+    if (e.key === "ArrowDown") { if (navStation(1)) e.preventDefault(); return; }
+    if (!active) return;
     var allDays = e.ctrlKey || e.metaKey;   // Ctrl (Cmd on macOS) -> step through ALL imaged days
     if (e.key === "ArrowLeft") { (allDays ? active.prevAny() : active.prevValid()); e.preventDefault(); }
     else if (e.key === "ArrowRight") { (allDays ? active.nextAny() : active.nextValid()); e.preventDefault(); }
-    else if (e.key === "ArrowUp") { if (navStation(-1)) e.preventDefault(); }
-    else if (e.key === "ArrowDown") { if (navStation(1)) e.preventDefault(); }
     else if (e.key === "0") { active.openFlag(); e.preventDefault(); }            // open flag + comment dialog
     else if (e.key === "1") { active.quickFlag(0); e.preventDefault(); }          // aerosol contamination
     else if (e.key === "2") { active.quickFlag(1); e.preventDefault(); }          // cloud contamination

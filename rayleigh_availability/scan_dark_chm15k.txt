@@ -1,0 +1,26 @@
+# Scan dark nuits-claires -- CHM15k : 5 candidats FE "dark fort" + cas limites + controles sains
+# (geographiquement varies) + le quadruple d'Amsterdam. Format : wmo ident [start]
+# 5 candidats "dark fort" (gradient FE annee-mois, phase4 par 4.2)
+0-20000-0-00203 A            # MESSINA        (FE -16.6 +- 5.1)
+0-20000-0-06610 A 20250601   # PAYERNE        (FE -20.7 +- 3.1, ere post-swap TUB140016)
+0-20008-0-MSA A              # MONTSEC        (FE -13.3 +- 1.5)
+0-20008-0-BRN A              # BERN           (FE -8.4 +- 2.0)
+0-20000-0-06290 A            # TWENTHE        (FE -6.5 +- 1.3)
+# cas limites FE (faibles mais > 2 sigma)
+0-528-0-06233 A              # ASSENDELFT     (FE -2.7 +- 1.1)
+0-20000-0-06260 A            # DEBILT         (FE -2.1 +- 1.0)
+0-20000-0-10872 0            # GOTTFRIEDING   (candidat retire -> controle)
+# controles sains
+0-20000-0-10393 0            # LINDENBERG
+0-20000-0-06348 A            # CABAUW
+0-20000-0-10140 0            # HAMBURG
+0-100-20000-0000001 A        # SOFIA
+0-20008-0-UGR A              # GRANADA
+0-250-1001-07151 B           # PALAISEAU
+0-20000-0-03005 A            # LERWICK
+# Amsterdam quadruple (sert aussi au volet dashboards/soustraction)
+0-20000-0-06240 A
+0-20000-0-06240 B
+0-20000-0-06240 C
+0-20000-0-06240 D
+# 0-20000-0-78990 A          # BONAIRE : hors domaine CAMS Europe (boite caribbean absente en local)

@@ -62,6 +62,23 @@ htmlcov/
 # Figures and R&D output live outside the repo, under
 # C:\DATA\Projects\202606_E-PROFILE_calibration (see README). Ignore any local copy.
 figs_paper_validation/
+# rendered deck figures + intermediates (incl. large *_l1_cache*.npz) and report figure dirs
+presentation/figs*/
+doc/reports/figs_*/
+
+# Presentations, paper drafts, and cached intermediates: kept on disk, not versioned
+# (same policy as the reference PDFs below -- large binaries / third-party formats).
+*.pptx
+*.docx
+*.npz
+
+# R&D scratch scripts (underscore-prefixed one-offs) in the study / presentation dirs -- kept local.
+# Scoped to these dirs so it never hits package dunders or the tracked cloud submodules
+# (calibration/cloud/_water_vapor.py, _filters.py); dunders are re-included for safety.
+validation/**/_*.py
+presentation/**/_*.py
+!**/__init__.py
+!**/__main__.py
 
 # Reference papers are kept on disk but not committed (~90 MB + third-party copyright).
 # Their text extracts (doc/*.txt) and the index (doc/README.md) ARE tracked.

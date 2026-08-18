@@ -27,7 +27,8 @@ _STATIC = Path(__file__).parent / "static"
 # Project JS/CSS that get a cache-busting ?v=<hash> so browsers always pick up changes (Plotly is
 # stable + large -> left unversioned). Same list is used to copy them into the site.
 _VERSIONED_ASSETS = ("style.css", "table-sort.js", "paginate.js", "filter.js", "qcflag.js",
-                     "diag.js", "histlink.js", "search.js", "rangesync.js")
+                     "diag.js", "histlink.js", "search.js", "rangesync.js",
+                     "stationindex.js", "stationnav.js", "dailypanel.js", "cltiles.js")
 
 
 def _asset_version() -> str:
@@ -39,6 +40,30 @@ def _asset_version() -> str:
         if p.exists():
             h.update(p.read_bytes())
     return h.hexdigest()[:8]
+
+
+def _write_if_changed(path: Path, text: str) -> bool:
+    """Write *text* only when it differs from what is on disk. Returns True if the file was written.
+
+    The publish step rsyncs by timestamp, so rewriting an identical file re-uploads it for nothing;
+    this keeps a data file out of the daily transfer on the days it does not change.
+
+    Compares BYTES and writes through a temp file + os.replace, for two reasons that are not
+    theoretical: read_text() on a file truncated mid-UTF-8-sequence raises UnicodeDecodeError (a
+    ValueError, so an `except OSError` would not catch it) and would kill the whole daily build
+    before a single page is rendered, repeating on every subsequent run until someone deleted the
+    file by hand; and a non-atomic write is what would leave such a file behind in the first place.
+    Callers must pass newline-free text (a byte compare does not do the text-mode CRLF translation)."""
+    data = text.encode("utf-8")
+    try:
+        if path.exists() and path.read_bytes() == data:
+            return False
+    except OSError:
+        pass
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_bytes(data)
+    os.replace(tmp, path)
+    return True
 
 
 def _fmt(x, spec="{:.3g}", dash="—"):
@@ -93,11 +118,16 @@ def _copy_flag_examples(flagex_dir, out_dir: Path) -> dict:
 def _write_assets(out_dir: Path) -> str | None:
     assets = out_dir / "assets"
     assets.mkdir(parents=True, exist_ok=True)
-    (assets / "plotly.min.js").write_text(get_plotlyjs(), encoding="utf-8")
+    # Byte-compare before writing: rewriting identical assets (4.7 MB of Plotly every day) gives
+    # them fresh mtimes and the publish rsync re-uploads them for nothing.
+    _write_if_changed(assets / "plotly.min.js", get_plotlyjs())
     for name in _VERSIONED_ASSETS:
         src = _STATIC / name
         if src.exists():
-            shutil.copyfile(src, assets / name)
+            data = src.read_bytes()
+            dst = assets / name
+            if not (dst.exists() and dst.read_bytes() == data):
+                dst.write_bytes(data)
     logo = None
     for ext in ("svg", "png", "jpg", "jpeg"):
         src = _STATIC / f"eumetnet_logo.{ext}"
@@ -365,7 +395,8 @@ def _copy_diagnostics(diag: pd.DataFrame, cal: pd.DataFrame, out_dir: Path) -> d
     return _diag_index_from(d, cal)
 
 
-def _method_block(key, method, cal, kal, series, diags=None, op_all=None, oldray_all=None):
+def _method_block(key, method, cal, kal, series, diags=None, op_all=None,
+                  oldray_all=None, alt_m=None):
     """Figures + aggregates for one method section on a station page."""
     g_m = cal[(cal["key"] == key) & (cal["method"] == method)].sort_values("datetime")
     kal_m = kal[(kal["key"] == key) & (kal["method"] == method)] if len(kal) else kal
@@ -382,7 +413,7 @@ def _method_block(key, method, cal, kal, series, diags=None, op_all=None, oldray
         figs={
             "ts": charts.fig_to_div(charts.series_timeseries(g_m, kal_m, method, op_df, oldray_df), f"fig-ts-{safe}"),
             "flags": charts.fig_to_div(charts.monthly_flag_bars(g_m, method), f"fig-mf-{safe}"),
-            "aux": charts.fig_to_div(charts.aux_timeseries(g_m, method), f"fig-aux-{safe}"),
+            "aux": charts.fig_to_div(charts.aux_timeseries(g_m, method, alt_m), f"fig-aux-{safe}"),
         },
         recent=g_m.iloc[::-1].to_dict("records"),          # full archive, newest first (paginated)
         diag_dates=sorted({d["date"] for d in (diags or [])}),  # dates that have a diagnostic image
@@ -449,6 +480,38 @@ def _ombsens_keystats(fullcal_dir, period: str = "all") -> pd.DataFrame:
     return out
 
 
+#: One S3 listing per prefix per build; a failed request is cached as [] so an offline build costs
+#: at most one timeout per prefix, not one per station page.
+_BUCKET_LIST_CACHE: dict = {}
+
+
+def _bucket_keys(prefix: str) -> list:
+    """Object keys under *prefix* in the public image bucket ([] when unset/unreachable).
+
+    Consulted ONLY when a local gate found nothing: a locally built site over a partial tree (no
+    ombsens CSVs, no classification sidecars) can still reference the operational products, which
+    live in the bucket. The operational build has the local gate files and never issues a request.
+    """
+    if not config.IMG_BASE_URL:
+        return []
+    if prefix in _BUCKET_LIST_CACHE:
+        return _BUCKET_LIST_CACHE[prefix]
+    keys: list = []
+    try:
+        import urllib.parse
+        import urllib.request
+        import xml.etree.ElementTree as ET
+        url = (config.IMG_BASE_URL.rstrip("/")
+               + "?list-type=2&max-keys=1000&prefix=" + urllib.parse.quote(prefix))
+        with urllib.request.urlopen(url, timeout=8) as r:
+            tree = ET.fromstring(r.read())
+        keys = [el.text for el in tree.iter() if el.tag.endswith("Key") and el.text]
+    except Exception:                                                        # noqa: BLE001
+        keys = []
+    _BUCKET_LIST_CACHE[prefix] = keys
+    return keys
+
+
 def _stage_ombsens_pngs(fullcal_dir, key, out_dir: Path) -> dict:
     """Stage the per-station OmB / sensitivity diagnostic PNGs into the site (under ombsens/<key>/)
     the same way per-night diagnostics are staged (symlink by default, ALC_DIAG_LINK overrides), and
@@ -509,6 +572,20 @@ def _stage_ombsens_pngs(fullcal_dir, key, out_dir: Path) -> dict:
                         per[pk] = u
         if per:
             out[f"{kind}_periods"] = per
+    # Bucket fallback (see _bucket_keys): the operational products exist even when this tree
+    # carries neither the PNGs nor the gating CSVs.
+    for kind in ("omb", "sens"):
+        if kind in out:
+            continue
+        listing = _bucket_keys(f"ombsens/{key}/{key}_{kind}")
+        base_key = f"ombsens/{key}/{key}_{kind}.png"
+        if base_key in listing:
+            out[kind] = config.IMG_BASE_URL + base_key
+            pref = f"ombsens/{key}/{key}_{kind}_"
+            per = {k[len(pref):-4]: config.IMG_BASE_URL + k for k in listing
+                   if k.startswith(pref) and k.endswith(".png")}
+            if per:
+                out[f"{kind}_periods"] = per
     return out
 
 
@@ -567,6 +644,86 @@ def _load_status(fullcal_dir, key):
     return df
 
 
+def _latest_status_by_key(fullcal_dir, keys) -> dict:
+    """{key: (date, quality)} from the last line of each ``<key>_status.csv``.
+
+    Reads the header plus the tail of each file rather than parsing it, because this runs once for
+    the whole network (436 files) purely to put a status dot on the neighbour links. The DATE comes
+    back with the class because the last row can be arbitrarily old: an instrument that stopped
+    reporting months ago would otherwise show its last-ever green dot as if it were today's."""
+    out = {}
+    if not fullcal_dir:
+        return out
+    for k in keys:
+        p = Path(fullcal_dir) / str(k) / f"{k}_status.csv"
+        try:
+            with p.open("rb") as fh:
+                header = fh.readline().decode("utf-8", "replace").strip().split(",")
+                if "quality" not in header:
+                    continue
+                idx = header.index("quality")
+                fh.seek(0, 2)
+                size = fh.tell()
+                fh.seek(max(0, size - 4096))          # the tail always holds the last full row
+                tail = fh.read().decode("utf-8", "replace").strip().splitlines()
+        except OSError:
+            continue
+        for line in reversed(tail):
+            parts = line.split(",")
+            if len(parts) > idx and parts[0][:1].isdigit():   # skip a re-read header line
+                out[str(k)] = (parts[0], parts[idx])
+                break
+    return out
+
+
+def _station_index_records(st, series, fullcal_dir) -> list:
+    """One compact record per station for the client-side station index.
+
+    Feeds three things at once: the nav-bar search panel, the country/instrument filters on a
+    station page, and the previous/next links (which show the neighbour's status and calibration
+    constant). Emitted in the SAME order as the stations table, i.e. the order prev/next walks, so
+    the client never re-sorts and the navigation order is identical to the old server-baked one.
+
+    Keys are short because this file is fetched by every page: k=key, n=name, w=WIGOS id,
+    c=country, t=instrument type, q=latest daily quality, qd=the DATE of that status row (so the
+    client can grey out a dot that is months old rather than present it as current),
+    m={method: {...}}."""
+    latest_q = _latest_status_by_key(fullcal_dir, list(st["key"]))
+    by_key: dict = {}
+    for _, r in series.iterrows():
+        by_key.setdefault(str(r["key"]), {})[str(r["method"])] = r
+    out = []
+    for _, r in st.iterrows():
+        k = str(r["key"])
+        itype = str(r.get("itype", "") or "")
+        theo = config.theoretical_cl(itype)
+        methods = {}
+        for m, s in by_key.get(k, {}).items():
+            cl = s.get("median_cl")
+            cl = float(cl) if pd.notna(cl) else None
+            flag = s.get("last_flag")
+            methods[m] = {
+                # raw C_L spans 11 orders of magnitude across types, so the percentage of the
+                # type's nominal value is what makes the number readable in a one-line link
+                "cl": float(f"{cl:.4g}") if cl else None,
+                "pct": round(100.0 * cl / theo, 1) if (cl and theo) else None,
+                "f": float(flag) if pd.notna(flag) else None,
+                "d": str(s.get("last_date") or ""),
+            }
+        qd, qv = latest_q.get(k, ("", ""))
+        out.append({
+            "k": k,
+            "n": str(r.get("name", "") or ""),
+            "w": k.rsplit("_", 1)[0] if "_" in k else k,
+            "c": str(r.get("country", "") or ""),
+            "t": itype,
+            "q": qv,
+            "qd": qd,
+            "m": methods,
+        })
+    return out
+
+
 def _load_hk(fullcal_dir, key):
     """Per-stream daily housekeeping (<key>_hk.csv) for the monitoring panel; None if absent/empty."""
     if not fullcal_dir:
@@ -591,6 +748,102 @@ def _load_hk(fullcal_dir, key):
 
 
 # --- per-station page render (shared by the serial + parallel paths) ----------
+def _emit_hk_hourly(fullcal_dir, key: str, out_dir: Path) -> None:
+    """data/<key>/hk_hourly.json from the runner's hourly sidecar, keyed by the SAME trace names
+    the daily housekeeping chart uses (config.HK_PANEL labels) so the client can swap arrays into
+    the existing figure. Fetch-on-zoom: the page loads it only when the operator zooms below ~45
+    days, which is why it is a sidecar file and not part of the page."""
+    if not fullcal_dir:
+        return
+    src = Path(fullcal_dir) / key / f"{key}_hk_hourly.csv"
+    if not src.exists():
+        return
+    import csv as _csv
+    t, series = [], {label: [] for _, label, _, _ in config.HK_PANEL}
+    by_field = {f: label for f, label, _, _ in config.HK_PANEL}
+    try:
+        with open(src, newline="", encoding="utf-8") as f:
+            for r in _csv.DictReader(f):
+                h = str(r.get("hour", ""))
+                if len(h) != 10 or not h.isdigit():
+                    continue
+                t.append(f"{h[:4]}-{h[4:6]}-{h[6:8]} {h[8:]}:00")
+                for fld, label in by_field.items():
+                    v = r.get(fld, "")
+                    series[label].append(float(v) if v not in ("", None) else None)
+    except (OSError, ValueError):
+        return
+    if not t:
+        return
+    ddir = out_dir / "data" / key
+    ddir.mkdir(parents=True, exist_ok=True)
+    _write_if_changed(ddir / "hk_hourly.json",
+                      json.dumps({"t": t, "series": series}, separators=(",", ":")))
+
+
+def _hopkin_panel(out_dir: Path, key: str) -> str | None:
+    """Pool the per-scene (cloud base, C) pairs the cloud payloads carry into the panel's grid.
+
+    Reads what is already on disk -- data/<key>/<date>_cloud.json -- so the card appears for exactly
+    the nights the daily panel can show, and disappears cleanly for a station whose payloads predate
+    the capture (older payloads simply have no "scenes" key).
+    """
+    ddir = out_dir / "data" / key
+    if not ddir.is_dir():
+        return None
+    cbh, cs, day = [], [], []
+    for f in sorted(ddir.glob("*_cloud.json")):
+        try:
+            j = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        sc = j.get("scenes") or {}
+        a, b = sc.get("cbh") or [], sc.get("c") or []
+        if not a or len(a) != len(b):
+            continue
+        d = f.name.split("_")[0]
+        cbh.extend(a)
+        cs.extend(b)
+        day.extend([d] * len(a))
+    if len(cbh) < 30:
+        return None
+    cells = charts.cloud_cbh_cells({"cbh": cbh, "c": cs, "day": day})
+    if cells is None:
+        return None
+    return json.dumps(cells, separators=(",", ":"))
+
+
+def _daily_panel(out_dir: Path, key: str, methods: list) -> dict | None:
+    """The interactive daily-calibration panel, when its payloads have been generated.
+
+    The panel is an ADDITION to this page, never a replacement for it: the per-day index it needs
+    lives in ``<out>/data/<key>/_index.json`` (written by scripts/build_station_dashboard.py), and
+    when that file is absent the section simply does not render and every existing block is
+    untouched. Returns the template variables, or None.
+    """
+    idx = out_dir / "data" / key / "_index.json"
+    if not idx.exists():
+        return None
+    try:
+        index = json.loads(idx.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not index:
+        return None
+    from monitoring import panel as PANEL
+    # The panel's method switch must offer every method the INDEX carries, even when the SQLite cal
+    # frame has no rows for it (a DB gap must not hide a product that exists on disk).
+    idx_methods = {m for by in index.values() for m in by}
+    methods = [m for m in config.METHOD_ORDER if m in (set(methods) | idx_methods)]
+    boot = {"station": {"key": key}, "methods": methods,
+            "dates": sorted(index), "days": {}, "index": index}
+    meta = {"n_days": len(index), "gz_kb": 0, "per_unit_kb": 0, "curated": False, "lazy": True}
+    return {"body": PANEL.PANEL_BODY, "rail": PANEL.PANEL_RAIL, "css": PANEL.PANEL_CSS,
+            "js": PANEL.PANEL_JS.replace("__META__", json.dumps(meta)),
+            "payload": json.dumps(boot, separators=(",", ":")),
+            "n_days": len(index)}
+
+
 def _render_one_station(key, ctx) -> str:
     """Render and write one station's HTML page from the shared context *ctx*. Independent of every
     other station (writes only stations/<key>.html and stages that key's own OmB/sens PNGs), so it is
@@ -600,13 +853,27 @@ def _render_one_station(key, ctx) -> str:
     methods = [m for m in config.METHOD_ORDER
                if len(cal[(cal["key"] == key) & (cal["method"] == m)])]
     blocks = [_method_block(key, m, cal, kal, series, ctx.diag_by.get((key, m), []),
-                            ctx.op_all, ctx.oldray_all) for m in methods]
+                            ctx.op_all, ctx.oldray_all, alt_m=meta.get("alt")) for m in methods]
     # Cloudnet target classification curtains: a per-day gallery like the calibration diagnostics, but
     # not tied to a calibration method (it has no cal rows), so it renders as its own standalone card.
     class_diags = ctx.diag_by.get((key, "classification"), [])
-    overlay = None
+    if not class_diags:
+        # Same fallback as ombsens: the curtains are produced operationally and live in the bucket
+        # even when this tree has no classification/ sidecars to enumerate.
+        _pref = f"diag/{key}/classification_"
+        class_diags = sorted(
+            ({"date": k[len(_pref):-4], "rel": config.IMG_BASE_URL + k, "success": True}
+             for k in _bucket_keys(_pref)
+             if k.endswith(".png") and k[len(_pref):-4].isdigit()),
+            key=lambda r: r["date"])
+    overlay, cl_tiles = None, []
+    by_method = {m: cal[(cal["key"] == key) & (cal["method"] == m)] for m in methods}
+    # The headline tiles are useful on a ONE-method stream too (median, spread, drift, last valid),
+    # so they are not gated on the two-method overlay the way the comparison figure is.
+    _as_of = cal["datetime"].max() if len(cal) else None
+    cl_stats = metrics.cl_headline_stats(by_method, as_of=_as_of)
+    cl_tiles = cl_stats.get("combined", [])
     if len(methods) >= 2:
-        by_method = {m: cal[(cal["key"] == key) & (cal["method"] == m)] for m in methods}
         overlay = charts.fig_to_div(charts.cl_overlay(by_method), "fig-overlay")
     i = ctx.nav_idx.get(key)
     prev_station = f"{ctx.all_keys[i - 1]}.html" if (i is not None and i > 0) else ""
@@ -618,7 +885,7 @@ def _render_one_station(key, ctx) -> str:
     status_df = _load_status(ctx.fullcal_dir, key)
     availability, status_json = None, None
     if status_df is not None:
-        avail_fig = charts.daily_availability_bar(status_df)
+        avail_fig = charts.daily_availability_rows(status_df, cal[cal["key"] == key], methods)
         if avail_fig is not None:
             availability = charts.fig_to_div(avail_fig, "fig-avail")
             status_map = {str(r["date"]): {"q": str(r.get("quality", "")), "s": str(r.get("summary", ""))}
@@ -628,8 +895,19 @@ def _render_one_station(key, ctx) -> str:
     # Top-of-page links: download the calibration NetCDF(s) + the matching CEDA L2 archive page.
     nc_files = _stage_netcdfs(ctx.fullcal_dir, key, ctx.out_dir)
     ceda_url = getattr(ctx, "ceda_by", {}).get(key)
-    html = ctx.tmpl.render(base="../", logo=ctx.logo, key=key, meta=meta,
+    cal_classes = [{"key": c, "label": config.CAL_CLASS_SHORT[c],
+                    "title": config.CAL_CLASS_LABELS[c],
+                    "color": config.CAL_CLASS_COLORS[c]} for c in config.CAL_CLASS_ORDER]
+    daily_panel = _daily_panel(ctx.out_dir, key, methods)
+    hopkin = _hopkin_panel(ctx.out_dir, key) if "cloud" in methods else None
+    _emit_hk_hourly(ctx.fullcal_dir, key, ctx.out_dir)
+    html = ctx.tmpl.render(base="../", logo=ctx.logo, key=key, meta=meta, cal_classes=cal_classes,
+                           img_base=config.IMG_BASE_URL,
+                           daily_panel=daily_panel,
+                           hopkin=hopkin, cl_tiles=cl_tiles,
+                           cl_stats_json=json.dumps(cl_stats, ensure_ascii=False),
                            blocks=blocks, overlay=overlay, search_json=ctx.search_json,
+                           countries=getattr(ctx, "countries", []), types=getattr(ctx, "types", []),
                            prev_station=prev_station, next_station=next_station,
                            monitoring=monitoring, availability=availability, status_json=status_json,
                            ombsens=ombsens, nc_files=nc_files, ceda_url=ceda_url,
@@ -648,23 +926,27 @@ _WORKER_CTX = None
 
 
 def _render_worker_init(db_path, out_dir, fullcal_dir, opcoeff_csv, oldray_dir, logo,
-                        search_json, periods_json, ceda_json=""):
+                        search_json, periods_json, ceda_json="",
+                        countries_json="", types_json=""):
     global _WORKER_CTX
     if _WORKER_CTX is not None:
         return  # fork (Linux/CSCS): the worker inherited the parent's ctx -> no reload/re-index
     # spawn (Windows): rebuild the read-only context from the pickled paths
     cal, series, st, kal, diag = metrics.load_frames(Path(db_path))
     all_keys = list(st["key"])
+    env = _env()
     _WORKER_CTX = SimpleNamespace(
         cal=cal, series=series, st=st, kal=kal,
         diag_by=_diag_index(diag, cal),
         op_all=_load_opcoeff(opcoeff_csv or None),
         oldray_all=_load_oldray(oldray_dir or None),
-        tmpl=_env().get_template("station.html"),
+        tmpl=env.get_template("station.html"),
         out_dir=Path(out_dir), fullcal_dir=(fullcal_dir or None),
         all_keys=all_keys, nav_idx={k: i for i, k in enumerate(all_keys)},
         logo=(logo or None), search_json=search_json,
         ceda_by=(json.loads(ceda_json) if ceda_json else {}),
+        countries=(json.loads(countries_json) if countries_json else []),
+        types=(json.loads(types_json) if types_json else []),
         periods=(json.loads(periods_json) if periods_json else None),
         periods_json=(periods_json or None))
 
@@ -789,6 +1071,20 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
     types = [t for t in config.TYPE_ORDER if t in set(st["itype"])] + \
             sorted(set(st["itype"]) - set(config.TYPE_ORDER) - {"Unknown"}) + \
             (["Unknown"] if "Unknown" in set(st["itype"]) else [])
+
+    # Station index written ONCE to data/stations.json and fetched by every page, instead of being
+    # inlined into all 436 of them. The inline #search-index blob stays for now as the file://
+    # fallback (a build opened by double-click cannot fetch).
+    #
+    # Deliberately NO ?v= token on the URL: the daily build re-renders only the stations whose data
+    # changed, so a token stamped into the HTML would go stale on exactly the pages that were not
+    # re-rendered -- i.e. it would bust the cache only where it was not needed. The client fetches
+    # the one stable URL with cache:"no-cache" instead, so the server revalidates (304, ~250 B, when
+    # unchanged) and every page is correct immediately after an incremental build.
+    stations_json = json.dumps(_station_index_records(st, series, fullcal_dir),
+                               ensure_ascii=False, separators=(",", ":"))
+    (out_dir / "data").mkdir(parents=True, exist_ok=True)
+    _write_if_changed(out_dir / "data" / "stations.json", stations_json)
     # --- Time-period set (auto-derived years; active vs frozen) ----------------
     # All-time + each calendar year (first..current) + rolling last-N-day windows. The current year,
     # the rolling windows and all-time are rebuilt every run; a past complete year is built ONCE and
@@ -845,7 +1141,8 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
         cal=cal, kal=kal, series=series, st=st, diag_by=diag_by, op_all=op_all,
         oldray_all=oldray_all, tmpl=station_tmpl, out_dir=out_dir, fullcal_dir=fullcal_dir,
         all_keys=all_keys, nav_idx=nav_idx, logo=logo, search_json=search_json,
-        ceda_by=ceda_by, periods=period_list, periods_json=periods_json)
+        ceda_by=ceda_by, countries=countries, types=types,
+        periods=period_list, periods_json=periods_json)
 
     n_workers = int(workers) if workers else 1
     if n_workers > 1 and len(keys) > 1:
@@ -857,7 +1154,9 @@ def build_site(db_path: Path, out_dir: Path, limit_pages: int | None = None,
         initargs = (str(db_path), str(out_dir), str(fullcal_dir) if fullcal_dir else "",
                     str(opcoeff_csv) if opcoeff_csv else "", str(oldray_dir) if oldray_dir else "",
                     logo or "", search_json, periods_json,
-                    json.dumps(ceda_by, ensure_ascii=False))
+                    json.dumps(ceda_by, ensure_ascii=False),
+                    json.dumps(countries, ensure_ascii=False),
+                    json.dumps(types, ensure_ascii=False))
         # Expose the parent's ctx so fork()ed workers (Linux/CSCS) inherit it for free; spawn()ed
         # workers (Windows) ignore this and rebuild from initargs in the initializer.
         global _WORKER_CTX

@@ -130,6 +130,20 @@ def _create_calibration_file(
     nc_method.flag_values = np.array([0, 1, 2, 3], dtype=np.int8)
     nc_method.flag_meanings = "Rayleigh Liquid_water_clouds Ground_based_lidar Satellite_lidar"
 
+    # Which ALGORITHM VERSION produced this row. A file accumulates rows over years and can be
+    # appended to by a newer release, so the version has to be per calibration, not a global
+    # attribute -- otherwise a re-processed night is indistinguishable from an original one and a
+    # series that straddles an upgrade cannot be interpreted.
+    nc_version = ncid.createVariable('calibration_version', 'i2', ('time',), zlib=True,
+                                     fill_value=-999)
+    nc_version.long_name = "Algorithm version that produced this calibration"
+    nc_version.flag_values = np.array(sorted(VERSION_CODES.values()), dtype=np.int16)
+    nc_version.flag_meanings = " ".join(k for k, _ in sorted(VERSION_CODES.items(),
+                                                             key=lambda kv: kv[1]))
+    nc_version.comment = ("code = major*100 + minor*10 + patch of the calibration method, e.g. "
+                          "100 = E-PROF v1.0, 120 = v1.2, 200 = v2 (C8), 220 = v2.2 "
+                          "(noise-aware molecular-window gates)")
+
     # Housekeeping variables
     nc_lifetime = ncid.createVariable('laser_life_time', 'f8', ('time',), zlib=True, fill_value=-999.9)
     nc_lifetime.long_name = "Average laser life time during the calibration (nb of shots since factory)"
@@ -166,6 +180,21 @@ def _create_calibration_file(
     return ncid
 
 
+# Method name -> numeric version code (major*100 + minor*10 + patch). Numeric so the variable can
+# carry flag_values/flag_meanings and be compared arithmetically ("rows older than 200").
+VERSION_CODES = {
+    "eprof_v1.0": 100, "eprof_v1.1": 110, "eprof_v1.2": 120, "eprof_v0.25": 25,
+    "eprof_v2": 200, "eprof_v2p": 205, "eprof_v2.2": 220,
+    "earlinet": 300, "bellini": 310, "main": 90, "improved": 95,
+    "cloud_oconnor": 1000,          # the liquid-cloud (O'Connor) retrieval
+}
+
+
+def version_code(method_name: str) -> int:
+    """Numeric code for a calibration method name; -999 when it is not a known version."""
+    return VERSION_CODES.get(str(method_name), -999)
+
+
 def write_calibration_result(
     output_dir: Path,
     info: InstrumentInfo,
@@ -176,6 +205,7 @@ def write_calibration_result(
     wavelength_nm: float,
     housekeeping: dict,
     method: int = 0,
+    version: int = -999,
 ) -> Path:
     """
     Write calibration result to NetCDF file.
@@ -251,6 +281,8 @@ def write_calibration_result(
         ncid.variables['calibration_top_height'][idx] = result.calibration_top_height
 
     ncid.variables['calibration_method'][idx] = method  # 0=Rayleigh, 1=Liquid_water_clouds
+    if 'calibration_version' in ncid.variables:
+        ncid.variables['calibration_version'][idx] = int(version)
 
     ncid.variables['laser_wavelength'][idx] = wavelength_nm
 

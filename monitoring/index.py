@@ -26,8 +26,12 @@ import pandas as pd
 from monitoring import config
 from monitoring.config import DB_NAME, SUCCESS_FLAGS
 
+# "version" = the numeric algorithm code the run stamped on each row. Carried through so the station
+# page can NAME the vintage it is plotting instead of asserting one; absent in archives written
+# before the column existed, and then simply left empty rather than guessed.
 _CAL_COLS = ["key", "method", "date", "datetime", "flag", "success", "cal_value",
-             "uncertainty", "rel_uncertainty", "n_profiles", "bottom_height", "top_height", "message"]
+             "uncertainty", "rel_uncertainty", "n_profiles", "bottom_height", "top_height",
+             "version", "message"]
 
 
 def _read_station_csv(path: Path, key: str) -> pd.DataFrame:
@@ -41,7 +45,8 @@ def _read_station_csv(path: Path, key: str) -> pd.DataFrame:
     if "n_profiles" not in df.columns:
         df["n_profiles"] = np.nan
 
-    for col in ("flag", "cal_value", "uncertainty", "bottom_height", "top_height", "n_profiles"):
+    for col in ("flag", "cal_value", "uncertainty", "bottom_height", "top_height", "n_profiles",
+                "version"):
         df[col] = pd.to_numeric(df.get(col), errors="coerce")
     df["method"] = df["method"].fillna("rayleigh").astype(str)
     df["message"] = df.get("message", "").fillna("")

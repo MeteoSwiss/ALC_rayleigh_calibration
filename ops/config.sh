@@ -15,6 +15,30 @@ export ALC_CENSUS="$ALC_REPO/validation/scope_l1_2026_census.json" # station cen
 # --- calibration output (per-stream <key>_cal.csv + yearly NetCDFs) -----------------------------
 export ALC_FULLCAL_DIR="/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.0"
 
+# ==================================================================================================
+# v2.2 CUTOVER BLOCK -- uncomment ALL FOUR LINES TOGETHER, never individually.
+# ==================================================================================================
+# This is the flip. Procedure, prerequisites and rollback: doc/OPERATIONS_v22_cutover.md.
+#
+# Why one block: the daily runner MERGES into the per-stream CSVs, so v2.2 code writing into the
+# v2.0 tree interleaves the two vintages irreversibly and destroys the archive you would roll back
+# to. The method, the water-vapour spectrum and the output tree must therefore change in the SAME
+# edit -- which is also why they ship commented out: deploying the code must not flip anything.
+#
+# Do NOT uncomment before scripts/check_v22_archive.py passes against the new tree.
+# Rollback = re-comment these lines (or restore ops/config.sh.pre_v22_<date>), then rebuild the
+# dashboard WITHOUT --changed-only and publish.
+#
+# export ALC_FULLCAL_DIR="/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.2"
+# export ALC_MOLECULAR_METHOD="eprof_v2.2"
+# export ALC_WV_SPECTRUM='{"CL61": [910.55, 0.188]}'
+# export ALC_OPCOEFF_CSV="/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.2/operational_coefficients.csv"
+#
+# Deliberately NOT set: ALC_DARK_PROFILE. The measured hood dark exists only at Payerne, and the
+# operator's decision (2026-08-17) is to keep the network homogeneous; Payerne CHM15k therefore
+# keeps its known ~-24 % near-top-of-window bias (phase4_network_validation.md §4.4).
+# ==================================================================================================
+
 # --- dashboard (static site, served by your web server at a SEPARATE path) ----------------------
 export ALC_DASHBOARD_DIR="/data/zue/E_PROFILE/ALC/Calibration/dashboard"
 export ALC_L2_DIR="/data/zue/E_PROFILE/ALC/L2_FILES"                                                # optional: L2 archive for station name/country (blank = skip)
@@ -72,3 +96,12 @@ export ALC_TMPDIR="${ALC_TMPDIR:-/data/zue/E_PROFILE/ALC/Calibration/tmp}"
 mkdir -p "$ALC_TMPDIR" 2>/dev/null || true
 export TMPDIR="$ALC_TMPDIR"; export TMP="$ALC_TMPDIR"; export TEMP="$ALC_TMPDIR"
 export CAMS_TMPDIR="$ALC_TMPDIR"
+
+# Curated per-flag example images for flags.html. Without this the DAILY rebuild silently strips
+# the examples the operator curated (build_dashboard only kept them when --flagex was passed).
+# export ALC_FLAGEX_DIR="$ALC_BASE/flag_examples"
+
+# Daily-calibration panel payloads (interactive station pages). OFF until the panel is rolled out:
+# when =1, ops_daily regenerates data/<key>/<date>_<method>.json for panel-enabled stations after
+# each calibrated day, and publish.sh ships data/ on the S3 bucket leg.
+# export ALC_PANEL_PAYLOADS=1

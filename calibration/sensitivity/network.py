@@ -77,6 +77,15 @@ def sensitivity_over_period(
     z_ctr = z_edges[:-1] + np.diff(z_edges) / 2.0
     n_z = z_ctr.size
 
+    # An empty day is a real thing in this archive -- a station can have an L1 file whose slice for
+    # the requested date holds ZERO profiles -- and it must not reach time[0]. This raised
+    # IndexError, and because the exception surfaced on the worker's stdout (logging is forced to
+    # CRITICAL in the runner's _process_stream) rather than in the batch log, it looked exactly like
+    # "sensitivity produced nothing" for every stream whose window contained one such day. Short
+    # windows survived by luck; the full 2025-2026 window did not.
+    if time.size == 0:
+        return None
+
     dtime_s = (time - time[0]) / np.timedelta64(1, "s")
     if dt is None:
         dt = float(np.median(np.diff(dtime_s)))

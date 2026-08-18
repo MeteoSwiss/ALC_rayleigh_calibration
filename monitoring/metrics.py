@@ -140,3 +140,76 @@ def watchlist(cal: pd.DataFrame, st: pd.DataFrame) -> pd.DataFrame:
     df = pd.DataFrame(alerts).sort_values(["issue", "priority"], ascending=[True, False]).reset_index(drop=True)
     df["country"] = df["key"].map(lambda k: str(country_by_key.get(k, "") or ""))
     return df
+
+
+#: Tile grading thresholds (absolute value of the metric, in its own unit). Display heuristics for
+#: an operator's eye, NOT acceptance criteria -- the flags decide whether a night calibrates.
+TILE_OK, TILE_WARN, TILE_BAD = "#1a7431", "#b7791f", "#b00020"
+
+
+def _grade(v, good, warn):
+    if v is None or not np.isfinite(v):
+        return TILE_BAD
+    a = abs(v)
+    return TILE_OK if a < good else (TILE_WARN if a < warn else TILE_BAD)
+
+
+def _tiles_from(ok_all, label_suffix, ratio, as_of):
+    """One tile set from a pooled frame of successful calibrations."""
+    med = float(ok_all["cal_value"].median())
+    p10, p90 = (float(ok_all["cal_value"].quantile(q)) for q in (0.10, 0.90))
+    spread = 100.0 * (p90 - p10) / med if med else None
+    last = ok_all["datetime"].max()
+    win = last - pd.Timedelta(days=15)
+    recent = ok_all[ok_all["datetime"] >= win]["cal_value"]
+    prior = ok_all[(ok_all["datetime"] < win)
+                   & (ok_all["datetime"] >= win - pd.Timedelta(days=45))]["cal_value"]
+    drift = (100.0 * (recent.median() / prior.median() - 1.0)
+             if len(recent) and len(prior) and prior.median() else None)
+    # Age against the ARCHIVE's end (as_of), never wall-clock: on a frozen or archived build a
+    # wall-clock age painted every station red for simply having been built in the past.
+    ref = as_of if as_of is not None else last
+    age = int((pd.Timestamp(ref).normalize() - last.normalize()).days)
+    tiles = [
+        {"label": f"MEDIAN C_L {label_suffix}", "value": f"{med:.4g}",
+         "note": f"{len(ok_all)} calibrated nights", "color": TILE_OK},
+        {"label": "SPREAD (P10-P90)", "value": "—" if spread is None else f"{spread:.0f}%",
+         "note": f"{p10:.4g} … {p90:.4g}", "color": _grade(spread, 10, 20)},
+        *([{"label": "CLOUD / RAYLEIGH RATIO", "value": f"{ratio:.3g}x",
+            "note": ("the two retrievals agree" if abs(ratio - 1) < 0.05 else
+                     "a systematic offset likely reflects electronic distortion of the signal, "
+                     "not the water-vapour correction"),
+            "color": _grade(ratio - 1.0, 0.05, 0.15)}] if ratio is not None else []),
+        {"label": "15-DAY DRIFT", "value": "—" if drift is None else f"{drift:+.1f}%",
+         "note": "vs the preceding 45 d" if drift is not None else "not enough history",
+         "color": _grade(drift, 5, 10)},
+        {"label": "LAST VALID", "value": "today" if age <= 0 else f"{age} d ago",
+         "note": last.strftime("%Y-%m-%d"), "color": _grade(age, 3, 8)},
+    ]
+    return tiles
+
+
+def cl_headline_stats(by_method: dict, as_of=None) -> dict:
+    """Tile sets: 'combined' pools BOTH methods (the default view -- both retrievals estimate the
+    SAME constant), plus one per method for when the operator isolates a trace in the overlay's
+    legend. The ratio tile exists only in the combined view; it is meaningless for one method."""
+    ok = {m2: g[g["success"] == 1].sort_values("datetime") for m2, g in by_method.items()}
+    ok = {m2: g for m2, g in ok.items() if len(g)}
+    if not ok:
+        return {}
+    ratio = None
+    if "cloud" in ok and "rayleigh" in ok:
+        mr = float(ok["rayleigh"]["cal_value"].median())
+        ratio = float(ok["cloud"]["cal_value"].median()) / mr if mr else None
+    pooled = pd.concat(ok.values(), ignore_index=True)
+    out = {"combined": _tiles_from(
+        pooled, "(both methods)" if len(ok) > 1 else f"({config.method_label(next(iter(ok))).upper()})",
+        ratio, as_of)}
+    for m2, g in ok.items():
+        out[m2] = _tiles_from(g, f"({config.method_label(m2).upper()})", None, as_of)
+    return out
+
+
+def cl_headline_tiles(by_method: dict, as_of=None) -> list:
+    """Back-compat wrapper: the combined tile set."""
+    return cl_headline_stats(by_method, as_of).get("combined", [])

@@ -181,7 +181,9 @@ def test_summary_reactive_kpis_and_instrument_chart(dash):
     html = (dash["out"] / "index.html").read_text(encoding="utf-8")
     assert "fig-instr" in html                                  # instruments-over-time chart
     assert 'id="series-index"' in html and 'id="instr-activity"' in html
-    for kid in ("kpi-instruments", "kpi-series", "kpi-cals", "kpi-success"):
+    # "method series" was dropped from the KPI row (operator request 2026-08-17)
+    assert 'id="kpi-series"' not in html
+    for kid in ("kpi-instruments", "kpi-cals", "kpi-success"):
         assert f'id="{kid}"' in html, f"missing KPI id {kid}"
     # filter.js recomputes those ids
     js = (Path(charts.__file__).resolve().parent / "static" / "filter.js").read_text(encoding="utf-8")
@@ -195,19 +197,127 @@ def test_favicon_present(dash):
     assert 'rel="icon"' in page and "favicon.png" in page
 
 
-def test_availability_bar_builder():
-    """daily_availability_bar builds a bar spanning the record with the quality colours + gaps."""
-    df = pd.DataFrame({"date": ["20260101", "20260103", "20260110"],  # a gap between 03 and 10
-                       "quality": ["pass", "error", "warning"],
-                       "summary": ["No warning or error recorded", "'Transmitter failure (A)' 2 h",
-                                   "'Window contamination (W)' 5 h"]})
-    fig = charts.daily_availability_bar(df)
-    assert fig is not None and fig.data
-    colors = set(fig.data[0].marker.color)
-    assert config.QUALITY_COLORS["pass"] in colors
-    assert config.QUALITY_COLORS["error"] in colors
-    assert config.QUALITY_COLORS["nodata"] in colors   # the gap days
-    assert len(fig.data[0].x) == 10                     # 20260101..20260110 inclusive
+def _status_frame():
+    return pd.DataFrame({"date": ["20260101", "20260103", "20260110"],  # a gap between 03 and 10
+                         "quality": ["pass", "error", "warning"],
+                         "summary": ["No warning or error recorded",
+                                     "'Transmitter failure (A)' 2 h",
+                                     "'Window contamination (W)' 5 h"]})
+
+
+def test_availability_rows_status_only():
+    """With no calibration rows the card is the status row alone, spanning the whole record."""
+    fig = charts.daily_availability_rows(_status_frame())
+    assert fig is not None and len(fig.data) == 1
+    assert len(fig.data[0].x) == 10                    # 20260101..20260110 inclusive
+    assert list(fig.layout.yaxis.ticktext) == ["Instrument status"]
+    assert fig.layout.title.text is None               # the HTML card carries the title
+    q = list(fig.data[0].z[0])
+    assert q[0] == 0 and q[2] == 2 and q[3] == 3       # pass, error, then gap days -> nodata
+
+
+def test_availability_rows_adds_cloud_and_calibration_rows():
+    """A CL61-like stream gets four rows: status, cloud cover, and one row per method."""
+    status = _status_frame()
+    status["mean_cloud_cover"] = [0.0, 4.0, 8.0]
+    status["cloud_src"] = ["cloud_amount"] * 3
+    cal = pd.DataFrame({"date": ["20260101", "20260103", "20260110"] * 2,
+                        "method": ["rayleigh"] * 3 + ["cloud"] * 3,
+                        "flag": [1.0, -1.0, -2.0, 1.0, -24.0, -21.0]})
+    fig = charts.daily_availability_rows(status, cal, ["rayleigh", "cloud"])
+    assert list(fig.layout.yaxis.ticktext) == [
+        "Instrument status", "Mean cloud cover", "Calibration — Rayleigh",
+        "Calibration — Liquid-cloud"]
+    assert len(fig.data) == 4
+    # rows are stacked top-down: y0 increases, and the axis range is descending
+    assert [t.y0 for t in fig.data] == [0, 1, 2, 3]
+    assert fig.layout.yaxis.range[0] > fig.layout.yaxis.range[1]
+    order = config.CAL_CLASS_ORDER
+    ray = list(fig.data[2].z[0])
+    assert ray[0] == order.index("ok") and ray[2] == order.index("noscene")
+    cld = list(fig.data[3].z[0])
+    assert cld[9] == order.index("instrument")         # flag -21 = laser energy too low
+
+
+def test_station_index_payload(dash):
+    """data/stations.json carries one record per station, in the navigation order, with the
+    status and the constant the neighbour links display."""
+    p = dash["out"] / "data" / "stations.json"
+    assert p.exists()
+    recs = json.loads(p.read_text(encoding="utf-8"))
+    assert [r["k"] for r in recs] == [f"{s['wmo']}_{s['ident']}" for s in _STATIONS]
+    a = recs[0]
+    assert a["t"] == "CHM15k" and a["n"] == "ALPHA" and a["w"] == "0-20000-0-00001"
+    assert a["q"] == "warning"                       # last row of the synthetic status CSV
+    # the status DATE travels with the class so the client can grey out a months-old dot instead
+    # of presenting it as the station's current health
+    assert a["qd"] == _DATES[-1]
+    m = a["m"]["rayleigh"]
+    assert m["d"] == _DATES[-1] and m["f"] == 1.0
+    # the constant is also expressed as a percent of the type's nominal value, which is what the
+    # links show (raw C_L spans 11 orders of magnitude across types)
+    assert 90 <= m["pct"] <= 110
+    # the CL31 station calibrates by cloud, so its record carries that method instead
+    assert "cloud" in recs[2]["m"]
+
+
+def test_station_pages_fetch_the_index_and_keep_a_baked_fallback(dash):
+    """Station pages ship the filters and fetch the index, but keep the server-baked UNFILTERED
+    neighbours in data-prev/data-next so the arrow keys work before the fetch lands."""
+    keys = [f"{s['wmo']}_{s['ident']}" for s in _STATIONS]
+    page = (dash["out"] / "stations" / f"{keys[1]}.html").read_text(encoding="utf-8")
+    assert 'id="f-country"' in page and 'id="f-type"' in page
+    assert f'data-key="{keys[1]}"' in page
+    assert f'data-prev="{keys[0]}.html"' in page and f'data-next="{keys[2]}.html"' in page
+    for asset in ("stationindex.js", "stationnav.js"):
+        assert asset in page and (dash["out"] / "assets" / asset).exists()
+
+
+def test_station_index_url_is_stable_and_revalidated(dash):
+    """No ?v= token: the daily build re-renders only changed stations, so a token stamped into the
+    HTML would go stale on exactly the pages that were NOT re-rendered. One stable URL + a
+    revalidating fetch is what keeps every page correct."""
+    page = (dash["out"] / "index.html").read_text(encoding="utf-8")
+    assert 'data-index="data/stations.json"' in page
+    assert "stations.json?v=" not in page
+    js = (dash["out"] / "assets" / "stationindex.js").read_text(encoding="utf-8")
+    assert 'cache: "no-cache"' in js
+
+
+def test_write_if_changed_survives_a_corrupt_file(tmp_path):
+    """A file truncated mid-UTF-8 must not kill the build: read_text would raise UnicodeDecodeError
+    (a ValueError, so `except OSError` misses it) and the daily run would abort before rendering a
+    single page, repeating every day until someone deleted the file by hand."""
+    p = tmp_path / "stations.json"
+    p.write_bytes(b'[{"n":"\xc3')                     # lone UTF-8 lead byte
+    assert render._write_if_changed(p, '[{"n":"OK"}]') is True
+    assert p.read_text(encoding="utf-8") == '[{"n":"OK"}]'
+    assert render._write_if_changed(p, '[{"n":"OK"}]') is False   # unchanged -> not rewritten
+    assert not list(tmp_path.glob("*.tmp"))                       # atomic write leaves no debris
+
+
+def test_cal_class_groups_flags():
+    """Every documented flag maps to a class, and an unknown flag never reads as a success."""
+    assert config.cal_class(1) == "ok" and config.cal_class(0.5) == "ok"
+    assert config.cal_class(-1) == "noscene"
+    assert config.cal_class(-24) == "atmos" and config.cal_class(-2) == "atmos"
+    assert config.cal_class(-20) == "instrument"
+    assert config.cal_class(-3) == "retrieval"
+    assert config.cal_class(0) == "nodata"
+    assert config.cal_class(-77) == "retrieval"        # unknown -> never "ok"
+    assert config.cal_class(None) == "nodata"
+
+
+def test_monitoring_timeseries_uses_compact_x_encoding():
+    """The HK figure ships x0/dx (not a per-trace datetime array) and carries no Plotly title."""
+    hk = pd.DataFrame({"datetime": pd.to_datetime(["20260101", "20260102", "20260104"],
+                                                  format="%Y%m%d"),
+                       "laser": [100.0, 99.0, 98.0], "window": [80.0, 81.0, 82.0]})
+    fig = charts.monitoring_timeseries(hk)
+    assert fig.data and fig.data[0].x is None and fig.data[0].x0 is not None
+    assert fig.data[0].dx == 86400000.0                # one day in ms
+    assert len(fig.data[0].y) == 4                     # reindexed onto the full grid (a gap on 03)
+    assert fig.layout.title.text is None
 
 
 def test_instrument_count_chart_builder():
