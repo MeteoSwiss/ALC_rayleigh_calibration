@@ -35,8 +35,8 @@ export ALC_S3_REMOTE="${ALC_S3_REMOTE:-}"                          # rclone remo
 export ALC_AWS_PROFILE="${ALC_AWS_PROFILE:-ewc}"                      # aws profile (ALC_S3_TOOL=aws), e.g. ewc
 export ALC_S3_ENDPOINT="${ALC_S3_ENDPOINT:-https://object-store.os-api.cci2.ecmwf.int}"                      # aws endpoint (ALC_S3_TOOL=aws), e.g. https://object-store.os-api.cci2.ecmwf.int
 export ALC_VM_RSYNC_TARGET="${ALC_VM_RSYNC_TARGET:-hem@136.156.139.31:/var/www/alc}"             # ssh host:path of the web docroot, e.g. hem@136.156.139.31:/var/www/alc
-export ALC_VM_SSH='ssh -i ~/.ssh/EWC -o ProxyCommand="connect -S proxy.meteoswiss.ch:1080 %h %p"'                             # ssh command for the rsync; add -i KEY + ProxyCommand behind a proxy
-# Behind a proxy (e.g. MeteoSwiss server 434) -- aws/rclone honour http_proxy/https_proxy; the VM rsync
+export ALC_VM_SSH="${ALC_VM_SSH:-ssh -i ~/.ssh/EWC -o ProxyCommand=\"connect -S proxy.meteoswiss.ch:1080 %h %p\"}"                             # ssh command for the rsync; add -i KEY + ProxyCommand behind a proxy
+# Behind a proxy (operational host is zueub439; zueub434 was the pre-2026-07-14 host) -- aws/rclone honour http_proxy/https_proxy; the VM rsync
 # uses ALC_VM_SSH. Example:
 #   export https_proxy="http://proxy.meteoswiss.ch:<port>"; export http_proxy="$https_proxy"
 #   export no_proxy="localhost,127.0.0.1"
