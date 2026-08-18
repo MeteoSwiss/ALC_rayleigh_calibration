@@ -32,11 +32,9 @@
 
   function label(rec, arrow) {
     if (!rec) return "";
-    // No status LED here (it stays in the search panel): the stepper is pure navigation, and the
-    // dot crowded the two compact buttons.
-    var cl = window.ALCStations.clLabel(rec, window.ALCStations.bestMethod(rec));
-    return arrow + ' <span class="nname">' + (rec.n || rec.k) + "</span>" +
-      (cl ? '<span class="ncl">' + cl + "</span>" : "");
+    // Name only: no status LED and no %-of-nominal here (both live in the search panel) — the
+    // stepper is pure navigation and the two compact buttons have no room for anything else.
+    return arrow + ' <span class="nname">' + (rec.n || rec.k) + "</span>";
   }
 
   function apply() {

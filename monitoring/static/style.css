@@ -71,7 +71,6 @@ body {
    neighbour's stale name still in it. */
 .navnb[hidden] { display: none; }
 .navnb .nname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.navnb .ncl { color: #a9c7dd; font-size: 11px; flex: none; }
 /* --- Station topbar, design 2B: identity, headline metrics and panels live IN the nav ---------- */
 .nvsep { width: 1px; height: 26px; background: rgba(255,255,255,.22); flex: none; }
 .nvid { display: flex; flex-direction: column; line-height: 1.3; min-width: 0; }
