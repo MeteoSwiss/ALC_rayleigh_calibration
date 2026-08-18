@@ -18,7 +18,7 @@
     // landed; in the empty case update() renders the neighbourhood, which needs these records
     if (box.value.trim() || document.activeElement === box) update();
   });
-  var matches = [], sel = -1;
+  var matches = [], sel = -1, hereKey = null;   // hereKey: current station, highlighted in browse mode
 
   function go(rec) { if (rec) window.location.href = base + "stations/" + rec.k + ".html"; }
 
@@ -36,7 +36,8 @@
       // status dot + constant as a percent of the type's nominal value, so the panel doubles as a
       // "browse the network" view instead of being search-only
       var cl = window.ALCStations.clLabel(r, window.ALCStations.bestMethod(r));
-      return '<div class="sr' + (i === sel ? " sel" : "") + '" data-i="' + i + '">' +
+      return '<div class="sr' + (i === sel ? " sel" : "") + (r.k === hereKey ? " here" : "") +
+        '" data-i="' + i + '">' +
         window.ALCStations.statusDot(r) + '<span class="sr-name">' + (r.n || r.w) + '</span>' +
         '<span class="sr-key">' + r.k + '</span>' +
         '<span class="sr-meta">' + [r.t, r.c].filter(Boolean).join(" · ") + '</span>' +
@@ -46,38 +47,49 @@
     Array.prototype.forEach.call(panel.querySelectorAll(".sr"), function (el) {
       el.addEventListener("mousedown", function (e) { e.preventDefault(); go(matches[+el.getAttribute("data-i")]); });
     });
+    // Keep the interesting row in view of the (wheel-scrollable) panel. Manual scrollTop, not
+    // scrollIntoView: the latter also scrolls every ancestor, i.e. the page itself.
+    var tgt = panel.querySelector(".sr.sel");
+    if (tgt) {   // arrow keys: minimal scroll to keep the selection visible
+      if (tgt.offsetTop < panel.scrollTop) panel.scrollTop = tgt.offsetTop;
+      else if (tgt.offsetTop + tgt.offsetHeight > panel.scrollTop + panel.clientHeight)
+        panel.scrollTop = tgt.offsetTop + tgt.offsetHeight - panel.clientHeight;
+    } else if ((tgt = panel.querySelector(".sr.here"))) {   // browse mode: centre this station
+      panel.scrollTop = Math.max(0, tgt.offsetTop - (panel.clientHeight - tgt.offsetHeight) / 2);
+    } else {
+      panel.scrollTop = 0;
+    }
   }
 
   function update() {
     var q = box.value.trim().toLowerCase();
     sel = -1;
     if (!q) {
-      // Empty box on focus = "browse the neighbours": show the stations around this one, honouring
-      // the navbar filter if there is one, so browsing and searching are the same panel.
-      matches = neighbourhood();
+      // Empty box on focus = "browse the network": the WHOLE scoped station list, wheel-scrollable,
+      // centred on (and highlighting) the station being viewed. The old 15-row neighbourhood window
+      // made the scrollbar pointless -- there was nothing beyond it to scroll to.
+      matches = browseList();
       render();
       return;
     }
+    hereKey = null;
     matches = records.filter(function (r) { return r._s.indexOf(q) >= 0; });
     matches.sort(function (a, b) {
       var ra = rank(a, q), rb = rank(b, q);
       if (ra !== rb) return ra - rb;
       return (a.n || a.k).localeCompare(b.n || b.k);
     });
-    matches = matches.slice(0, 15);
     render();
   }
 
-  function neighbourhood() {
+  function browseList() {
     var navEl = document.getElementById("station-nav");
     var here = navEl && navEl.getAttribute("data-key");
     var fc = document.getElementById("f-country"), ft = document.getElementById("f-type");
     var c = fc ? fc.value : "", t = ft ? ft.value : "";
     var subset = records.filter(function (r) { return (!c || r.c === c) && (!t || r.t === t); });
-    if (!subset.length) return [];
-    var i = here ? subset.findIndex(function (r) { return r.k === here; }) : -1;
-    if (i < 0) return subset.slice(0, 15);
-    return subset.slice(Math.max(0, i - 7), Math.max(0, i - 7) + 15);
+    hereKey = (here && subset.some(function (r) { return r.k === here; })) ? here : null;
+    return subset;
   }
 
   box.addEventListener("input", update);

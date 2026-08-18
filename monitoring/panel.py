@@ -897,6 +897,11 @@ PANEL_CSS = r"""
    box-shadow:0 10px 30px rgba(20,40,60,.28); } }
  .dp-wrap .card { background:#fff; border:1px solid var(--dp-line); border-radius:10px; padding:9px; }
  .dp-wrap .card + .card { margin-top:12px; }
+ /* The host styles every .card with a 12px top margin. On #daily it COLLAPSES through .dp-wrap and
+    moves the whole wrapper down; inside the absolutely-positioned rail it cannot collapse, so the
+    calendar card started 12px below the daily card's top edge. Pin the rail's first card to the
+    rail top so the two cards' borders align. */
+ .dp-wrap .dp-rail > .card:first-child { margin-top:0; }
  .dp-wrap .toolbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
  .dp-wrap button { font:inherit; font-size:13px; padding:4px 11px; border:1px solid #c3ceda;
           background:#fff; border-radius:7px; cursor:pointer; color:var(--dp-ink); }
