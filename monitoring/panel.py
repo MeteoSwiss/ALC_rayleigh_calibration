@@ -1658,10 +1658,10 @@ function drawCBH(HK) {
               line:{color:'#c0392b', width:2}, marker:{size:6, color:'#c0392b'},
               hovertemplate:'base %{y:.2f} km<br>mean C %{x:.1f} %<extra></extra>' });
   }
-  const sub = pooled.n + ' scenes \\u00b7 ' + pooled.days.length + ' nights'
-            + (st.slope === null ? '' : ' \\u00b7 slope ' + (st.slope > 0 ? '+' : '')
+  const sub = pooled.n + ' scenes · ' + pooled.days.length + ' nights'
+            + (st.slope === null ? '' : ' · slope ' + (st.slope > 0 ? '+' : '')
                + st.slope.toFixed(1)
-               + (st.se === null ? '' : ' \\u00b1 ' + st.se.toFixed(1)) + ' %/km');
+               + (st.se === null ? '' : ' ± ' + st.se.toFixed(1)) + ' %/km');
   Plotly.newPlot('d_cbh', tr, Object.assign({}, LAY, { height:270, showlegend:false,
     shapes:[{ type:'line', yref:'paper', y0:0, y1:1, x0:100, x1:100,
               line:{color:'#444', width:1, dash:'dash'} }],
