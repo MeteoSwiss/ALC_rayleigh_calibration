@@ -1,6 +1,10 @@
 # v2.2 network release → interactive dashboard → EWC publish
 
-Plan only, written 2026-08-17. Nothing below has been executed. It covers the three things asked
+**STATUS: DONE — published and verified live on 2026-08-18 at 06:30.**
+Written 2026-08-17 as a plan; the sections below are kept as written, with execution notes added.
+See "Deployment record" at the end for what actually happened, including one self-inflicted outage.
+
+Plan written 2026-08-17. It covers the three things asked
 for: recompute every site on balfrin, rebuild the dashboard **with the interactive daily panel**,
 and publish to EWC — plus the one decision that has to be taken before any of it starts.
 
@@ -344,3 +348,52 @@ Finally, open three stations of different type and confirm the console says
 **Rollback**: the previous HTML is still on the VM until overwritten, and nothing in this release
 deletes a bucket object — restoring the old site is an rsync of the previous docroot, with the new
 payloads simply going unreferenced.
+
+---
+
+## Deployment record — 2026-08-18
+
+| artefact | result |
+|---|---|
+| calibration archive, 433 streams, 2025-01-01 → 2026-08-13 | v2.2, `version` stamped (220 / 1000) |
+| OmB | 429 caches / 426 CSVs |
+| sensitivity | **429 / 429** — was 15 before the empty-day fix |
+| per-day payloads | **263 574 files, 102 GB**, all 433 stations |
+| payloads in the object store | **263 574 objects — count verified equal** |
+| OmB + sensitivity images | re-uploaded, v2.2 vintage |
+| station pages | 433 rebuilt (434 live, one stale page left in place) |
+| site test tier, on the real site | **41 passed** |
+| live verification | panel draws from the bucket, period selector moves all 9 figures, cloud-base card renders beside the histogram |
+
+### Two things that were NOT in the plan and had to be solved live
+
+**1. The bucket sent no CORS header.** The panel `fetch()`es payloads cross-origin; the objects were
+already world-readable but browsers blocked the read (`TypeError: Failed to fetch`, verified in
+Chromium). `<img>` never needed CORS, so serving PNGs from this bucket had worked for years — the
+payload store is the first thing here fetched with XHR. Fixed with a GET/HEAD rule
+(`ops/cscs/bucket_cors.json`), applied on the operator's explicit instruction.
+
+**2. A self-inflicted outage of a few minutes.** The HTML was deployed by extracting a tarball built
+on balfrin, where files carry mode **640**. `tar` preserved that, nginx lost read access, and the
+site returned 403/404 until `chmod` restored 755/644. The publish path must therefore ALWAYS
+normalise permissions after extracting — see below. A snapshot of the previous docroot was taken
+first (`/home/hem/alc_pre_v22`), so rollback was one command away throughout.
+
+### Deploy command that is safe to repeat
+
+```bash
+scp -i ~/.ssh/EWC alc_v22_html.tgz hem@136.156.139.31:/home/hem/
+ssh -i ~/.ssh/EWC hem@136.156.139.31 'set -e
+  cp -a /var/www/alc $HOME/alc_pre_$(date +%Y%m%d)          # rollback point
+  tar -xzf ~/alc_v22_html.tgz -C /var/www/alc
+  find /var/www/alc -type d -exec chmod 755 {} +            # MANDATORY: the tarball carries 640
+  find /var/www/alc -type f -exec chmod 644 {} +'
+```
+
+### Left open
+
+* The daily cron on zueub434 still runs v2.0 and does not yet generate payloads — the operator's
+  step, and the reason the published site is a snapshot rather than a self-updating product.
+* One stale station page remains in the docroot (434 live vs 433 built); harmless, removed by the
+  first `--delete` publish.
+* `alc_pre_v22` snapshot on the VM should be deleted once the release is accepted.
