@@ -758,6 +758,9 @@ def daily_availability_rows(status_df: pd.DataFrame, cal_df: pd.DataFrame | None
     for m, c in cal_by_method.items():
         # one row per (date, method); keep the last row if a day somehow carries duplicates
         fmap = {t: f for t, f in zip(c["dt"], c["flag"])}
+        # The message is what separates "no night at this latitude" from "no data" -- both are
+        # written as flag 0 by the pipeline.
+        msgmap = ({t: m for t, m in zip(c["dt"], c["message"])} if "message" in c else {})
         z, cd = [], []
         for t in full:
             f = fmap.get(t)
@@ -765,7 +768,7 @@ def daily_availability_rows(status_df: pd.DataFrame, cal_df: pd.DataFrame | None
                 z.append(None)
                 cd.append(["—", "no calibration row"])
                 continue
-            k = config.cal_class(f)
+            k = config.cal_class(f, msgmap.get(t))
             z.append(cls_idx[k])
             cd.append([config.CAL_CLASS_LABELS[k], config.flag_label(f, m)])
         traces.append(go.Heatmap(

@@ -158,10 +158,11 @@ def quality_color(q) -> str:
 # (date, method) rows): calibrated 48.4 %, no usable scene 16.5 %, atmosphere 28.6 %, instrument
 # 0.94 %, retrieval 0.57 %, no data 1.5 %. "Instrument" gets a colour that stands out precisely
 # because it is rare AND actionable (dirty window / weak laser).
-CAL_CLASS_ORDER = ["ok", "noscene", "atmos", "retrieval", "instrument", "nodata"]
+CAL_CLASS_ORDER = ["ok", "noscene", "nonight", "atmos", "retrieval", "instrument", "nodata"]
 CAL_CLASS_LABELS = {
     "ok": "Calibrated",
     "noscene": "No usable scene",
+    "nonight": "No night at this latitude",
     "atmos": "Rejected — atmosphere",
     "retrieval": "Rejected — retrieval",
     "instrument": "Rejected — instrument",
@@ -172,6 +173,7 @@ CAL_CLASS_LABELS = {
 CAL_CLASS_SHORT = {
     "ok": "calibrated",
     "noscene": "no scene",
+    "nonight": "no night",
     "atmos": "atmosphere",
     "retrieval": "retrieval",
     "instrument": "instrument",
@@ -180,11 +182,20 @@ CAL_CLASS_SHORT = {
 CAL_CLASS_COLORS = {
     "ok": "#1a9850",          # same green as FLAG_COLORS[1]
     "noscene": "#f6e3a1",     # pale sand: expected, the sky's fault, not a defect
+    #: Twilight blue. A polar-summer day is NOT a failure and not missing data: the instrument
+    #: measured all day, there was simply no astronomical night to fit. At Hopen (76.5 N) this is
+    #: 300 days of 590, at Oslo 127 -- painting them the same grey as "instrument off" made a
+    #: latitude read as an outage.
+    "nonight": "#8fa4c8",
     "atmos": "#f0932b",
     "retrieval": "#d64545",
     "instrument": "#8e44ad",  # rare + actionable -> deliberately unlike the others
     "nodata": "#dfe3e8",
 }
+#: The pipeline writes flag 0 for BOTH "no measurement reached the retrieval" and "there was no
+#: night to work with"; only the message separates them, so cal_class() looks at it.
+NO_NIGHT_MARKER = "nighttime window"
+
 _CAL_CLASS_OF_FLAG = {
     1: "ok", 0.5: "ok",
     -1: "noscene",
@@ -196,14 +207,22 @@ _CAL_CLASS_OF_FLAG = {
 }
 
 
-def cal_class(flag) -> str:
+def cal_class(flag, message=None) -> str:
     """Display class for a daily calibration flag. Unknown flags read as a retrieval failure rather
-    than silently as 'calibrated' -- a new flag must never be able to look like a success."""
+    than silently as 'calibrated' -- a new flag must never be able to look like a success.
+
+    *message* separates the two things the pipeline both files under flag 0: a day where nothing
+    usable reached the retrieval, and a day where the sun never set far enough to give a night. The
+    second is geography, not a fault, and it dominates whole seasons at high latitude -- so it gets
+    its own class rather than being folded into "no data" beside genuinely dead instruments.
+    """
     try:
         f = float(flag)
     except (TypeError, ValueError):
         return "nodata"
     key = int(f) if float(f).is_integer() else f
+    if key == 0 and message and NO_NIGHT_MARKER in str(message):
+        return "nonight"
     return _CAL_CLASS_OF_FLAG.get(key, "retrieval")
 
 # --- Mean cloud cover (availability card, row 2) ---------------------------------------------------

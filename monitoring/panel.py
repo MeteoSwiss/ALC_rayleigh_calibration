@@ -723,6 +723,11 @@ def _run_one(rnc, stream: dict, d: datetime, method: str) -> dict:
                     "constant": cv if (np.isfinite(cv) and cv > 0) else None,
                     "uncertainty": r.get("uncertainty")}
             meta["flag_label"] = _flag_label(meta.get("flag"), method)
+            # The pipeline files a polar-summer night under flag 0 = "No data", which reads as a
+            # broken instrument on a day the instrument worked perfectly. Say what actually
+            # happened; the message is the only thing that distinguishes the two.
+            if "nighttime window" in str(meta.get("message") or "").lower():
+                meta["flag_label"] = "No night at this latitude"
             break
     plots = [c for c in CAPTURED if c["kind"] != "window"]
     wins = [c for c in CAPTURED if c["kind"] == "window"]
@@ -1146,7 +1151,18 @@ const CAL_COL = {
   // the PNG pipeline's internals, not anything the operator chooses by.
   fig:      { bg:'#d98c00', fg:'#ffffff', lbl:'rejected',
               tip:'The night did not calibrate — open it to see the curtain and the reason.' },
+  // Polar summer. The instrument measured all day; there was simply no astronomical night to fit,
+  // so this is neither a rejection nor missing data. At Hopen it is 300 days of 590.
+  nonight:  { bg:'#8fa4c8', fg:'#ffffff', lbl:'no night at this latitude',
+              tip:'The sun never set far enough for a night window — geography, not a fault.' },
 };
+// The pipeline files BOTH "nothing usable" and "no night" under flag 0; only the message separates
+// them.
+const isNoNight = p => !!(p && /nighttime window/i.test(p.message || ''));
+// Derived at RENDER time, never trusted from the payload: the payloads already published were
+// written when a polar-summer night was still labelled "No data", and regenerating 263 574 of them
+// to change one string would be absurd.
+const flagLabelOf = p => (isNoNight(p) ? 'No night at this latitude' : (p && p.flag_label) || '');
 function dayColour(d) {
   const present = D.methods.map(m => summaryOf(d, m)).filter(Boolean);
   if (!present.length) return null;
@@ -1154,6 +1170,7 @@ function dayColour(d) {
   // Every method reporting "no measurement" is NOT a rejection -- it is the grey no-data state the
   // legend has always advertised and nothing ever used.
   if (!okm.length && present.every(isNoData)) return null;
+  if (!okm.length && present.every(isNoNight)) return CAL_COL.nonight;
   if (!okm.length) return CAL_COL.fig;
   // "both" means every method CONFIGURED for this station, so a Rayleigh-only instrument (a CHM15k
   // never gets a cloud calibration -- it saturates in liquid cloud) still reads as a full success
@@ -1165,7 +1182,13 @@ function buildLegend() {
   const rows = D.methods.length > 1
     ? [CAL_COL.both, CAL_COL.rayleigh, CAL_COL.cloud]
     : [{ bg:CAL_COL.both.bg, lbl:'calibrated' }];
-  rows.push(CAL_COL.fig, { bg:'#f2f4f7', lbl:'no data' });
+  rows.push(CAL_COL.fig);
+  // Only advertise the polar-summer colour on stations that actually have such nights.
+  if (Object.values(D.index || {}).some(by => Object.values(by || {})
+        .some(v => v && /nighttime window/i.test(v.message || '')))) {
+    rows.push(CAL_COL.nonight);
+  }
+  rows.push({ bg:'#f2f4f7', lbl:'no data' });
   document.getElementById('legend').innerHTML = rows.map(r =>
     `<span title="${(r.tip || r.lbl).replace(/"/g, '&quot;')}">` +
     `<span class="sw" style="background:${r.bg};border:1px solid #dbe3ea"></span>${r.lbl}</span>`
@@ -1808,7 +1831,7 @@ function drawMsg(p) {
   else bits.push('<b>No calibration constant was produced</b>');
   const det = [];
   if (p.flag !== undefined && p.flag !== null)
-    det.push('flag <b>' + p.flag + '</b>' + (p.flag_label ? ' — ' + p.flag_label : ''));
+    det.push('flag <b>' + p.flag + '</b>' + (flagLabelOf(p) ? ' — ' + flagLabelOf(p) : ''));
   if (p.message) det.push('message: “' + p.message + '”');
   if (p.constant) det.push('C_L = ' + (+p.constant).toPrecision(5) +
     (p.uncertainty ? ' ± ' + (+p.uncertainty).toPrecision(3) : ''));
@@ -1824,7 +1847,7 @@ function drawFlags() {
     if (!p) return `<div style="margin:4px 0"><span class="chip na">${lbl}: not run</span></div>`;
     const cls = isOK(p) ? 'ok' : 'bad';
     return `<div style="margin:4px 0"><span class="chip ${cls}">${lbl}: flag ${p.flag}</span>` +
-      (p.flag_label ? `<div style="font-size:11px;color:#66707a;margin:2px 0 0 2px">${p.flag_label}</div>` : '') +
+      (flagLabelOf(p) ? `<div style="font-size:11px;color:#66707a;margin:2px 0 0 2px">${flagLabelOf(p)}</div>` : '') +
       `</div>`;
   }).join('');
 }
