@@ -112,7 +112,13 @@
   // into it -- the arrow keys, the calendar, a .diaglink in a table -- moves the panel too, with no
   // second implementation of any of them.
   function watchViewer() {
-    var labels = document.querySelectorAll(".diag-date");
+    // CALIBRATION viewers only. The classification gallery also carries a .diag-date, but its
+    // imaged-day set is its own (sparse, recent): following it let any figure click be overridden
+    // an instant later — the click's __diagJump made the classification viewer jumpNearest() to a
+    // DIFFERENT day, whose label change echoed back here and yanked the panel off the clicked
+    // night. The panel is the master; the classification curtain only follows.
+    var labels = document.querySelectorAll(
+      'section.diag[data-method="rayleigh"] .diag-date, section.diag[data-method="cloud"] .diag-date');
     if (!labels.length) return false;
     var obs = new MutationObserver(function () {
       for (var i = 0; i < labels.length; i++) {
@@ -222,29 +228,17 @@
       }
     });
   })();
-    // The availability card promises "click a day to load its diagnostic". With a diag viewer the
-    // click reaches the panel through the viewer's date label; without one, nothing happened --
-    // so the panel takes the click itself.
-    var avail = document.getElementById("fig-avail");
-    if (avail && avail.on
-        && !document.querySelector('section.diag[data-method="rayleigh"], '
-                                   + 'section.diag[data-method="cloud"]')) {
-      avail.on("plotly_click", function (ev) {
-        var pt = ev && ev.points && ev.points[0];
-        if (!pt || pt.x === undefined) return;
-        var dt = new Date(pt.x);
-        if (isNaN(+dt)) return;
-        var ds = dt.toISOString().slice(0, 10).replace(/-/g, "");
-        goDay(ds);
-      });
-    }
-
     // Clicking a point on any dated station figure opens that night below. The availability card
     // always advertised this; the C_L time series, the calibration-window chart and the Rayleigh
     // overlay carry one marker PER NIGHT, so a click on them means exactly one day and it is the
     // most direct way to inspect an outlier the operator has just spotted.
     function dayFromPoint(pt) {
       if (!pt || pt.x === undefined || pt.x === null) return null;
+      // Take the calendar date straight off an ISO-ish string: new Date() parses "YYYY-MM-DD
+      // HH:MM" as LOCAL time and toISOString() then shifts it back to UTC — east of Greenwich
+      // that lands a midnight point on the PREVIOUS day.
+      var m = String(pt.x).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (m) return m[1] + m[2] + m[3];
       var dt = new Date(pt.x);
       if (isNaN(+dt)) return null;
       return dt.toISOString().slice(0, 10).replace(/-/g, "");
@@ -269,7 +263,10 @@
         }
       });
     }
-    document.querySelectorAll('[id^="fig-ts-"], [id^="fig-aux-"], #fig-overlay')
+    // fig-avail rides the same wiring: it used to have its own handler with its own date parse,
+    // which reintroduced the local-time/UTC off-by-one that dayFromPoint exists to prevent (and
+    // it checked gd.on only once, without wireDayClick's retry).
+    document.querySelectorAll('#fig-avail, [id^="fig-ts-"], [id^="fig-aux-"], #fig-overlay')
       .forEach(function (gd) { wireDayClick(gd, 0); });
 
     // Dates in the "all calibrations" tables open that night in the panel (the per-calibration
