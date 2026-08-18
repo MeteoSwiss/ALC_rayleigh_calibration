@@ -88,14 +88,17 @@ from calibration.io.classification import (  # noqa: E402
 from calibration.io.data_loader import build_file_paths  # noqa: E402
 from calibration.io.instrument_day import load_instrument_day  # noqa: E402
 from calibration.flags import cloud_flag, flag_label, dominant_cloud_reject_flag  # noqa: E402
+from calibration.plotting import plot_cloud_diagnostics_compact  # noqa: E402
 from calibration.io.output import (  # noqa: E402
     VERSION_CODES, version_code, write_calibration_result, strip_calibration_method)  # noqa: E402
-from calibration.plotting import plot_cloud_diagnostics_compact  # noqa: E402
 from monitoring.kalman import kalman_best_estimate  # noqa: E402  (self-contained leaf)
 from monitoring import periods as periods_mod  # noqa: E402  (period set: auto years + active/frozen)
 
-# PLOTS=1 emits a diagnostic PNG per SUCCESSFUL calibration (Rayleigh via plot_main, cloud via
-# plot_cloud_diagnostics_compact). Env-controlled so it propagates to every per-stream subprocess.
+# Per-calibration diagnostic PNGs were retired operationally on 2026-08-18: ops/config.sh no
+# longer sets PLOTS, so the daily run produces none (the interactive daily panel renders those
+# nights from the JSON payloads instead). The PLOTS-gated plotting PATH must stay: the panel's
+# payload capture rides it -- monitoring/panel.py patches the plotting functions and sets PLOTS=1
+# in its own workers to intercept the figure data without writing any PNG to the archive.
 PLOT_ENABLED = os.environ.get("PLOTS", "0") == "1"
 # Candidate-algorithm override for the Rayleigh method (see _do_rayleigh). Empty -> options.json wins,
 # so the operational daily run is unaffected.
@@ -311,7 +314,7 @@ def _do_rayleigh(s, start, end, shared=None, screen=False):
     o.folder_output = OUT / key          # calibrate_rayleigh writes its NetCDF here (method 0)
     o.cams_folder = CAMS
     o.plot_all = False
-    o.plot_main = PLOT_ENABLED           # PLOTS=1 -> Rayleigh diagnostic PNG per success
+    o.plot_main = PLOT_ENABLED           # unset operationally; the panel's capture sets PLOTS=1
     # Method override, so a candidate algorithm can be run over the network WITHOUT editing the
     # operational options.json (which the daily cron also reads). ALC_MOLECULAR_PARAMS is a JSON
     # object merged into molecular_params, e.g. ALC_MOLECULAR_METHOD=eprof_v2.2
@@ -458,9 +461,9 @@ def _do_cloud(s, start, end, shared=None):
                     housekeeping=_HK_NAN, method=1,
                     version=VERSION_CODES["cloud_oconnor"],
                 )
-            # Diagnostic image for successes AND informative rejections (a cloud was present but a
-            # filter rejected it: flags -20..-26). Genuine clear sky (-1) / no data (0) get none --
-            # there is nothing to diagnose, and over a multi-year run that would be a huge image flood.
+            # PLOTS-gated diagnostic figure. Unset operationally (PNGs retired for the panel), but
+            # the path must remain: the panel's payload capture patches this module-level binding
+            # and rides the call for successes AND informative rejections (flags -20..-26).
             if PLOT_ENABLED and (ok or flag <= -20):
                 pdir = OUT / key / "plots" / info.wmo_id / ds[:4]
                 pdir.mkdir(parents=True, exist_ok=True)
@@ -1046,7 +1049,7 @@ def _do_classification(s, start, end, shared=None, force=False):
     """Cloudnet target classification (ceiloclass) per stream-day, on the shared read-once grid.
 
     Builds the classifier input from the coarse working grid (rcs_0 -> beta, + CL61 depolarization)
-    and the CAMS temperature -> writes a classification NetCDF (+ curtain PNG when PLOTS=1) under
+    and the CAMS temperature -> writes a classification NetCDF (+ curtain PNG) under
     ``<key>/classification/<wmo>/<year>/``. A day whose NetCDF already exists is skipped unless
     ``force`` (resume: the daily run's backfill days are not re-classified every day).
     ``ceiloclass``/``ceilopyter`` are OPTIONAL deps: if missing, log once and return. A day without
@@ -1100,9 +1103,9 @@ def _do_classification(s, start, end, shared=None, force=False):
                 wavelength=float(ceilo.wavelength), altitude=alt,
                 latitude=s["lat"], longitude=s["lon"],
                 location=s.get("site", key), source_files=[str(fp)])
-            if PLOT_ENABLED:
-                plot_classification(result, str(out_nc.with_suffix("")) + ".png",
-                                    beta=ceilo.beta, depol=ceilo.depol, histogram=True)
+            # Always emitted: the dashboard's classification card is fed by these curtains.
+            plot_classification(result, str(out_nc.with_suffix("")) + ".png",
+                                beta=ceilo.beta, depol=ceilo.depol, histogram=True)
             n_ok += 1
         except Exception as exc:  # noqa: BLE001 - a classification failure must not lose the run
             print(f"{key} {ds}: classification failed: {type(exc).__name__}: {exc}", flush=True)
@@ -1256,7 +1259,7 @@ def main():
     ap.add_argument("--classify", action="store_true",
                     help="also run the Cloudnet target classification (ceiloclass) per stream-day on "
                          "the shared read-once grid; writes <key>/classification/<wmo>/<year>/*.nc "
-                         "(+ curtain PNG when PLOTS=1). Needs the optional ceiloclass/ceilopyter deps "
+                         "(+ curtain PNG). Needs the optional ceiloclass/ceilopyter deps "
                          "and CAMS temperature; CHM15k/CL31/CL51/CL61 (no Mini-MPL reader).")
     ap.add_argument("--no-cal", action="store_true",
                     help="skip (re)calibration and REUSE the existing <key>_kalman.csv for "

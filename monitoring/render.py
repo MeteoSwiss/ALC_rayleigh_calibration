@@ -395,7 +395,7 @@ def _copy_diagnostics(diag: pd.DataFrame, cal: pd.DataFrame, out_dir: Path) -> d
     return _diag_index_from(d, cal)
 
 
-def _method_block(key, method, cal, kal, series, diags=None, op_all=None,
+def _method_block(key, method, cal, kal, series, op_all=None,
                   oldray_all=None, alt_m=None):
     """Figures + aggregates for one method section on a station page."""
     g_m = cal[(cal["key"] == key) & (cal["method"] == method)].sort_values("datetime")
@@ -416,8 +416,6 @@ def _method_block(key, method, cal, kal, series, diags=None, op_all=None,
             "aux": charts.fig_to_div(charts.aux_timeseries(g_m, method, alt_m), f"fig-aux-{safe}"),
         },
         recent=g_m.iloc[::-1].to_dict("records"),          # full archive, newest first (paginated)
-        diag_dates=sorted({d["date"] for d in (diags or [])}),  # dates that have a diagnostic image
-        diags=diags or [],
     )
 
 
@@ -852,7 +850,7 @@ def _render_one_station(key, ctx) -> str:
     meta = st[st["key"] == key].iloc[0].to_dict()
     methods = [m for m in config.METHOD_ORDER
                if len(cal[(cal["key"] == key) & (cal["method"] == m)])]
-    blocks = [_method_block(key, m, cal, kal, series, ctx.diag_by.get((key, m), []),
+    blocks = [_method_block(key, m, cal, kal, series,
                             ctx.op_all, ctx.oldray_all, alt_m=meta.get("alt")) for m in methods]
     # Cloudnet target classification curtains: a per-day gallery like the calibration diagnostics, but
     # not tied to a calibration method (it has no cal rows), so it renders as its own standalone card.

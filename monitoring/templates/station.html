@@ -43,7 +43,7 @@
 
 <section class="card availcard">
   <h2>Data availability, cloud cover &amp; calibration
-    <span class="muted">— per day; click a day to load its diagnostic below</span></h2>
+    <span class="muted">— per day; click a day to open that night in the daily panel</span></h2>
   {% if availability %}
   <div class="avail-legend">
     <b>Status</b>
@@ -141,44 +141,21 @@ window.__payloadBase = "{{ img_base }}data/";
     <span class="muted">{{ b.meta.success_rate | fmt('{:.0f}') }}% success · {{ b.meta.n_success or 0 }}/{{ b.meta.n_dates or 0 }} ·
     median {{ b.meta.median_cl | fmt('{:.4g}') }} · rel. unc {{ b.meta.median_rel_unc | fmt('{:.0f}') }}%
     {% if daily_panel %}· click a point to open that night{% endif %}</span></h2>
-  {% if b.diags %}
-  <section class="diag card" id="diag-{{ b.method }}" data-ts="fig-ts-{{ b.method }}"
-           data-key="{{ key }}" data-method="{{ b.method }}" data-itype="{{ meta.itype }}" tabindex="0">
-    <h3>Diagnostic — <span class="diag-date muted">latest</span>
-      <span class="diag-nav">
-        <button type="button" class="diag-prev" title="Previous valid calibration (←)">‹ prev cal</button>
-        <button type="button" class="diag-next" title="Next valid calibration (→)">next cal ›</button>
-        <button type="button" class="diag-up" title="Previous day, incl. rejected (Ctrl+←)">‹ day</button>
-        <button type="button" class="diag-down" title="Next day, incl. rejected (Ctrl+→)">day ›</button>
-        <button type="button" class="diag-flag" title="Flag this calibration for QC review — opens a comment box (shortcut 0). Quick-flag: 1 = aerosol, 2 = cloud, 3 = low signal. Saved in your browser; export via the widget at bottom-right">⚑ flag</button>
-      </span>
-      <span class="muted diag-hint">— <b>← →</b> valid calibrations, <b>Ctrl+← →</b> all days, <b>↑ ↓</b> change station,
-        <b>0</b> flag + note (<b>1</b> aerosol · <b>2</b> cloud · <b>3</b> low signal)
-        (<span class="cal-key cal-ok"></span> good calibration · <span class="cal-key cal-bad"></span> rejected)</span>
-    </h3>
-    <div class="diag-body">
-      <div class="diag-cal"></div>
-      <a class="diag-imglink" target="_blank" rel="noopener"><img class="diag-img" alt="calibration diagnostic"></a>
-    </div>
-    <div class="diag-status q-nodata" aria-live="polite"
-         title="Instrument status reported on this day (decoded from the status strings)"></div>
-    <script type="application/json" class="diag-data">{{ b.diags | tojson }}</script>
-  </section>
-  {% endif %}
-
+  {# The per-calibration diagnostic-PNG viewer was retired on 2026-08-18: the interactive daily
+     panel above renders the same nights from the JSON payloads. Table dates now open the panel. #}
   <div class="grid2">
     <div class="card">{{ b.figs.flags | safe }}</div>
     <div class="card">{{ b.figs.aux | safe }}</div>
   </div>
   <h3 class="muted">All {{ b.label }} calibrations ({{ b.recent | length }}) —
-    <span class="muted">click a date to load its diagnostic, click a flag for its meaning</span></h3>
+    <span class="muted">{% if daily_panel %}click a date to open that night in the daily panel, {% endif %}click a flag for its meaning</span></h3>
   <div class="tablewrap">
   <table class="stationtable paginated" data-page-size="15">
     <thead><tr><th>Date</th><th>Flag</th><th>C_L</th><th>Uncertainty</th><th>Extra</th><th>Message</th></tr></thead>
     <tbody>
     {% for r in b.recent %}
       <tr data-date="{{ r.date }}">
-        <td>{% if r.date in b.diag_dates %}<a class="diaglink" data-date="{{ r.date }}" href="#diag-{{ b.method }}">{{ r.date }}</a>{% else %}{{ r.date }}{% endif %}</td>
+        <td>{% if daily_panel %}<a class="paneldate" data-date="{{ r.date }}" href="#d={{ r.date }}">{{ r.date }}</a>{% else %}{{ r.date }}{% endif %}</td>
         <td><span class="dot" style="background:{{ flag_color(r.flag) }}"></span>
             <a class="flaglink" href="{{ base }}flags.html#flag-{{ flag_anchor(r.flag) }}">{{ r.flag }}</a>
             <span class="muted">{{ flag_label(r.flag, b.method) }}</span></td>

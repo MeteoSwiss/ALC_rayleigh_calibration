@@ -77,38 +77,6 @@ def _read_kalman_csv(path: Path, key: str) -> pd.DataFrame:
     return df[["key", "method", "date", "kalman", "kalman_std"]]
 
 
-def _diag_rows_from_csv(fullcal_dir: Path, keys) -> list:
-    """Enumerate the per-calibration diagnostic images from each key's <key>_cal.csv instead of from
-    the on-disk PNGs (used in IMAGES_IN_BUCKET mode, where the local PNGs may have been deleted).
-
-    Every cal row with method in {rayleigh, cloud} corresponds 1:1 to a diagnostic PNG, so the
-    complete diag list is data-driven. ``src`` is the *expected* PNG path the runner would have
-    written (<fullcal>/<key>/plots/<wmo>/<YYYY>/<date>_<wmo>_<method>_diag_compact.png); the renderer
-    still tries to stage it and silently skips any that no longer exist on disk."""
-    rows = []
-    for key in keys:
-        csv = Path(fullcal_dir) / key / f"{key}_cal.csv"
-        if not csv.exists():
-            continue
-        try:
-            df = pd.read_csv(csv, dtype={"date": str})
-        except Exception:
-            continue
-        if not len(df) or "date" not in df.columns:
-            continue
-        method_col = df["method"].astype(str) if "method" in df.columns else pd.Series(["rayleigh"] * len(df))
-        wmo = key.rsplit("_", 1)[0]
-        for date, method in zip(df["date"].astype(str), method_col):
-            if not date.isdigit() or len(date) < 4:
-                continue
-            if method not in ("rayleigh", "cloud"):
-                continue
-            src = (Path(fullcal_dir) / key / "plots" / wmo / date[:4]
-                   / f"{date}_{wmo}_{method}_diag_compact.png")
-            rows.append(dict(key=key, method=method, date=date, src=str(src)))
-    return rows
-
-
 def _classification_rows(fullcal_dir: Path, keys) -> list:
     """Cloudnet classification curtain rows (method='classification'), one per
     ``<key>/classification/<wmo>/<YYYY>/<key>_<YYYYMMDD>_classification.nc``. Enumerating the NetCDF
@@ -129,35 +97,12 @@ def _classification_rows(fullcal_dir: Path, keys) -> list:
 
 
 def _scan_diagnostics(fullcal_dir: Path, keys) -> pd.DataFrame:
-    """Find per-calibration diagnostic PNGs the runner emitted under <key>/plots/**/*.png.
-
-    Filenames are '<YYYYMMDD>_<wmo>_<method>_diag_compact.png'; we key each image by
-    (key, method, date) and keep its absolute source path for the renderer to copy in.
-
-    In IMAGES_IN_BUCKET mode the rows are derived from each key's <key>_cal.csv instead, so the diag
-    list survives even when the local PNGs have been deleted (they live in the bucket). The ``src``
-    path is the expected on-disk location; the renderer stages whatever still exists and skips the
-    rest."""
+    """Per-day image gallery rows. Since 2026-08-18 the per-calibration Rayleigh/cloud diagnostic
+    PNGs are retired (the interactive daily panel renders those nights from the JSON payloads), so
+    the only imaged product left is the Cloudnet classification curtain -- one row per
+    classification NetCDF, in both on-disk and IMAGES_IN_BUCKET modes."""
     cols = ["key", "method", "date", "src"]
-    if config.IMAGES_IN_BUCKET:
-        return pd.DataFrame(_diag_rows_from_csv(fullcal_dir, keys)
-                            + _classification_rows(fullcal_dir, keys), columns=cols)
-    rows = []
-    for key in keys:
-        pdir = Path(fullcal_dir) / key / "plots"
-        if not pdir.exists():
-            continue
-        for png in pdir.rglob("*_diag_compact.png"):
-            name = png.name
-            date = name[:8]
-            if not date.isdigit():
-                continue
-            method = "cloud" if "_cloud_diag" in name else ("rayleigh" if "_rayleigh_diag" in name else None)
-            if method is None:
-                continue
-            rows.append(dict(key=key, method=method, date=date, src=str(png)))
-    rows += _classification_rows(fullcal_dir, keys)   # per-day classification curtains
-    return pd.DataFrame(rows, columns=cols)
+    return pd.DataFrame(_classification_rows(fullcal_dir, keys), columns=cols)
 
 
 def _load_manifest(manifest_path: Path) -> pd.DataFrame:

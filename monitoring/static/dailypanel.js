@@ -272,6 +272,21 @@
     document.querySelectorAll('[id^="fig-ts-"], [id^="fig-aux-"], #fig-overlay')
       .forEach(function (gd) { wireDayClick(gd, 0); });
 
+    // Dates in the "all calibrations" tables open that night in the panel (the per-calibration
+    // diagnostic-PNG viewer they used to load was retired in favour of the panel).
+    document.addEventListener("click", function (e) {
+      var a = e.target && e.target.closest ? e.target.closest("a.paneldate[data-date]") : null;
+      if (!a) return;
+      e.preventDefault();
+      var ds = a.getAttribute("data-date");
+      goDay(ds);
+      if (typeof window.__diagJump === "function") {
+        try { window.__diagJump(ds); } catch (err) { /* classification card is optional */ }
+      }
+      var host = document.querySelector(".dp-wrap");
+      if (host) host.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+
     // Plain arrows: diag.js owns them when a CALIBRATION viewer exists; otherwise they would do
     // nothing at all, so the panel steps its own indexed days.
     if (!document.querySelector('section.diag[data-method="rayleigh"], '

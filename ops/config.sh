@@ -72,7 +72,9 @@ export ALC_DAY_LAG="${ALC_DAY_LAG:-1}"                              # process da
 export ALC_BACKFILL_DAYS="${ALC_BACKFILL_DAYS:-5}"                  # also (re)try the last N still-missing days -> self-healing after an outage
 export ALC_WORKERS="${ALC_WORKERS:-6}"                             # parallel streams (slow no-sudo server -> keep modest)
 export STREAM_TIMEOUT="${STREAM_TIMEOUT:-1800}"                     # per-stream subprocess timeout (seconds)
-export PLOTS="${PLOTS:-1}"                                          # 1 = render diagnostic PNGs (needed for the per-calibration viewer)
+# PLOTS was retired 2026-08-18: the per-calibration diagnostic PNGs are no longer produced (the
+# interactive daily panel renders those nights from JSON payloads); the classification curtain
+# PNG is now always emitted by the classify step.
 export ALC_CLASSIFY="${ALC_CLASSIFY:-1}"                           # 1 = also run Cloudnet target classification (needs ceiloclass in $ALC_VENV; set 1 after install)
 
 # --- network (no-sudo server behind a proxy): uncomment + set if CAMS download needs it ----------
