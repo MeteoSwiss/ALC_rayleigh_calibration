@@ -16,7 +16,7 @@ body {
 .logo { display: inline-flex; align-items: center; line-height: 0; margin-right: 4px; }
 .logo img, .logo svg { display: block; }
 .topbar .spacer { flex: 1; }
-.asof, .back { color: #d6e6f2; text-decoration: none; font-size: 13px; }
+.asof { color: #d6e6f2; text-decoration: none; font-size: 13px; }
 .navfilter { font: inherit; font-size: 12px; padding: 3px 7px; margin-left: 6px; max-width: 200px;
   background: #fff; color: var(--ink); border: 1px solid #2a5a82; border-radius: 6px; cursor: pointer; }
 
@@ -51,23 +51,93 @@ body {
 /* Previous/next station links: the neighbour's name is truncated so the crowded topbar keeps a
    fixed width whatever the station is called. */
 .navnb { display: inline-flex; align-items: center; gap: 4px; max-width: 190px; margin-left: 10px; }
+/* Station stepper (design 2B): the two neighbour links joined into one bordered control. */
+.navstep { display: inline-flex; align-items: center; border: 1px solid rgba(255,255,255,.28);
+  border-radius: 6px; overflow: hidden; flex: none; }
+.navstep .navnb { margin: 0; padding: 5px 9px; font-size: 11.5px; color: #fff; }
+.navstep .navnb + .navnb { border-left: 1px solid rgba(255,255,255,.22); }
+.navstep .navnb:hover { background: rgba(255,255,255,.10); text-decoration: none; }
+/* until stationnav.js fills the links, the empty bordered box must not render */
+.navstep:not(:has(.navnb:not([hidden]))) { display: none; }
 /* The UA's [hidden]{display:none} loses to ANY author display declaration, so without this rule a
    link stationnav.js hides (first/last station of a subset) keeps rendering — with the previous
    neighbour's stale name still in it. */
 .navnb[hidden] { display: none; }
 .navnb .nname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .navnb .ncl { color: #a9c7dd; font-size: 11px; flex: none; }
-.navhint { color: #a9c7dd; font-size: 11px; margin-left: 8px; }
+/* --- Station topbar, design 2B: identity, headline metrics and panels live IN the nav ---------- */
+.nvsep { width: 1px; height: 26px; background: rgba(255,255,255,.22); flex: none; }
+.nvid { display: flex; flex-direction: column; line-height: 1.3; min-width: 0; }
+.nvid-top { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.nvname { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; max-width: 280px; }
+.nvchip { font-size: 11px; font-weight: 600; background: rgba(255,255,255,.16); border-radius: 4px;
+  padding: 1px 7px; white-space: nowrap; flex: none; }
+.nvchip-warn { background: #f0b429; color: #3b2c00; }
+.nvchip-bad { background: #e05252; color: #fff; }
+.nvmeta { font-family: ui-monospace, "Cascadia Code", monospace; font-size: 11px;
+  color: rgba(255,255,255,.62); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nvstats { display: flex; align-items: center; gap: 18px; margin: 0 4px; flex: none; }
+.nvstat { display: flex; flex-direction: column; line-height: 1.25; }
+.nvl { font-family: ui-monospace, "Cascadia Code", monospace; font-size: 9.5px;
+  letter-spacing: .08em; text-transform: uppercase; color: rgba(255,255,255,.55); }
+.nvv { font-family: ui-monospace, "Cascadia Code", monospace; font-size: 13.5px; font-weight: 600;
+  color: #fff; font-variant-numeric: tabular-nums; }
+/* metric grading on the dark brand blue: a light ramp, not the tiles' dark ink colors */
+.nvv.nv-ok { color: #a8e6bf; }
+.nvv.nv-warn { color: #ffd98e; }
+.nvv.nv-bad { color: #ffb0a8; }
+.navsearch-sm input { width: 210px; }
+.nvbtn { font: inherit; color: #fff; font-size: 12.5px; border: 1px solid rgba(255,255,255,.28);
+  border-radius: 6px; padding: 5px 10px; background: transparent; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px; text-decoration: none; flex: none; }
+.nvbtn:hover { background: rgba(255,255,255,.10); }
+.nvcount { background: #f0b429; color: #3b2c00; font-size: 10.5px; font-weight: 700;
+  border-radius: 999px; padding: 1px 6px; }
+.nvcount[hidden] { display: none; }
+.nvinfo { color: #fff; border: 1px solid rgba(255,255,255,.28); border-radius: 50%; width: 28px;
+  height: 28px; display: inline-flex; align-items: center; justify-content: center; font-size: 13px;
+  font-weight: 600; font-family: Georgia, serif; text-decoration: none; flex: none; }
+.nvinfo:hover { background: rgba(255,255,255,.10); text-decoration: none; }
+/* dropdown panels (⇩ Data, ⚙ Filters) */
+.nvdrop { position: relative; }
+.nvpanel { position: absolute; top: calc(100% + 8px); right: 0; width: 300px; background: var(--card);
+  color: var(--ink); border: 1px solid #d0d8e2; border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(18,28,45,.18); padding: 14px; display: flex; flex-direction: column;
+  gap: 12px; z-index: 1000; }
+.nvpanel[hidden] { display: none; }
+.nvpl { font-family: ui-monospace, "Cascadia Code", monospace; font-size: 10px;
+  letter-spacing: .08em; text-transform: uppercase; color: #8a94a1; }
+.nvrow { display: flex; flex-direction: column; gap: 5px; }
+.nvrl { font-size: 11.5px; color: #6b7684; }
+.nvpills { display: flex; flex-wrap: wrap; gap: 4px; }
+.nvpill { font: inherit; font-size: 11.5px; padding: 4px 9px; border-radius: 5px;
+  border: 1px solid #d3dae2; background: #fff; color: #4c5866; cursor: pointer;
+  text-decoration: none; }
+.nvpill:hover { border-color: var(--accent); color: var(--accent); }
+.nvpill.on { border-color: var(--brand); background: var(--brand); color: #fff; font-weight: 600; }
+.nvselects { display: flex; gap: 6px; }
+.nvselects select { flex: 1; min-width: 0; font: inherit; font-size: 12px; padding: 6px 9px;
+  border: 1px solid #d3dae2; border-radius: 6px; color: #2c3947; background: #fff; cursor: pointer; }
+.nvnote { font-size: 11px; color: #8a94a1; }
+.nvnote[hidden] { display: none; }
+.nvplink { font-size: 12.5px; color: var(--accent); text-decoration: none; }
+.nvplink:hover { text-decoration: underline; }
+.nvhr { height: 1px; background: #e9edf2; }
 /* The station topbar carries logo + brand + search + flag link + summary link + 2 filters + 2
    neighbour links + the period selector: past ~1570 px of fixed content it must give ground rather
    than overflow. The bar wraps (above), and below a laptop width the least useful pieces shrink. */
 @media (max-width: 1500px) {
   .navsearch input { width: 200px; }
+  .navsearch-sm input { width: 160px; }
   .navnb { max-width: 132px; }
-  /* .navhint must never get display:none here: stationnav.js controls it with the `hidden`
-     attribute, which an author display rule would override -- the hint would then be stuck
-     visible (or invisible) regardless of the filter state. The bar wraps instead. */
+  /* the inline metrics are the first thing the crowded bar gives up (they repeat in the C_L tiles) */
+  .nvstats { display: none; }
+  /* .navhint / #nav-hint must never get display:none here: stationnav.js controls them with the
+     `hidden` attribute, which an author display rule would override -- the hint would then be
+     stuck visible (or invisible) regardless of the filter state. The bar wraps instead. */
 }
+@media (max-width: 1200px) { .nvmeta { display: none; } .nvname { max-width: 200px; } }
 @media (max-width: 1100px) { .topbar .brand { display: none; } }
 .navlink { color: #d6e6f2; text-decoration: none; font-size: 13px; margin-left: 6px; white-space: nowrap; }
 .navlink:hover { color: #fff; text-decoration: underline; }
@@ -91,7 +161,6 @@ body {
 .diaglink:hover { text-decoration: underline; }
 .flaglink { color: var(--ink); text-decoration: none; border-bottom: 1px dotted var(--muted); }
 .flaglink:hover { color: var(--accent); border-bottom-color: var(--accent); }
-.back:hover { text-decoration: underline; }
 .container { max-width: 1280px; margin: 0 auto; padding: 18px; }
 h1 { font-size: 22px; margin: 8px 0 4px; }
 h2 { font-size: 17px; margin: 22px 0 10px; }
@@ -115,21 +184,6 @@ h2 { font-size: 17px; margin: 22px 0 10px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
   padding: 8px; margin: 12px 0; }
 @media (max-width: 900px) { .grid2, .kpis { grid-template-columns: 1fr; } }
-
-/* Top-of-page action links (download NetCDF, CEDA L2) */
-.links { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
-.btnlink { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 600;
-  text-decoration: none; color: var(--brand); background: var(--card); border: 1px solid var(--line);
-  border-radius: 8px; padding: 5px 11px; }
-.btnlink:hover { border-color: var(--accent); color: var(--accent); background: #eef4fb; }
-
-/* Station metadata, inline in the subtitle (was a separate .metabar card) */
-.metainline { color: var(--muted); font-size: 13px; margin-left: 10px; white-space: nowrap; }
-.metainline b { font-weight: 600; margin-right: 3px; margin-left: 8px; }
-@media (max-width: 900px) {
-  .metainline { display: block; margin-left: 0; white-space: normal; }
-  .metainline b:first-child { margin-left: 0; }
-}
 
 /* Tables */
 table { border-collapse: collapse; width: 100%; background: var(--card);
@@ -288,10 +342,5 @@ td a:hover { text-decoration: underline; }
 .tile .tn { font-size:11.5px; color:#66707a; }
 
 .ndot-unknown { background:#c3ceda; }
-
-/* --- one-line station header: the fold belongs to the availability card, not the header --- */
-h1.oneline { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; margin:10px 0 8px;
-             font-size:19px; }
-h1.oneline .stmeta { font-size:13px; font-weight:400; color:var(--muted,#66707a); }
 
 .tablewrap { overflow-x: auto; }

@@ -28,7 +28,8 @@ _STATIC = Path(__file__).parent / "static"
 # stable + large -> left unversioned). Same list is used to copy them into the site.
 _VERSIONED_ASSETS = ("style.css", "table-sort.js", "paginate.js", "filter.js", "qcflag.js",
                      "diag.js", "histlink.js", "search.js", "rangesync.js",
-                     "stationindex.js", "stationnav.js", "dailypanel.js", "cltiles.js")
+                     "stationindex.js", "stationnav.js", "navmenus.js",
+                     "dailypanel.js", "cltiles.js")
 
 
 def _asset_version() -> str:
@@ -621,7 +622,12 @@ def _stage_netcdfs(fullcal_dir, key, out_dir: Path) -> list:
         except OSError:
             if not config.IMAGES_IN_BUCKET:
                 continue
-        out.append({"year": year, "fname": nc.name, "url": config.nc_url(key, nc.name)})
+        try:
+            size_mb = round(nc.stat().st_size / 1e6, 1)
+        except OSError:
+            size_mb = None
+        out.append({"year": year, "fname": nc.name, "url": config.nc_url(key, nc.name),
+                    "size_mb": size_mb})
     out.sort(key=lambda r: r["year"], reverse=True)
     return out
 
@@ -842,6 +848,26 @@ def _daily_panel(out_dir: Path, key: str, methods: list) -> dict | None:
             "n_days": len(index)}
 
 
+def _nav_stats(tiles: list) -> dict:
+    """Headline numbers for the station topbar (design 2B), read off the combined C_L tile set so
+    the bar and the tiles can never disagree. Tile colors map to grade classes ('ok'/'warn'/'bad')
+    because the bar sits on the dark brand blue and needs its own light color ramp."""
+    grade = {metrics.TILE_OK: "ok", metrics.TILE_WARN: "warn", metrics.TILE_BAD: "bad"}
+    out: dict = {}
+    for t in tiles or []:
+        lbl = str(t.get("label", ""))
+        cls = grade.get(t.get("color"), "")
+        if lbl.startswith("MEDIAN C_L"):
+            out["median"] = t["value"]
+        elif lbl.startswith("SPREAD"):
+            out["spread"], out["spread_cls"] = t["value"], cls
+        elif lbl.startswith("15-DAY DRIFT"):
+            out["drift"], out["drift_cls"] = t["value"], cls
+        elif lbl.startswith("LAST VALID"):
+            out["age"], out["age_date"], out["age_cls"] = t["value"], t.get("note", ""), cls
+    return out
+
+
 def _render_one_station(key, ctx) -> str:
     """Render and write one station's HTML page from the shared context *ctx*. Independent of every
     other station (writes only stations/<key>.html and stages that key's own OmB/sens PNGs), so it is
@@ -899,7 +925,15 @@ def _render_one_station(key, ctx) -> str:
     daily_panel = _daily_panel(ctx.out_dir, key, methods)
     hopkin = _hopkin_panel(ctx.out_dir, key) if "cloud" in methods else None
     _emit_hk_hourly(ctx.fullcal_dir, key, ctx.out_dir)
+    # Topbar (design 2B): headline metrics + staleness chip + the Data panel's nights/size line.
+    nav = _nav_stats(cl_tiles)
+    g_key = cal[cal["key"] == key]
+    nav["nights"] = int(g_key["date"].nunique())
+    nav["calibrated"] = int(g_key[g_key["success"] == 1]["date"].nunique())
+    nc_mb = sum(f["size_mb"] for f in nc_files if f.get("size_mb"))
+    nav["nc_mb"] = round(nc_mb, 1) if nc_mb else None
     html = ctx.tmpl.render(base="../", logo=ctx.logo, key=key, meta=meta, cal_classes=cal_classes,
+                           nav=nav,
                            img_base=config.IMG_BASE_URL,
                            daily_panel=daily_panel,
                            hopkin=hopkin, cl_tiles=cl_tiles,

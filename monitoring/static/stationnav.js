@@ -80,15 +80,15 @@
       a.title = rec.k + (rec.c ? " · " + rec.c : "") + (rec.t ? " · " + rec.t : "");
     });
     if (hint) {
-      if (!(c || t)) {
-        hint.hidden = true;
-      } else {
-        hint.hidden = false;
-        hint.textContent = !filtered.length
-          ? "no station matches this filter — arrows walk the full network"
-          : (!scoped ? "this station is outside the filter — arrows walk the full network"
-                     : filtered.length + " stations in filter");
-      }
+      // Always visible (it lives in the ⚙ panel next to the scope selects): the operator should
+      // see what the ↑ ↓ stepper walks even when no filter is set.
+      hint.hidden = false;
+      hint.textContent = !filtered.length
+        ? "No station matches this scope — the stepper walks the full network."
+        : (!scoped
+            ? "This station is outside the scope — the stepper walks the full network."
+            : "Scope drives the ↑ ↓ station stepper — " + filtered.length +
+              " station" + (filtered.length === 1 ? "" : "s") + ", this is #" + (i + 1) + ".");
     }
   }
 

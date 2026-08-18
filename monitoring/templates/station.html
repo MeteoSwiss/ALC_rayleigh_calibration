@@ -1,45 +1,111 @@
 {% extends "base.html" %}
 {% block title %}{{ key }} — calibration{% endblock %}
-{% block headerextra %}<a class="back" href="{{ base }}index.html">&larr; summary</a>
-<select id="f-country" class="navfilter" title="Filter the station navigation by country">
-  <option value="">All countries</option>
-  {% for c in countries %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
-</select>
-<select id="f-type" class="navfilter" title="Filter the station navigation by instrument type">
-  <option value="">All types</option>
-  {% for t in types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
-</select>
+{# Station topbar, design "2B": no second identity band below the nav -- the sticky bar itself
+   carries the station identity, the headline metrics, the prev/next stepper, the search box and
+   the Data / Filters panels, so name + ID never leave the screen while scrolling. #}
+{% block topbar %}
+<a class="logo" href="{{ base }}index.html" title="EUMETNET E-PROFILE — all stations">
+  {% if logo %}<img src="{{ base }}assets/{{ logo }}" alt="EUMETNET" height="24">
+  {% else %}<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="EUMETNET">
+    <rect width="24" height="24" rx="5" fill="#ffffff"/>
+    <text x="12" y="17" text-anchor="middle" fill="#0b3d61" font-family="Arial, sans-serif" font-size="15" font-weight="700">E</text>
+  </svg>{% endif %}
+</a>
+<a class="brand" href="{{ base }}index.html" title="All stations">E-PROFILE</a>
+<span class="nvsep"></span>
+<div class="nvid">
+  <div class="nvid-top">
+    <span class="nvname" title="{{ meta.institution or '' }}">{{ meta.name or key }}</span>
+    <span class="nvchip">{{ meta.itype }}</span>
+    {% for b in blocks %}<span class="nvchip">{{ b.label }}</span>{% endfor %}
+    {% if nav.age_cls in ('warn', 'bad') %}<span class="nvchip nvchip-{{ nav.age_cls }}"
+       title="last valid calibration {{ nav.age_date }}">{{ nav.age | replace(' ago', '') }} stale</span>{% endif %}
+  </div>
+  <span class="nvmeta">{{ key }} · {{ meta.country or "—" }} ·
+    {{ meta.lat | fmt('{:.3f}') }}, {{ meta.lon | fmt('{:.3f}') }} · {{ meta.alt | fmt('{:.0f}') }} m</span>
+</div>
+<span class="spacer"></span>
+{% if nav.median %}
+<div class="nvstats">
+  <div class="nvstat" title="median calibration constant over the successful nights"><span class="nvl">Median C_L</span>
+    <span class="nvv">{{ nav.median }}</span></div>
+  {% if nav.spread %}<div class="nvstat" title="P10–P90 spread of the successful C_L values"><span class="nvl">Spread</span>
+    <span class="nvv nv-{{ nav.spread_cls }}">{{ nav.spread }}</span></div>{% endif %}
+  {% if nav.drift %}<div class="nvstat" title="median of the last 15 d vs the preceding 45 d"><span class="nvl">Drift 15 d</span>
+    <span class="nvv nv-{{ nav.drift_cls }}">{{ nav.drift }}</span></div>{% endif %}
+</div>
+{% endif %}
 {# The prev/next links are filled in by stationnav.js from data/stations.json, because their target
-   depends on the filters above. Hidden until then to avoid a flash of empty links; #station-nav
-   below still carries the server-baked UNFILTERED neighbours so the Up/Down keys work in the
-   moments before the index arrives (stationnav.js overwrites both attributes once it does). #}
-<a class="back navnb" id="nav-prev" href="#" title="Previous station (Up arrow)" hidden></a>
-<a class="back navnb" id="nav-next" href="#" title="Next station (Down arrow)" hidden></a>
-<span class="muted navhint" id="nav-hint" hidden></span>
-{% if periods %}<select id="period-sel" class="navfilter" title="Time window — zooms every chart, the calibration list and the OmB/sensitivity panels">
-  {% for p in periods %}<option value="{{ p.key }}"{% if p.key == 'all' %} selected{% endif %}>{{ p.label }}</option>{% endfor %}
-</select>{% endif %}{% endblock %}
+   depends on the scope filters in the ⚙ panel. Hidden until then to avoid a flash of empty links;
+   #station-nav below still carries the server-baked UNFILTERED neighbours so the Up/Down keys work
+   in the moments before the index arrives (stationnav.js overwrites both attributes once it does). #}
+<div class="navstep">
+  <a class="navnb" id="nav-prev" href="#" title="Previous station (Up arrow)" hidden></a>
+  <a class="navnb" id="nav-next" href="#" title="Next station (Down arrow)" hidden></a>
+</div>
+<div class="navsearch navsearch-sm" data-base="{{ base }}" data-index="{{ base }}data/stations.json">
+  <input id="station-search" type="text" autocomplete="off" spellcheck="false"
+         placeholder="Search station…">
+  <div id="search-results" class="search-results" hidden></div>
+</div>
+{% if nc_files or ceda_url %}
+<div class="nvdrop">
+  <button type="button" class="nvbtn" id="nv-data-btn" aria-expanded="false"
+          aria-controls="nv-data-panel">&#8681; Data &#8964;</button>
+  <div class="nvpanel" id="nv-data-panel" hidden>
+    <span class="nvpl">Data</span>
+    {% if nc_files %}
+    <div class="nvrow"><span class="nvrl">Calibration NetCDF</span>
+      <div class="nvpills">
+        {% for f in nc_files %}<a class="nvpill" href="{{ f.url }}" download
+           title="{{ f.fname }}{% if f.size_mb %} · {{ f.size_mb }} MB{% endif %}">{{ f.year }} &#8681;</a>{% endfor %}
+      </div>
+    </div>
+    {% endif %}
+    {% if ceda_url %}<div class="nvhr"></div>
+    <a class="nvplink" href="{{ ceda_url }}" target="_blank" rel="noopener"
+       title="E-PROFILE L2 daily files for this instrument on the CEDA archive">&#8599; CEDA L2 daily files</a>{% endif %}
+    <span class="nvnote">{{ nav.nights or 0 }} nights · {{ nav.calibrated or 0 }} calibrated{% if nav.nc_mb %} · {{ nav.nc_mb }} MB{% endif %}</span>
+  </div>
+</div>
+{% endif %}
+<div class="nvdrop">
+  <button type="button" class="nvbtn" id="nv-filters-btn" aria-expanded="false"
+          aria-controls="nv-filters-panel">&#9881; Filters<span class="nvcount" id="nv-filter-count" hidden></span></button>
+  <div class="nvpanel" id="nv-filters-panel" hidden>
+    <span class="nvpl">View &amp; filters</span>
+    {% if periods %}
+    <div class="nvrow"><span class="nvrl">Period</span>
+      <div class="nvpills" id="period-pills">
+        {% for p in periods %}<button type="button" class="nvpill{% if p.key == 'all' %} on{% endif %}"
+           data-period="{{ p.key }}">{{ p.label }}</button>{% endfor %}
+      </div>
+      {# The pills proxy this select: rangesync.js owns it (window relayout + sessionStorage). #}
+      <select id="period-sel" hidden title="Time window — zooms every chart, the calibration list and the OmB/sensitivity panels">
+        {% for p in periods %}<option value="{{ p.key }}"{% if p.key == 'all' %} selected{% endif %}>{{ p.label }}</option>{% endfor %}
+      </select>
+    </div>
+    {% endif %}
+    <div class="nvrow"><span class="nvrl">Station list scope</span>
+      <div class="nvselects">
+        <select id="f-country" title="Scope the station stepper by country">
+          <option value="">All countries</option>
+          {% for c in countries %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+        </select>
+        <select id="f-type" title="Scope the station stepper by instrument type">
+          <option value="">All types</option>
+          {% for t in types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+        </select>
+      </div>
+      <span class="nvnote" id="nav-hint" hidden></span>
+    </div>
+  </div>
+</div>
+<a class="nvinfo" href="{{ base }}flags.html" title="Flag reference">i</a>
+{% endblock %}
 
 {% block content %}
 <div id="station-nav" data-key="{{ key }}" data-prev="{{ prev_station }}" data-next="{{ next_station }}" hidden></div>
-{# ONE line: the availability card and the calibration info must be visible on load, so the
-   header spends a single row. The WMO id is not repeated (the page title IS the WIGOS key) and
-   the institution lives in the tooltip of the site name. #}
-<h1 class="oneline">{{ key }} <span class="badge">{{ meta.itype }}</span>
-{% for b in blocks %}<span class="mtag mtag-{{ b.method }}">{{ b.label }}</span>{% endfor %}
-  <span class="stmeta" title="{{ meta.institution or '' }}">{{ meta.name or "—" }} ·
-    {{ meta.country or "—" }} · {{ meta.lat | fmt('{:.3f}') }}, {{ meta.lon | fmt('{:.3f}') }} ·
-    {{ meta.alt | fmt('{:.0f}') }} m</span>
-</h1>
-
-{% if nc_files or ceda_url %}
-<section class="links">
-  {% for f in nc_files %}<a class="btnlink" href="{{ f.url }}" download
-     title="Download the calibration NetCDF for {{ f.year }}">&#8681; Calibration NetCDF {{ f.year }}</a>{% endfor %}
-  {% if ceda_url %}<a class="btnlink" href="{{ ceda_url }}" target="_blank" rel="noopener"
-     title="E-PROFILE L2 daily files for this instrument on the CEDA archive">&#8599; CEDA L2 data</a>{% endif %}
-</section>
-{% endif %}
 
 <section class="card availcard">
   <h2>Data availability, cloud cover &amp; calibration
