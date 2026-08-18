@@ -675,6 +675,7 @@ def test_polar_summer_is_not_reported_as_missing_data():
     # the availability card must hand the message over, or the class can never be reached
     src = (REPO / "monitoring/charts.py").read_text(encoding="utf-8")
     assert "msgmap" in src and "cal_class(f, msgmap" in src
+    assert "no profiles in the nighttime window" in src,         "the hover detail must not still read 'No data' under 'No night at this latitude'"
     # and the panel must agree with the card
     panel = (REPO / "monitoring/panel.py").read_text(encoding="utf-8")
     assert "isNoNight" in panel and "CAL_COL.nonight" in panel

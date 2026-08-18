@@ -770,7 +770,12 @@ def daily_availability_rows(status_df: pd.DataFrame, cal_df: pd.DataFrame | None
                 continue
             k = config.cal_class(f, msgmap.get(t))
             z.append(cls_idx[k])
-            cd.append([config.CAL_CLASS_LABELS[k], config.flag_label(f, m)])
+            # The second hover line is the pipeline's own name for the flag, which for a
+            # polar-summer night is "No data" -- directly contradicting the first line. Quote the
+            # reason the pipeline actually recorded instead.
+            detail = ("no profiles in the nighttime window" if k == "nonight"
+                      else config.flag_label(f, m))
+            cd.append([config.CAL_CLASS_LABELS[k], detail])
         traces.append(go.Heatmap(
             x=list(full), y0=len(rows), dy=1, z=[z], customdata=[cd],
             colorscale=cls_scale, zmin=0, zmax=len(cls_order), showscale=False,
