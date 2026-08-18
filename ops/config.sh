@@ -29,10 +29,10 @@ export ALC_FULLCAL_DIR="/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.0
 # Rollback = re-comment these lines (or restore ops/config.sh.pre_v22_<date>), then rebuild the
 # dashboard WITHOUT --changed-only and publish.
 #
-# export ALC_FULLCAL_DIR="/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.2"
-# export ALC_MOLECULAR_METHOD="eprof_v2.2"
-# export ALC_WV_SPECTRUM='{"CL61": [910.55, 0.188]}'
-# export ALC_OPCOEFF_CSV="/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.2/operational_coefficients.csv"
+export ALC_FULLCAL_DIR="/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.2"
+export ALC_MOLECULAR_METHOD="eprof_v2.2"
+export ALC_WV_SPECTRUM='{"CL61": [910.55, 0.188]}'
+export ALC_OPCOEFF_CSV="/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.2/operational_coefficients.csv"
 #
 # Deliberately NOT set: ALC_DARK_PROFILE. The measured hood dark exists only at Payerne, and the
 # operator's decision (2026-08-17) is to keep the network homogeneous; Payerne CHM15k therefore
@@ -42,7 +42,7 @@ export ALC_FULLCAL_DIR="/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.0
 # --- dashboard (static site, served by your web server at a SEPARATE path) ----------------------
 export ALC_DASHBOARD_DIR="/data/zue/E_PROFILE/ALC/Calibration/dashboard"
 export ALC_L2_DIR="/data/zue/E_PROFILE/ALC/L2_FILES"                                                # optional: L2 archive for station name/country (blank = skip)
-export ALC_OPCOEFF_CSV="/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.0/operational_coefficients.csv"                                           # optional: operational-constant CSV for the comparison maps (blank = skip)
+export ALC_OPCOEFF_CSV="${ALC_OPCOEFF_CSV:-/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.0/operational_coefficients.csv}"                       # optional: operational-constant CSV for the comparison maps (blank = skip). Guarded: the v2.2 cutover block above must win.
 export ALC_OLDRAY_DIR="/data/pay/REM/ACQ/E_PROFILE_ALC/Calibration/rayleigh"   # old operational Rayleigh (v1) overlay
 export ALC_CEDA_LINKS="$ALC_REPO/validation/ceda_links.json"     # {key: CEDA-L2 URL} for the per-page CEDA link (committed; blank = skip). Refresh occasionally: python scripts/build_ceda_links.py --out "$ALC_CEDA_LINKS"
 
@@ -104,4 +104,4 @@ export CAMS_TMPDIR="$ALC_TMPDIR"
 # Daily-calibration panel payloads (interactive station pages). OFF until the panel is rolled out:
 # when =1, ops_daily regenerates data/<key>/<date>_<method>.json for panel-enabled stations after
 # each calibrated day, and publish.sh ships data/ on the S3 bucket leg.
-# export ALC_PANEL_PAYLOADS=1
+export ALC_PANEL_PAYLOADS=1
