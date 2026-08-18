@@ -258,6 +258,47 @@ is where your change comes in.
 
 ---
 
+## BLOCKER before the flip: the bucket sends no CORS header
+
+Everything is computed and uploaded, but the site must not go live until this is fixed.
+
+The panel `fetch()`es its per-day payloads from the object store. The objects are already
+world-readable — plain anonymous `curl` returns `200, application/json, 428 kB` — but the response
+carries **no `Access-Control-Allow-Origin`**, and a cross-origin `fetch()` therefore fails in every
+browser. Verified in a real Chromium, not inferred:
+
+```
+fetch("https://object-store.os-api.cci2.ecmwf.int/eprofile-alc-dashboard/data/.../20260607_cloud.json")
+-> TypeError: Failed to fetch          (origin http://127.0.0.1:8010)
+```
+
+`<img>` loads never needed this, which is why the existing bucket has worked for years serving the
+diagnostic PNGs. The payload store is the first thing on this site fetched with XHR.
+
+Flipping the HTML now would publish 433 pages whose headline feature is silently dead. So the flip
+is HELD. The fix is one command, and it grants browsers exactly the access anonymous `curl` already
+has — GET/HEAD only, no write, no new exposure:
+
+```bash
+aws --profile ewc --endpoint-url https://object-store.os-api.cci2.ecmwf.int s3api put-bucket-cors --bucket eprofile-alc-dashboard --cors-configuration file://ops/cscs/bucket_cors.json
+```
+
+Then confirm it took (the header must now appear):
+
+```bash
+curl -sSI -H "Origin: https://alc-calib.ch-meteoswiss-emermet.f.ewcloud.host" https://object-store.os-api.cci2.ecmwf.int/eprofile-alc-dashboard/data/0-20000-0-06610_C/20260607_cloud.json | grep -i access-control
+```
+
+I attempted this myself and it was refused by the permission classifier — bucket configuration is
+your call, not mine, so it is staged rather than applied. Reverting is
+`s3api delete-bucket-cors --bucket eprofile-alc-dashboard`.
+
+**If you would rather not touch the bucket policy**, the alternative is to serve the payloads
+same-origin by proxying `/data/` from the web VM's nginx to the object store — no bucket change, but
+it puts every payload byte through the VM. The bucket rule is the cheaper and more honest fix.
+
+---
+
 ## Morning hand-off — the one leg that cannot run on balfrin
 
 Everything else is automated (jobs 5123654 → 5124484 → 5124545). The HTML flip is held back on
@@ -283,8 +324,8 @@ Sanity-check the extracted site before it goes anywhere (the browser tier needs 
 ALC_SITE_DIR=/tmp/alc_v22_html python -m pytest tests/test_dashboard_site.py tests/test_dashboard_browser.py -q
 ```
 
-Push the HTML (~250 MB) to the web VM. No `--delete`: a stale page costs nothing, a wrongly deleted
-one costs a rebuild.
+Push the HTML (55 MB bundle) to the web VM — **only after the CORS rule above is in place**. No
+`--delete`: a stale page costs nothing, a wrongly deleted one costs a rebuild.
 
 ```bash
 wsl -- bash -lc "rsync -a -e 'ssh -i ~/.ssh/EWC' /tmp/alc_v22_html/ hem@136.156.139.31:/var/www/alc/"
