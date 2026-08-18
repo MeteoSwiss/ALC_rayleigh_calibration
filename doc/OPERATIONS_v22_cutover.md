@@ -1,214 +1,254 @@
-# v2.2 cutover runbook (host `zueub434`)
+# Bascule v2.2 sur zueub434 — instructions pour une session Claude Code
 
-Take the operational network from **`eprof_v2`** to **`eprof_v2.2` + the CL61 constructor
-water-vapour spectrum**, by transferring a recomputed archive from CSCS and flipping one config
-block. Written to be executed step by step on `zueub434` (by a human or a Claude Code session
-there); every step says what it changes and how to undo it.
+À exécuter **sur `zueub434.meteoswiss.ch`**, dans un clone du dépôt, branche `rayleigh-availability`
+(commit `c3386ba` ou plus récent). Le calcul est déjà fait : l'archive v2.2 complète existe sur
+balfrin et le dashboard est **déjà publié** sur EWC. Ce document ne fait que ramener le serveur
+opérationnel au même millésime et faire en sorte que le quotidien continue tout seul.
 
-**Companion documents.** `doc/OPERATIONS.md` (the standing ops guide — §10 Gotchas is assumed
-knowledge here), `doc/reports/phase4_network_validation.md` §5.1 (why v2.2 is deployable),
-`ops/cscs/alc_v22_release.sbatch` + `alc_v22_addons.sbatch` (how the archive was produced),
-`scripts/check_v22_archive.py` (the gates that authorise the flip).
-
-## What actually changes
-
-| | before | after |
-|---|---|---|
-| Rayleigh method | `eprof_v2` (version code 200) | `eprof_v2.2` (220) |
-| CL61 WV spectrum | 910.74 nm / FWHM 1.0 | **910.55 nm / FWHM 0.188** (constructor) |
-| CL31 / CL51 / CHM15k spectra | unchanged | unchanged |
-| dark correction | none | none (network kept homogeneous — operator decision) |
-| output tree | `ALC_calibration_v2.0/` | `ALC_calibration_v2.2/` |
-| `_status.csv` | 9 columns | +`mean_cloud_cover`, `cloud_cover_n`, `cloud_src` |
-
-**Not** in this release: what E-PROFILE distributes in L2. `operational_coefficients.csv` only
-*reads* the constants out of the distributed L2 files — nothing here writes back to the L1→L2 hub.
-Handing the new constants to the hub is a separate, coordinated step, and it is that step (not this
-one) that would take CL31/CL51 off their uncalibrated 1e8 default. No user notice is needed for the
-cutover itself.
-
-## Host gotchas that bite in this procedure
-
-- `sudo` is **stdin-only** to `rem`: `echo "cmd" | sudo /bin/su - rem`. There is no `sudo -u rem`.
-- `rem` runs with **`noclobber`**: inside its shell `>` refuses to overwrite. Use `>>`, `>|`, or a
-  fresh path.
-- `publish.sh` returning **rc=2** is the known rsync-protocol quirk and is **non-fatal**; the HTML
-  usually lands anyway. Re-run `bash ops/publish.sh` if the live site lags.
-- Internet egress (CAMS) needs the **8080 HTTP proxy**; the HTML rsync to the VM uses a **1080
-  SOCKS** ProxyCommand. Different ports — do not conflate them.
+> **Contexte à ne pas perdre.** Ce qui est publié aujourd'hui est un *instantané* : les 263 574
+> payloads du panneau interactif sont dans le bucket, mais le cron du serveur tourne encore
+> `eprof_v2` et ne génère aucun payload. Tant que l'étape 5 n'est pas faite, le site se fige
+> progressivement : les courbes avanceront (elles viennent des CSV) mais le panneau journalier
+> restera bloqué à la date de la release.
 
 ---
 
-## Step 0 — BLOCKING: establish what is actually deployed
-
-The repository does not record which branch the server runs, and `main` is stale (2 commits, wrong
-paths, `eprof_v1.2`). Find out before touching anything.
+## 0. Orientation (toujours en premier)
 
 ```bash
-source /data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.0_code/ops/config.sh
-cd "$ALC_REPO" && git rev-parse --abbrev-ref HEAD && git log --oneline -3 && git status --porcelain
-echo "$ALC_FULLCAL_DIR"; ls -d "$ALC_FULLCAL_DIR" | head
+source ops/config.sh                 # exporte tous les ALC_* + creds S3 + ALC_VENV
+source "$ALC_VENV/bin/activate"
+git -C "$ALC_REPO" rev-parse --abbrev-ref HEAD    # QUELLE branche est opérationnelle ?
 ```
 
-Record the branch and commit in the change log. If the working tree is dirty in tracked files, stop
-and find out why before continuing.
-
-## Step 1 — BLOCKING: rescue the live census
-
-`ALC_CENSUS` points **inside the git checkout** and `refresh_census.py` rewrites it every day, so a
-`git checkout`/`reset` would silently discard every station commissioned since the last commit.
+⚠️ **Avant tout `git checkout`/`pull` : sauvegarder le census.** `ALC_CENSUS` pointe *dans* le
+checkout et est réécrit chaque jour par `refresh_census.py` ; un checkout ferait disparaître toute
+station mise en service depuis le dernier commit.
 
 ```bash
-cp "$ALC_CENSUS" /data/zue/E_PROFILE/ALC/Calibration/census_live_$(date -u +%Y%m%d).json
-python - <<'PY'
-import json, os
-c = json.load(open(os.environ["ALC_CENSUS"]))
-rows = c if isinstance(c, list) else c.get("streams", [])
-print("live census streams:", len({r["wmo"] + "_" + r["ident"] for r in rows}))
-PY
-ls -d "$ALC_FULLCAL_DIR"/*/ | wc -l      # streams that actually have history
+cp -a "$ALC_CENSUS" ~/census_backup_$(date +%Y%m%d).json
 ```
 
-Keep both numbers. Step 4 refuses to proceed if the new archive does not cover them.
+Pour devenir `rem` : **uniquement** `sudo su - rem`, et les commandes passent par **STDIN**
+(`echo 'cmd' | sudo su - rem`), jamais `-c`. Le shell de `rem` a `noclobber` → `rm -f fichier`
+avant toute redirection sur un fichier existant.
 
-## Step 2 — Transfer the archive from CSCS
+---
 
-The recompute lives on balfrin at `/scratch/mch/mhrvo/E_PROFILE_calout_v22_rel`. **Scratch is
-periodically purged** — do this promptly after the run.
-
-```bash
-NEW=/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.2
-mkdir -p "$NEW"
-df -h /data/zue | tail -1        # ABORT if free space < 1.5x the size of ALC_calibration_v2.0
-rsync -a --info=progress2 balfrin:/scratch/mch/mhrvo/E_PROFILE_calout_v22_rel/ "$NEW/"
-```
-
-The `.npz` caches must come across. They are not optional: the daily runner compares cache against
-CSV and **skips** OmB/sensitivity rather than rebuilding, so a tree without them freezes those
-products permanently.
-
-```bash
-ls "$NEW"/*/_omb_cache.npz  | wc -l
-ls "$NEW"/*/_sens_cache.npz | wc -l
-ls -d "$NEW"/*/ | wc -l          # the three counts must agree
-```
-
-## Step 3 — Carry over what the recompute deliberately did not produce
-
-Both are method-independent, so copying them is correct rather than lazy.
-
-```bash
-OLD="$ALC_FULLCAL_DIR"
-# Cloudnet classification curtains: absent from the new tree; without this the whole gallery
-# disappears from the dashboard network-wide at the flip.
-for d in "$OLD"/*/classification; do
-  k=$(basename "$(dirname "$d")"); [ -d "$d" ] && cp -a "$d" "$NEW/$k/"
-done
-# Per-night diagnostic PNGs: NOT copied on purpose (they are ~100-200 GB and already served from
-# the S3 bucket). The daily run regenerates them from the flip date onward.
-```
-
-## Step 4 — Run the gates
+## 1. Récupérer le code
 
 ```bash
 cd "$ALC_REPO"
-python scripts/check_v22_archive.py \
-    --new "$NEW" \
-    --ref  balfrin:/scratch/... (copy the reference locally, or run this ON balfrin) \
-    --old "$OLD" \
-    --census "$ALC_CENSUS" \
-    --json /tmp/v22_gates.json
+git fetch origin && git checkout rayleigh-availability && git pull
+git log --oneline -1        # doit être >= c3386ba
 ```
 
-Exit 0 is the authorisation to flip. Anything else stops the procedure. `SKIPPED` is not a pass —
-supply the missing tree and re-run. In particular G3 must confirm that every stream in the **live**
-census and in the **current** tree exists in the new one; streams commissioned after the CSCS run
-will be missing and must be calibrated locally before the flip:
+Ce que ce code apporte et que l'ancien n'a pas :
+* la colonne `version` dans `CSV_FIELDS` (sans elle le dashboard ne sait pas nommer le millésime) ;
+* le correctif « jour vide » de la sensibilité (sans lui, 15 flux sur 434 produisent le produit) ;
+* le panneau journalier interactif + la carte C vs base de nuage ;
+* `window.__payloadBase` (le panneau va chercher ses données dans le bucket).
+
+---
+
+## 2. Transférer l'archive v2.2 depuis balfrin
+
+Depuis zueub434 (`ssh -n -o BatchMode=yes balfrin` fonctionne dans ce sens) :
+
+| | |
+|---|---|
+| source | `balfrin:/scratch/mch/mhrvo/E_PROFILE_calout_v22_rel` |
+| taille | **11 Go** (dont 2,8 Go de PNG OmB/sens, 957 Mo de CSV+npz+NetCDF) |
+| contenu | 434 flux, 429 `_omb_cache.npz`, 429 `_sens_cache.npz`, 1 686 NetCDF annuels |
 
 ```bash
-# example, for the stragglers G3 lists
-ALC_FULLCAL_DIR="$NEW" ALC_MOLECULAR_METHOD=eprof_v2.2 \
-ALC_WV_SPECTRUM='{"CL61": [910.55, 0.188]}' \
-python scripts/run_network_calibration.py --stream <key> --start 20250101 --end <D_END> \
-       --methods rayleigh,cloud --sens --omb --force
+DEST=/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.2
+mkdir -p "$DEST"
+rsync -a --partial --inplace --info=progress2 \
+  balfrin:/scratch/mch/mhrvo/E_PROFILE_calout_v22_rel/ "$DEST/"
 ```
 
-## Step 5 — Fill the seam (D_END → yesterday)
+**Les deux `.npz` par flux DOIVENT voyager.** Le garde-fou de régression du runner compare le cache
+au CSV et **saute** le produit au lieu de le reconstruire : une archive transférée sans ses caches
+fige OmB et la sensibilité *définitivement*.
 
-The CSCS archive ends at the date printed in `RUN_PROVENANCE.json`. Fill the remaining days on the
-server **under the same lock as the cron**, or two 433-stream runs will collide.
+**`classification/` n'est pas dans la nouvelle archive** (0 répertoire — c'est normal, ce produit ne
+dépend pas de la méthode et n'a pas été régénéré). Deux options, dans cet ordre de préférence :
+
+1. ne rien faire : le build liste les images de classification **dans le bucket** via
+   `_bucket_keys()` (vérifié : 570 objets pour la seule station Payerne A) ;
+2. si tu veux les avoir en local, les copier depuis l'ancienne archive :
+   `rsync -a <ancienne>/*/classification/ "$DEST"/…` — jamais les régénérer.
+
+Contrôle de complétude avant de continuer :
 
 ```bash
-flock -n /tmp/alc_daily.lock -c '
-  ALC_FULLCAL_DIR="'"$NEW"'" ALC_MOLECULAR_METHOD=eprof_v2.2 \
-  ALC_WV_SPECTRUM='"'"'{"CL61": [910.55, 0.188]}'"'"' \
-  python '"$ALC_REPO"'/ops/ops_daily.py --start <D_END+1> --end <yesterday> \
-         --no-dashboard --no-publish'
+for f in _cal.csv _kalman.csv _hk.csv _status.csv _omb.csv _sens.csv; do
+  echo -n "$f: "; ls "$DEST"/*/*$f 2>/dev/null | wc -l
+done
+echo -n "_omb_cache.npz: "; ls "$DEST"/*/_omb_cache.npz | wc -l
+echo -n "_sens_cache.npz: "; ls "$DEST"/*/_sens_cache.npz | wc -l   # doit valoir 429, pas 15
 ```
 
-Then re-run Step 4's gates. G4 (seam) in the plan is this check: pick 5 stations × 3 days near
-D_END, re-run them through the daily driver and confirm the flags match and |ΔC/C| < 0.1 %. Any
-larger difference must be attributed (the CSCS run used the 0.4° monthly CAMS plus dailies; the
-server uses its own daily cache) and written down here.
+---
 
-## Step 6 — Dry-run the dashboard OFF the live site
+## 3. La bascule : **une seule** édition de `ops/config.sh`
 
 ```bash
-ALC_FULLCAL_DIR="$NEW" ALC_DASHBOARD_DIR=/data/zue/E_PROFILE/ALC/Calibration/dashboard_v22_dryrun \
-python scripts/build_dashboard.py --fullcal "$NEW" --out /data/zue/.../dashboard_v22_dryrun
+cp -a ops/config.sh ops/config.sh.pre_v22_$(date +%Y%m%d)
 ```
 
-Expect ≥ 434 station pages and **zero** `REGRESSION-GUARD` lines. Open a few pages: the
-availability card should now carry the cloud-cover row, and the constants should look like the
-station's history, not like a step change on every stream.
-
-## Step 7 — THE FLIP
+Puis, dans **le même commit / la même édition** (jamais l'un sans l'autre) :
 
 ```bash
-cp "$ALC_REPO/ops/config.sh" "$ALC_REPO/ops/config.sh.pre_v22_$(date -u +%Y%m%d)"
-# uncomment the four lines of the "v2.2 CUTOVER BLOCK" -- all of them, together
-$EDITOR "$ALC_REPO/ops/config.sh"
-source "$ALC_REPO/ops/config.sh"
-echo "$ALC_FULLCAL_DIR"; echo "$ALC_MOLECULAR_METHOD"; echo "$ALC_WV_SPECTRUM"
+export ALC_MOLECULAR_METHOD=eprof_v2.2
+export ALC_WV_SPECTRUM='{"CL61": [910.55, 0.188]}'
+export ALC_FULLCAL_DIR=/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.2
 ```
 
-Then a **full** rebuild (never `--changed-only` across a tree change — the page set is regenerated
-from a different archive) and publish:
+⚠️ **Méthode et arbre de sortie basculent ensemble.** Avec la méthode en v2.2 et l'ancien arbre, le
+cron fusionne des millésimes dans les mêmes CSV et `_preserve_existing_rows` conserve les deux par
+(méthode, fenêtre) — **irréversible**.
+
+Ne pas toucher `options.json` (c'est `ops/config.sh` qui pilote l'opérationnel).
+Laisser `ALC_DARK_PROFILE` **non défini** (décision : réseau homogène).
+
+---
+
+## 4. Combler le trou D_END → hier
+
+L'archive s'arrête au **2026-08-13**. Il faut rattraper les jours suivants **sous le même `flock`
+que le cron**, sinon deux passes 433-flux se télescopent :
 
 ```bash
-rm -f "$ALC_DASHBOARD_DIR/.last_build"
-python scripts/build_dashboard.py --changed-only=false 2>/dev/null || \
-python scripts/build_dashboard.py
-bash ops/publish.sh          # rc=2 is the known non-fatal rsync quirk
+flock /var/lock/alc_daily.lock \
+  python scripts/run_network_calibration.py \
+    --start 20260814 --end $(date -u -d yesterday +%Y%m%d) \
+    --sens --omb --per-type 0 --ignore-coverage --workers 8
 ```
 
-## Step 8 — Rollback (rehearse this BEFORE you need it)
+(adapter le chemin du lock à celui qu'utilise `ops/run_daily.sh` — le vérifier d'abord).
 
-The repository had no rollback procedure; this is it. It restores config, not data, because the
-v2.0 tree was never written to.
+---
+
+## 5. Ajouter l'étape « payloads » au flux quotidien — **c'est l'étape qui rend le site vivant**
+
+Sans elle, le panneau interactif reste figé à la date de la release. Dans `ops/ops_daily.py`, entre
+l'étape *calibrate* et l'étape *build dashboard*, pour chaque jour cible :
 
 ```bash
-cp "$ALC_REPO/ops/config.sh.pre_v22_<date>" "$ALC_REPO/ops/config.sh"
-source "$ALC_REPO/ops/config.sh"
-rm -f "$ALC_DASHBOARD_DIR/.last_build"
-python scripts/build_dashboard.py && bash ops/publish.sh
+python scripts/build_station_dashboard.py \
+  $(for d in "$ALC_FULLCAL_DIR"/*/; do echo --key $(basename "$d"); done) \
+  --start <D> --end <D> \
+  --cal-dir "$ALC_FULLCAL_DIR" --l1-root "$ALC_L1_ROOT" \
+  --out "$ALC_DASH_DIR" --payloads --no-pages --workers 8
 ```
 
-The live site must show v2.0 numbers again within ~15 minutes. Gate G5 asks you to *execute* this
-once on the dry-run directory and flip forward again, so the procedure is proven rather than
-believed.
+Ordre de grandeur mesuré : **~456 payloads/jour, ~40 Mo/jour** (~15 Go/an), ~10,5 s CPU par payload.
 
-## Step 9 — Verify at D+1 and D+7
+Puis les pousser dans le bucket, avec le reste des images :
 
-- the 15:00 cron ran green, and its log shows `ALC_FULLCAL_DIR=.../ALC_calibration_v2.2`;
-- **zero** `REGRESSION-GUARD` lines (a single one means a `.npz` did not travel — copy it from
-  balfrin, never delete the CSV);
-- station page count stable, no station lost its history;
-- the new days' constants are continuous with the CSCS archive across the seam;
-- `operational_coefficients.csv` still updates (it reads the distributed L2 and is unaffected by
-  the flip — if it changes, something else did).
+```bash
+aws --profile ewc --endpoint-url "$ALC_S3_ENDPOINT" \
+    s3 sync "$ALC_DASH_DIR/data" "s3://$ALC_S3_BUCKET/data" --only-show-errors --size-only
+```
 
-## Deliberately out of scope
+À décider avec l'opérateur : **horizon de rétention**. Aujourd'hui le store grossit sans limite
+(~15 Go/an sur une base de 102 Go). Si un horizon est adopté, ajouter l'élagage des objets plus
+anciens que la fenêtre, sur le modèle de l'élagage des PNG diag déjà présent dans `publish.sh`.
 
-Uncertainty-weighted Kalman, the two-pass altitude correction, any network dC/dCBH correction,
-regenerating 12 months of diagnostic images, and handing the constants to the L1→L2 hub.
+---
+
+## 6. Le timer (cron **ou** systemd — vérifier lequel est réellement actif)
+
+```bash
+crontab -l | grep -i alc
+sudo systemctl list-timers | grep -i alc
+```
+
+Le dépôt documente `cron 0 15 * * *` → `ops/run_daily.sh`. Si c'est un **timer systemd** :
+
+```bash
+systemctl cat alc-daily.timer alc-daily.service    # lire AVANT d'éditer
+sudoedit /etc/systemd/system/alc-daily.service     # si l'unité doit pointer ailleurs
+sudo systemctl daemon-reload
+sudo systemctl restart alc-daily.timer
+systemctl status alc-daily.timer --no-pager
+```
+
+Contraintes à respecter quel que soit le mécanisme :
+* **après 03:30 UTC** — le L1 d'un jour n'arrive que le lendemain matin ; un déclenchement avant
+  l'aube ne trouve aucune donnée pour « hier » ;
+* **un seul run à la fois** (`flock`), sinon deux passes réseau se télescopent ;
+* garder `ALC_DAY_LAG=1` et `ALC_BACKFILL_DAYS=5` (auto-réparation).
+
+Il y a aussi un cron `18 18 * * *` de `hem` qui produisait l'overlay v13, **retiré du code en
+2026-07** : le supprimer de la crontab s'il existe encore.
+
+---
+
+## 7. Publier sur EWC
+
+Le bucket est **déjà** à jour (payloads + images OmB/sens v2.2) et **CORS est déjà configuré**
+(règle GET/HEAD, `ops/cscs/bucket_cors.json`) : ne pas la retirer, le panneau cesserait de charger
+ses données.
+
+Le seul piège du déploiement HTML, appris à la dure : **les permissions**.
+
+```bash
+bash ops/publish.sh          # images -> bucket, HTML -> VM
+```
+
+Si le HTML est déployé par extraction d'une archive construite ailleurs, **normaliser les droits**,
+sinon nginx renvoie 403/404 (une archive faite sur balfrin porte du 640) :
+
+```bash
+ssh -i ~/.ssh/EWC hem@136.156.139.31 '
+  find /var/www/alc -type d -exec chmod 755 {} + ;
+  find /var/www/alc -type f -exec chmod 644 {} +'
+```
+
+`ops/publish.sh` renvoie parfois **rc=2** sur le rsync HTML alors que le HTML est bien arrivé : si
+le site public est en retard, relancer `bash ops/publish.sh`, ne pas déboguer rc=2.
+
+---
+
+## 8. Vérification (le lendemain, puis à J+7)
+
+```bash
+grep -c REGRESSION-GUARD <log du build>        # doit valoir 0
+ls "$ALC_DASH_DIR"/stations/*.html | wc -l     # >= 434
+```
+
+Dans un navigateur, sur trois stations de types différents (CHM15k / CL31 / CL61) :
+* la console affiche `[ALC] rangesync ready` ;
+* le panneau journalier se dessine **et affiche la date d'hier** (c'est le test de l'étape 5) ;
+* changer la période affiche `unchanged: none` ;
+* les trois cartes du bas (OmB, classification, sensibilité) sont présentes.
+
+---
+
+## 9. Retour arrière
+
+```bash
+cp -a ops/config.sh.pre_v22_<date> ops/config.sh   # restaure méthode + spectre + arbre
+# rebuild COMPLET (jamais partiel avec rsync --delete), puis publish
+```
+
+Rien dans cette release ne supprime d'objet du bucket : l'ancien site redevient cohérent dès que
+son HTML est restauré, les payloads v2.2 restant simplement non référencés. Un instantané du
+docroot d'avant bascule existe déjà sur la VM : `/home/hem/alc_pre_v22` (à supprimer une fois la
+release acceptée).
+
+---
+
+## Ce qu'il ne faut PAS faire
+
+* ne pas régénérer `classification/` (indépendant de la méthode, coûteux, déjà dans le bucket) ;
+* ne pas transférer l'archive **sans** les `.npz` (fige OmB et la sensibilité pour toujours) ;
+* ne pas basculer la méthode sans basculer l'arbre dans la même édition ;
+* ne pas écrire dans `/mnt/amaroc_data/alc_calib` (ancien emplacement, plafond d'inodes) ;
+* ne pas retirer la règle CORS du bucket ;
+* ne pas livrer les constantes au hub L1→L2 : c'est une étape coordonnée **séparée**, avec préavis
+  aux utilisateurs, et c'est elle — pas cette release — qui fera quitter aux CL31/CL51 leur
+  défaut 1e8.
