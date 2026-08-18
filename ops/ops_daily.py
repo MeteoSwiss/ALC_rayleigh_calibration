@@ -165,6 +165,12 @@ def update_panel_payloads(days) -> None:
            "--l1-root", os.environ.get("ALC_L1_ROOT", ""),
            "--out", str(DASHBOARD_DIR), "--payloads", "--no-pages", "--force",
            "--workers", os.environ.get("ALC_PANEL_WORKERS", "8")]
+    # Metadata fallback for streams with no L1 left on disk (silent station, pruned archive):
+    # without --db the builder sys.exits on the FIRST such stream and the whole night's payload
+    # batch is lost (seen 2026-08-18 with 0-20000-0-07530_A).
+    db = Path(DASHBOARD_DIR) / "calib_index.sqlite"
+    if db.exists():
+        cmd += ["--db", str(db)]
     for k in keys:
         cmd += ["--key", k]
     log(f"  panel payloads: {len(keys)} stations, {min(days)}..{max(days)}")
