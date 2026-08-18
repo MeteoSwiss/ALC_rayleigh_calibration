@@ -656,3 +656,30 @@ def test_sensitivity_survives_an_empty_day():
     j = src.index("sensitivity_over_period(", i)
     assert 'np.size(data["time"])' in src[i:j], \
         "the sens day loop must skip empty days before calling the kernel"
+
+
+def test_polar_summer_is_not_reported_as_missing_data():
+    """Oslo (59.9 N) shows 127 days of 589 with no calibration, Hopen (76.5 N) 300 of 590 — every
+    one of them written by the pipeline as flag 0 "No data" with the message "No profiles in
+    nighttime window". The instrument measured all day; there was simply no astronomical night to
+    fit. Painting those days the same grey as a dead instrument made a LATITUDE read as an outage,
+    so they get their own class."""
+    from monitoring import config as C
+    assert C.cal_class(0) == "nodata", "flag 0 with no message stays 'no data'"
+    assert C.cal_class(0, "No profiles in nighttime window") == "nonight"
+    assert C.cal_class(-1, "No profiles in nighttime window") == "noscene", \
+        "only flag 0 is ambiguous; a real rejection must keep its own class"
+    assert "nonight" in C.CAL_CLASS_ORDER
+    assert C.CAL_CLASS_COLORS["nonight"] != C.CAL_CLASS_COLORS["nodata"], \
+        "the whole point is that it must not look like missing data"
+    # the availability card must hand the message over, or the class can never be reached
+    src = (REPO / "monitoring/charts.py").read_text(encoding="utf-8")
+    assert "msgmap" in src and "cal_class(f, msgmap" in src
+    assert "no profiles in the nighttime window" in src,         "the hover detail must not still read 'No data' under 'No night at this latitude'"
+    # and the panel must agree with the card
+    panel = (REPO / "monitoring/panel.py").read_text(encoding="utf-8")
+    assert "isNoNight" in panel and "CAL_COL.nonight" in panel
+    assert "No night at this latitude" in panel, "the day's verdict must not read 'No data'"
+    # Derived at render time, so the payloads ALREADY published (written with the old label) are
+    # corrected without regenerating 263 574 files for one string.
+    assert "flagLabelOf" in panel and "p.flag_label ? " not in panel,         "the label must be derived from the message, not read straight from the payload"
