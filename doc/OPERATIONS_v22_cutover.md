@@ -35,13 +35,24 @@ avant toute redirection sur un fichier existant.
 
 ---
 
-## 1. Récupérer le code
+## 1. Mettre à jour le code (il est DÉJÀ sur zueub434)
+
+Le dépôt opérationnel vit sur le serveur : **rien ne se transfère depuis balfrin côté code**, c'est
+un simple `git pull` dans le clone existant. Balfrin n'a servi qu'au calcul, et seules les
+**données** en viennent (étape 2).
 
 ```bash
 cd "$ALC_REPO"
-git fetch origin && git checkout rayleigh-availability && git pull
-git log --oneline -1        # doit être >= c3386ba
+git fetch origin
+git rev-parse --abbrev-ref HEAD          # branche réellement déployée ?
+git checkout rayleigh-availability && git pull
+git log --oneline -1                     # doit être >= 955efb4
 ```
+
+⚠️ Si le clone est sur une autre branche (`main` est gelée et très en retard — chemins `/data/pay`,
+`eprof_v1.2`, pas de `publish.sh`), **ne pas basculer de branche à l'aveugle** : vérifier d'abord ce
+que le cron lance réellement, et décider avec l'opérateur si on bascule la branche ou si on
+rapatrie les commits. Une bascule de branche change aussi le census (voir §0).
 
 Ce que ce code apporte et que l'ancien n'a pas :
 * la colonne `version` dans `CSV_FIELDS` (sans elle le dashboard ne sait pas nommer le millésime) ;
