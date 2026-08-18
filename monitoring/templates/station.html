@@ -18,13 +18,16 @@
     <span class="nvname" title="{{ meta.institution or '' }}">{{ meta.name or key }}</span>
     <span class="nvchip">{{ meta.itype }}</span>
     {% for b in blocks %}<span class="nvchip">{{ b.label }}</span>{% endfor %}
-    {% if nav.age_cls in ('warn', 'bad') %}<span class="nvchip nvchip-{{ nav.age_cls }}"
-       title="last valid calibration {{ nav.age_date }}">{{ nav.age | replace(' ago', '') }} stale</span>{% endif %}
   </div>
   <span class="nvmeta">{{ key }} · {{ meta.country or "—" }} ·
     {{ meta.lat | fmt('{:.3f}') }}, {{ meta.lon | fmt('{:.3f}') }} · {{ meta.alt | fmt('{:.0f}') }} m</span>
 </div>
 <span class="spacer"></span>
+{# Dynamic health lives together on the right: staleness chip against the metrics (the identity
+   block on the left stays purely static). Kept OUTSIDE .nvstats so it survives the narrow-screen
+   collapse of the metric columns. #}
+{% if nav.age_cls in ('warn', 'bad') %}<span class="nvchip nvchip-{{ nav.age_cls }}"
+   title="last valid calibration {{ nav.age_date }}">{{ nav.age | replace(' ago', '') }} stale</span>{% endif %}
 {% if nav.median %}
 <div class="nvstats">
   <div class="nvstat" title="median calibration constant over the successful nights"><span class="nvl">Median C_L</span>

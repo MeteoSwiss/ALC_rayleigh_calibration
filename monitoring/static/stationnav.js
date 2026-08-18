@@ -32,9 +32,10 @@
 
   function label(rec, arrow) {
     if (!rec) return "";
+    // No status LED here (it stays in the search panel): the stepper is pure navigation, and the
+    // dot crowded the two compact buttons.
     var cl = window.ALCStations.clLabel(rec, window.ALCStations.bestMethod(rec));
-    return arrow + " " + window.ALCStations.statusDot(rec) +
-      '<span class="nname">' + (rec.n || rec.k) + "</span>" +
+    return arrow + ' <span class="nname">' + (rec.n || rec.k) + "</span>" +
       (cl ? '<span class="ncl">' + cl + "</span>" : "");
   }
 
