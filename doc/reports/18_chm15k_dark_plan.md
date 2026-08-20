@@ -163,3 +163,23 @@ diurnal temperature cycles, free in the archive. It becomes the first P1-reducti
 after the Payerne validation. Exeter stays classified as a detector-fault era (fig22).
 
 ![P1 results](figs_remote_dark/fig23_p1_results.png)
+
+**Case quicklooks + the cover / snow / fog / fault discrimination (fig24).** Operator ground
+truth folded in: Kleine Scheidegg NEVER hosted a hood - all its flagged days are snow - and it
+becomes the negative-control family. The six pcolor panels give the recipe:
+
+| signature | cover/hood | snow on window | fault | (fog) |
+|---|---|---|---|---|
+| first gates | DARK (nothing scattered back; Berus) | BRIGHT x1e3-1e5 (pulse scatters off snow; KLS 2019 x217593) | dead | bright fog layer, structured top |
+| above 1 km | dark / pure noise speckle (Payerne telescope-only keeps live noise) | attenuated noise | nothing at all | attenuated |
+| window_transmission | -2 (invalid) on full covers | degraded-but-alive (82-101, variable) | -2 | normal-ish |
+| error_ext | "Signal values null/void" (Berus 52 % = covered fraction) or benign "max range" warning (Payerne) | "Max. detection range cannot be determined" (KLS 88 %) | "Signal null/void" 100 % all day | SCI / VV codes |
+| time pattern | consecutive days, season-agnostic | regional synchrony, winter, intermittent (melts) | consecutive until repair | diurnal lifecycle |
+
+Edge case documented: deep alpine burial (KLS 2023-12-03) can null even the first gates and
+mimic a cover in the profile alone - there the window_transmission (82, not -2), the warning-
+type error bits and the alpine-winter context decide. Caveat: transition-day aggregate ratios
+mix normal and event segments (Berus x44509 is driven by its normal morning) - the production
+verifier must compute discriminators on the flagged SEGMENT.
+
+![Case quicklooks](figs_remote_dark/fig24_cases_pcolor.png)
