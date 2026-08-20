@@ -106,3 +106,20 @@ cases second; (ii) Messina goes to the operator-notification list (laser end-of-
 any covered night there should wait until after servicing.
 
 ![Messina inspection](figs_remote_dark/fig21_MESSINA.png)
+
+**Second flagged unit — PLOVDIV_UNI (0-100-20000-000627_A, bound +402 %), fig21b.** The
+opposite pathology to Messina, and the pair validates the triage cross-check by example:
+
+- noise floor FLAT over 20 months (healthy laser) - not a degradation case;
+- one era step in Jan-2025: the first days sit x1e11 away in units (firmware/processing
+  change) - era-key any dark work from ~2025-01-15;
+- the measured signal saturates on a constant positive PEDESTAL above ~7 km where the
+  molecular should keep decaying; the pedestal/molecular crossing sits right at the 4.5-6.5 km
+  fit window, so the fit splits between pedestal and atmosphere -> bound +402 % with an
+  otherwise stable constant series.
+
+A fixed pedestal on a healthy unit is exactly what a covered night measures directly ->
+Plovdiv goes on the P2 campaign list (era-keyed), and its stability makes it a good first
+target. Contrast card: Messina = maintenance first; Plovdiv = campaign first.
+
+![Plovdiv inspection](figs_remote_dark/fig21_PLOVDIV.png)
