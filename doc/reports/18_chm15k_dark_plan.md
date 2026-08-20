@@ -183,3 +183,14 @@ mix normal and event segments (Berus x44509 is driven by its normal morning) - t
 verifier must compute discriminators on the flagged SEGMENT.
 
 ![Case quicklooks](figs_remote_dark/fig24_cases_pcolor.png)
+
+**Correction (operator's catch): the synchronised NL family is NOT snow — it is clean-air
+false positives.** Schiphol 2025-12-25 shows a perfectly visible boundary layer; it flagged
+because the detection band starts at 400 m and that day the whole BL sat BELOW it (p95|P|:
+161 at 0-400 m, 0.32 at 0.4-1 km, 0.028 = noise at 1-3 km) with zero clouds -> band ratio
+0.127 < 0.15. The NL-wide Christmas synchrony is a shallow stable winter airmass, not snow on
+windows. Consequence, now part of the verifier: the FIRST-GATES VETO - a true cover nulls the
+0-400 m gates too (Berus: dark; Payerne hood: dark), weather never does (here x161). The
+sweep's summary CSV lacks a 0-400 m column, so the veto runs in the per-candidate
+verification pass (226 days, cheap) and the column is added to future sweeps. The manually
+verified cases (Berus TRUE COVER, Exeter fault, Payerne control, KLS snow) are unaffected.
