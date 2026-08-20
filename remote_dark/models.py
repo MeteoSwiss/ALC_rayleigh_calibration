@@ -8,8 +8,10 @@ handful of parameters whose SHAPES come from the electronics:
   CL31 / CL51  P(z) = c + Σ_k A_k · exp(−z/τ_k) · sin(2π z/λ_k + φ_k)    (K under-damped resonances
                + a range-flat offset; the hood physical-model work found K=2: AC-coupling ring +
                transmitter ripple, and the network-offset work showed the flat part is real)
-  CHM15k       P(z) = −A · exp(−z/τ) + c                                 (firmware background
-               over-subtraction; the "cuvette" in rcs view is this times z²)
+  CHM15k       P(z) = −A · (z/1km)^k · exp(−z/τ) + c                       (PEAKED: the hood P-view
+               rises to a broad minimum at 1–4 km then decays and overshoots positive ~9–12 km; a
+               monotone exponential cannot peak, which is what broke the session-1 prior. Fit from
+               1 km up: below that the hood shows a +P overlap-region spike that is NOT dark.)
   CL61         b(z) = s · template(z)                                    (the hood shape itself with
                a free amplitude — the v4 θ-projection formalised; the CL61 dark is small and
                type-common, Looschelders 2025)
@@ -33,8 +35,11 @@ from remote_dark import hood
 
 #: Fit band per type (m). Below the floor the hood itself is transient-contaminated; above the
 #: ceiling the truth is pure noise. CL31 range ends at 7.7 km; CL61 structure lives <1.5 km.
+#: CL61 spans the full range: its hood dark continues (weakly, in rcs view) far above the
+#: near-range structure, and a template cut at 3 km left the M1 amplitude fit with nothing to
+#: match inside the Rayleigh window -- the template amplitude collapsed to ~0 (session 1 bug).
 FIT_BAND = {"CL31": (60.0, 7000.0), "CL51": (60.0, 7000.0),
-            "CHM15k": (200.0, 12000.0), "CL61": (10.0, 3000.0)}
+            "CHM15k": (1000.0, 15000.0), "CL61": (10.0, 15000.0)}
 
 
 # ------------------------------------------------------------------------------------ families ---
@@ -53,9 +58,15 @@ def damped_sinusoids(z, p, K):
 
 
 def negexp(z, p):
-    """−A exp(−z/τ) + c — the CHM15k over-subtraction family, P-view."""
+    """−A exp(−z/τ) + c — kept for reference; superseded by gexp for CHM15k."""
     A, tau, c = p
     return -A * np.exp(-z / tau) + c
+
+
+def gexp(z, p):
+    """−A (z/1km)^k exp(−z/τ) + c — the PEAKED CHM15k family (P-view). Peak at z = k·τ."""
+    A, k, tau, c = p
+    return -A * (z / 1000.0) ** k * np.exp(-z / tau) + c
 
 
 class Family:
@@ -69,6 +80,8 @@ class Family:
             return damped_sinusoids(z, self.params, 2)
         if self.kind == "negexp":
             return negexp(z, self.params)
+        if self.kind == "gexp":
+            return gexp(z, self.params)
         if self.kind == "template":
             t = np.interp(z, self.meta["tpl_rng"], self.meta["tpl_p"], left=0.0, right=0.0)
             return self.params[0] * t
@@ -131,10 +144,19 @@ def fit_family(itype: str, rng: np.ndarray, b_raw: np.ndarray, sem: np.ndarray) 
                     best = r
         fam = Family(itype, "damped2", best.x, {})
     elif itype == "CHM15k":
-        p0 = [max(np.nanmax(-y), 1e-12), 2000.0, float(np.nanmedian(y[-50:]))]
-        r = least_squares(lambda p: (negexp(z, p) - y) * w, p0,
-                          bounds=([0, 100, -np.inf], [np.inf, 5e4, np.inf]), max_nfev=2000)
-        fam = Family(itype, "negexp", r.x, {})
+        best = None
+        a0 = max(float(np.nanmax(-y)), 1e-12)
+        for k0 in (0.5, 1.0, 2.0):
+            for t0 in (1000.0, 2000.0, 4000.0):
+                try:
+                    r = least_squares(lambda p: (gexp(z, p) - y) * w, [a0, k0, t0, 0.0],
+                                      bounds=([0, 0.2, 300, -np.inf],
+                                              [np.inf, 5, 2e4, np.inf]), max_nfev=6000)
+                except Exception:                                           # noqa: BLE001
+                    continue
+                if best is None or r.cost < best.cost:
+                    best = r
+        fam = Family(itype, "gexp", best.x, {})
     else:                                                        # CL61 and anything template-like
         tpl = y / max(float(np.nanmax(np.abs(y))), 1e-30)
         fam = Family(itype, "template", np.array([float(np.nanmax(np.abs(y)))]),
@@ -153,7 +175,8 @@ def fit_family(itype: str, rng: np.ndarray, b_raw: np.ndarray, sem: np.ndarray) 
     #                  the truth integral: what a Rayleigh window would feel if the family were
     #                  subtracted instead of the hood profile.
     flat = (fam.params[0] if fam.kind == "damped2" else
-            fam.params[2] if fam.kind == "negexp" else 0.0)
+            fam.params[2] if fam.kind == "negexp" else
+            fam.params[3] if fam.kind == "gexp" else 0.0)
     y_st, f_st = y - flat, fam.p_view(z) - flat
     near = z <= 1500.0
     fam.meta["r2_p_near"] = _r2(y[near], fam.p_view(z[near]), w[near])
@@ -171,8 +194,8 @@ def fit_payerne(save: bool = True) -> dict:
     out = {}
     summary = {}
     for ident, itype in PAYERNE["types"].items():
-        rng, b, sem, b_raw = hood.truth(ident)
-        fam = fit_family(itype, rng, b_raw, sem)
+        rng, b_rcs, sem, _bp = hood.truth(ident)
+        fam = fit_family(itype, rng, b_rcs, sem)
         out[ident] = fam
         summary[ident] = fam.to_dict()
         print(f"  {ident} ({itype:6s}) kind={fam.kind:9s} "

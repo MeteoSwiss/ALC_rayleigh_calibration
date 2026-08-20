@@ -69,3 +69,45 @@ constraint is doing its job on shape.
    joint model on sky twilights.
 4. CL31 sky test for M1: build the missing Payerne B night cache (v4 `--start 20250101`), fit,
    compare near range — the band where the family ceiling is 0.998.
+
+---
+
+## Session 2 (same day, continued) — the amplitude closed where it can close
+
+Chronology of the amplitude chase, each step forced by a measurement:
+
+1. The "units bug" was three bugs. (a) The hood npz stores `_b` (P-view) and `_b_rcs` (rcs view);
+   the loader had them semantically swapped, so every session-1 comparison was against the wrong
+   view — the "+2.4e7 amplitude" was z² at 5 km. (b) The bounds of the family step walked with the
+   iterate instead of anchoring on the hood prior (τ contracted ×0.6 per iteration to the floor).
+   (c) The CHM15k family itself was wrong: the hood P-view PEAKS at ~3 km; a monotone exponential
+   cannot, so its prior τ was garbage. Replaced by −A·(z/1km)^k·e^(−z/τ) (peak at kτ = 2.7 km,
+   matching the hood; fit band from 1 km — below that the hood shows an overlap-region +P spike
+   that is not subtractable dark).
+2. The anchor went through three designs: era-scoped Kalman (rejected — the Kalman smooths across
+   the unit swap, the documented CL31 failure mode); era-scoped raw-cal median (rejected — the v4
+   cache amplitudes and the archive constants differ by a CONVENTION factor ~2.25, so an absolute
+   import drags everything); final: **per-night relative anchor** A_n ~ N(k̂·C_n, σ) with the
+   units factor k̂ estimated once — the archive contributes its independent night-to-night
+   structure, the absolute scale stays with the data.
+3. The anchored alternation was dropped for the template and gexp families (their far-range shapes
+   brush the molecular/z² directions; every night step drained them — measured, not assumed).
+   Single family step on the v4-initialised state.
+4. **The injection self-test is now part of every run**: the same estimator is re-run on the same
+   nights + 1× the hood dark; the recovered increment is the estimator's gain, and
+   θ_corr = θ_raw / gain.
+
+**Verdicts:**
+
+| stream | shape corr (2–8 km) | injection gain | θ_corr | verdict |
+|---|---|---|---|---|
+| Payerne C (CL61, 105 nights) | **+1.00** | 0.76 | **+1.13** | **closed** — remote dark within ~13 % of the hood |
+| Payerne A (CHM15k, 216 nights) | +0.24 (near-range +0.98) | 0.48 | +5.2 ≠ 1 | **not closable from one station** — the raw θ carries a contamination component NOT proportional to any true dark (v4's "aerosol/misfit ~2–3×", now measured per-stream); the far-gate anchor cannot help (the gexp hump is e-suppressed at 10 km). This is the case the plan reserved for M2. |
+
+The CHM15k negative is a *result*, not a failure: the self-test now quantifies, per stream, the
+exact thing v4 could only bound globally — and it says the cuvette amplitude needs the network.
+
+**Still open for the next session:** the M3 joint B+T fit on the two long hood sessions; the CL31
+sky test (its night cache must be built with the co-located CHM15k's clear-night list — the CL31
+has no Rayleigh nights of its own in the archive, which is why v4 called it untestable).
+

@@ -27,15 +27,19 @@ SETTLE_MIN = 20.0
 
 
 def truth(ident: str):
-    """(rng, b, sem, b_raw) — the pooled hood dark for one Payerne instrument, rcs_0 units.
+    """(rng, b_rcs, sem, b_p) — the pooled hood dark for one Payerne instrument.
 
-    `b` is the campaign-smoothed profile (median 150 m + mean 450 m, the subtractable product);
-    `b_raw` is the unsmoothed pooled median — the one to fit parametric FAMILIES against, since
-    smoothing at 450 m would erase exactly the resonant structure the CL31 family models.
+    * ``b_rcs``  rcs_0 units — WHAT THE PIPELINE SUBTRACTS; every rcs-view comparison uses this.
+    * ``b_p``    = b_rcs/z², the signal-view diagnostic.
+    * ``sem``    inter-session standard error, rcs_0 units.
+    Session-2 lesson burned in here: the npz key ``{ident}_b`` is the P-view and ``{ident}_b_rcs``
+    the rcs view — comparing a retrieved rcs profile against ``_b`` inflates the "amplitude" by z²
+    (+5.7e7 at 5 km), which cost half a session. For the CL31 the pool is POST-swap era only
+    (dark_profiles.pool selects it), so pre-swap comparisons need session_frames, not this.
     """
     z = np.load(HOOD_NPZ, allow_pickle=True)
-    return (np.asarray(z[f"{ident}_range"], float), np.asarray(z[f"{ident}_b"], float),
-            np.asarray(z[f"{ident}_sem"], float), np.asarray(z[f"{ident}_b_rcs"], float))
+    return (np.asarray(z[f"{ident}_range"], float), np.asarray(z[f"{ident}_b_rcs"], float),
+            np.asarray(z[f"{ident}_sem"], float), np.asarray(z[f"{ident}_b"], float))
 
 
 def session_frames(ident: str, min_hours: float = 0.0):
