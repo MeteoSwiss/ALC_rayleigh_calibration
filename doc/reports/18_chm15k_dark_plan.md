@@ -83,3 +83,26 @@ M2 same-sky regression transfers the absolute dark to siblings; triangle closure
 Sky-only absolute retrieval (proven impossible), cloud-derived darks for CHM15k (proven
 impossible), network-wide window retuning as a dark fix (fig15), and any shape transfer
 between units without a per-unit measurement (the CL61 lesson generalized).
+
+## P0 execution log
+
+**2026-08-23 — jobs launched**: caches+bounds for all 154 census CHM15k (balfrin postproc,
+restartable), archive cover-sweep back to 2015 (no CAMS needed).
+
+**First flagged unit inspected — MESSINA (0-20000-0-00203_A, bound +225 %), fig21.** Not a
+monster dark in absolute terms (evidence amplitude only x1.1 Payerne's) but a SICK unit:
+
+- noise floor DOUBLED smoothly over 20 months (no step -> not a swap; progressive laser-power
+  decay, the Le & O'Connor early-unit pattern);
+- the measured signal flattens to a positive pedestal above ~5 km where the molecular should
+  keep decaying -> the 4.5-6.5 km "Rayleigh" fit is mostly fitting OFFSET, nightly constants
+  scatter over 3 decades, and v2.2's validity gates already reject most recent nights;
+- the two are one mechanism: rcs_0 is laser-normalised, so a FIXED raw electronic offset
+  inflates as 1/laser exactly like the noise floor - the bound and the floor rise together.
+
+Triage consequences: (i) cross-reference every bound with the unit's noise-floor TREND -
+rising-floor units have 1/laser-inflated bounds and are maintenance cases first, campaign
+cases second; (ii) Messina goes to the operator-notification list (laser end-of-life), and
+any covered night there should wait until after servicing.
+
+![Messina inspection](figs_remote_dark/fig21_MESSINA.png)
