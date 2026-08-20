@@ -368,3 +368,39 @@ functional form derived from the electronics (CL31 two under-damped resonances; 
 (CL31 directly, CL61 after pulse-response correction); the noise floor + change detection as
 the tripwire; Payerne's hood as standing referee. Open items: buffer/multiple-scattering
 sensitivity sweep, CL61 undershoot deconvolution, network rollout on E-PROFILE archives.
+
+**CL61 undershoot deconvolution (fig17) - the ideal-state route FAILS, instructively.** For a
+single-pole AC coupling the state is exactly w(z) = (1/L_u) int y dz of the recorded signal, so
+x = y + w should invert the undershoot per profile, closed-form. Measured: the predicted
+charge-driven undershoot is ~1e4 LARGER than observed, and the freely fitted state coefficient
+is 0.00 (target 1). The recorded, calibrated beta_att does NOT charge the coupling at face
+value - firmware baseline handling and electrical dynamic-range compression sit between the
+optical signal and the archived numbers. Model-based deconvolution in L1 units is dead; the
+correction must be EMPIRICAL.
+
+![CL61 deconv](figs_remote_dark/fig17_cl61_deconv.png)
+
+**The cloud's fingerprint, measured empirically (fig18) - detector physics from the sky.**
+Cloud-relative frame (z' = height above CBH), profiles split by cloud-return charge Q
+(integrated over CBH-100..+400 m only - integrating from the ground folds the CL31's own
+near-range dark lobe into Q and corrupts the split); (bright - dim) tercile difference
+isolates the signal-induced pulse response, dark and internal-pulse terms cancelling. Results:
+
+- CL31: the response is an oscillation of wavelength Lambda = 5465 m - the hood-fitted
+  transmitter-ripple mode (5080 m) recovered from the sky within 8 %. RMS 1.62 x hood-dark
+  over 0.5-3 km above cloud, DEAD beyond ~3 km above CBH: this is exactly why fig16's CL31
+  retrieval matched the hood only above ~4 km absolute (CBH ~1 km + 3 km). The natural-hood
+  recipe for CL31 = use gates >= 3 km above cloud base.
+- CL61: sharp negative tail decaying with L = 553 m ~ the hood fast lobe (711 m), then flat;
+  RMS 3.51 x hood-dark in the same band - the signal-induced part dominates its above-cloud
+  offset (fig16's x2 excess explained). Recipe: gates >= ~2 km above CBH + per-gate Q-slope
+  removal (lever x3.3 between terciles).
+
+![Cloud impact](figs_remote_dark/fig18_cloud_impact.png)
+
+Standing summary of the natural-hood chain: opaque night clouds switch the atmosphere off;
+the brightness terciles measure and remove the cloud's own electrical fingerprint; what
+remains, per unit and per season, is the quiescent dark - validated against the Payerne hoods
+for CL31 (and CL61 pending the Q-corrected re-judgement). Circuit constants are recoverable
+from sky data alone, which also arms the change-detection layer with physical parameters
+rather than raw curves.
