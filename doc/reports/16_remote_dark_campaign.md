@@ -255,3 +255,30 @@ WHERE the fit is stable - 4.5-6.5 km at all six units - directly answering "whic
 carry more or less background noise". As a dark ESTIMATOR the scan inherits the same wall as
 everything single-station; as an operator diagnostic it is cheap and readable.
 
+**The fit-space experiment (operator's idea).** The molecular profile looks easier to fit in S
+(log scale) than in RCS. Tested with four estimators of the same nightly constant, on the same
+cached nights and the same 1-km windows: (E1) WLS in RCS - the current one; (E2) plain
+least-squares in S-view; (E3) median log-ratio in S - the estimator the eye performs on the
+log plot; (E4) median ratio in LINEAR space - the control: the same robust statistic with no
+positivity requirement. Metric: night-to-night robust CV of C-hat per window altitude, with a
+mandatory honesty gauge underneath - the median bias of each estimator against WLS.
+
+![Fit-space experiment](figs_remote_dark/fig11_fitspace.png)
+
+Three findings, in order of surprise. (1) The VIEW does nothing: E1 and E2 coincide to the
+linewidth at every altitude on every unit - a least-squares fit does not care what scale the
+plot used. (2) The log-median LOOKS dramatically more stable (Payerne A 52.5 -> 38.6 % CV at
+4.5 km, every unit above ~6 km) - but the bias row shows that stability is bought with bias:
+gates where noise drives S <= 0 cannot be logged and are silently dropped, so the noise
+distribution is clipped from below and C-hat inflates by +50 to +200 % above ~5-6 km (already
++9 % at 4 km on Payerne A). The bias is SNR-dependent, hence unit- and night-dependent -
+disqualifying for calibration: stable-but-wrong. The linear-median control confirms it: E4 does
+NOT reproduce E3's wins (Payerne A: 54.4 % vs 38.6 %), so the apparent gain was the clipping,
+not the robustness. (3) The legitimate kernel of the intuition - robust aggregation - is worth
+a real but modest amount: E4 is unbiased at every altitude on every unit and buys 0-4 CV points
+in the 3-5 km band (Schiphol A 38.4 -> 35.8, C 41.6 -> 37.6), nothing elsewhere. Verdict: keep
+WLS in RCS operationally; never fit log-S with a positivity cut - it silently inflates
+constants exactly where the 910-nm units are noisiest; if the estimator is ever revisited, a
+Huber/median robust loss is safe and marginally better on some units. The ~33-40 % CV floor
+common to all four estimators is real night-to-night transmission variability - no fit-space
+choice removes it; the levers that matter remain window choice (above) and aerosol screening.
