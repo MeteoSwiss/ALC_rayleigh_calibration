@@ -123,3 +123,32 @@ Plovdiv goes on the P2 campaign list (era-keyed), and its stability makes it a g
 target. Contrast card: Messina = maintenance first; Plovdiv = campaign first.
 
 ![Plovdiv inspection](figs_remote_dark/fig21_PLOVDIV.png)
+
+## P1 archive sweep — results (2026-08-23)
+
+Sweep done: 89,921 stream-days with data (154 CHM15k + Payerne control, back to 2015). Two
+design lessons paid for and fixed IN THE FLAGGING, no re-run needed: (i) a covered day's
+near-band p95 statistic is NOISE-limited at ~0.08-0.10x the normal level, so the initial x50
+threshold sat on the noise deck (mass-flagging ultra-clean synoptic nights at hazy sites and
+missing the hoods) -> criterion is now ratio < 0.15 with era-awareness; (ii) 'normal' must be
+computed PER YEAR - Payerne's units changed x3500 between 2016 and 2017.
+
+**Positive control PASSES**: Payerne flags exactly its 25-h hood session (2026-05-26..27) and
+nothing else (the 5-h 05-12 session is not a full day, by design).
+
+**226 full-day candidates on 73 streams** (`remote_dark/p1_cover_candidates.csv`), three
+families: (a) CONSECUTIVE RUNS uncorrelated with neighbours = cover/outage candidates - Exeter
+23 d (incl. 2025-07-24..08-12), Berus 8 d (2026-02), Potenza 3 d; (b) SYNCHRONISED regional
+single days = weather blockage (all NL on 2025-12-25/26, DE on 2026-01-11) - snow on windows,
+not usable; (c) scattered alpine/high-latitude winter singles (Kleine Scheidegg, Davos,
+Flesland, Andoya) = snow.
+
+**Housekeeping verification is mandatory before use** - demonstrated on Exeter 2025-08-01
+(fig22): the profile is a textbook dark (structure 20,000x below a normal day, 2879 profiles)
+BUT status_detector = -127 (vs 100) with the laser firing normally -> a RECEIVER FAULT period,
+not a cover; the data are not an operating-state dark. The find is still valuable: it dates an
+Exeter era boundary (~2025-08-12, post-repair) for era-keyed calibration. Candidate-day HK
+triage (status_detector / status_laser / window_transmission) goes into the P1 verification
+pass alongside the profile-shape check.
+
+![Exeter covered day](figs_remote_dark/fig22_exeter_cover.png)
