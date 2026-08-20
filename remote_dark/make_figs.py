@@ -22,13 +22,13 @@ def _norm(x, m):
 def fig_families():
     fig, axes = plt.subplots(1, 3, figsize=(15, 5.2))
     for ax, ident, itype in zip(axes, "BAC", ("CL31", "CHM15k", "CL61")):
-        rng, b, sem, braw = hood.truth(ident)
-        fam = models.fit_family(itype, rng, braw, sem)
+        rng, b_rcs, sem, _bp = hood.truth(ident)
+        fam = models.fit_family(itype, rng, b_rcs, sem)
         lo, hi = models.FIT_BAND[itype]
         m = (rng >= lo) & (rng <= hi) & (rng > 0)
         # P-view everywhere: it is where the electronics live and where each structure is visible.
         # x-limits from the STRUCTURE band, not from the near-range spike that dwarfs everything.
-        x_t = braw / np.where(rng > 0, rng, np.nan) ** 2
+        x_t = b_rcs / np.where(rng > 0, rng, np.nan) ** 2
         x_f = np.where(m, fam.p_view(rng), np.nan)
         if itype == "CL31":
             band, ylim = (rng >= 150) & (rng <= 3000), (0, 3.0)
@@ -77,8 +77,7 @@ def fig_m1():
         ax.plot(_norm(bf, mf)[band], rng[band] / 1e3, color="steelblue", lw=0.9, alpha=0.7,
                 label="free b (v4 evidence)")
         ax.set_title(f"{lab} — {int(z['n_nights'])} nights\n"
-                     f"shape corr vs hood (2–8 km): {cc:+.2f}   "
-                     f"[amplitude: open units bug]", fontsize=10)
+                     f"shape corr (2–8 km): {cc:+.2f}   theta_corr = {th:+.2f} (target 1)", fontsize=10)
         ax.set_xlabel("dark, normalised on 2–8 km")
         ax.set_ylabel("range (km)")
         ax.set_ylim(2, 8)
