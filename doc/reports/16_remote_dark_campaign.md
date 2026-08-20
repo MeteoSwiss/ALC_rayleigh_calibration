@@ -413,3 +413,31 @@ remains, per unit and per season, is the quiescent dark - validated against the 
 for CL31 (and CL61 pending the Q-corrected re-judgement). Circuit constants are recoverable
 from sky data alone, which also arms the change-detection layer with physical parameters
 rather than raw curves.
+
+**CHM15k, cloud brightness as a CONTINUOUS input (fig19).** Sextile-resolved response: the
+above-cloud offset is NON-MONOTONIC in the recorded charge (rises to a maximum near mid-charge
+then dives; visible at every height >= 2.5 km) - at least TWO competing signal-induced
+processes (a positive afterpulse pedestal and a faster-growing negative baseline
+over-subtraction), with curvature |quad/lin| = 0.5 over the observed x2.3 charge range. The
+Q->0 extrapolation rescue test fails definitively (theta = +78 vs hood): the CHM15k natural
+hood is closed by PROOF. What survives: the response curve y(Q) at reference heights and the
+kernel k(z') are per-unit detector signatures computable from any winter archive - health
+metrics (knee position ~ dead-time/afterpulse state) rather than dark estimates.
+
+![CHM response](figs_remote_dark/fig19_chm_response.png)
+
+**The hood-session slow drift, arbitrated (fig20).** Experimental fact folded in: the Payerne
+CHM15k "hood" covers the TELESCOPE only - the laser fires to the sky, so no hood-created
+reflection exists, and the intrinsic TX->RX internal flash is present covered and uncovered
+alike (the hood dark legitimately contains its response; no methodological contamination).
+Verdicts: (i) the flash-recovery hypothesis for the drift is REJECTED quantitatively - the
+laser monitor varied 0.07-0.25 % within sessions, x400 too small for the observed 50-200 %
+band drifts; (ii) the speculative "hood dark = internal-flash response" identification is
+also rejected: the hood dark and the cloud-response kernel decorrelate above 1 km (r = -0.05);
+(iii) within-session linear correlation with t_int is ~0 despite a 14 K diurnal swing - but
+that test is noise-diluted at 5-min bins and the drift is lagged/hysteretic; the consistent
+driver remains SLOW THERMAL state dynamics of the receiver chain (M3's low-pass measurement,
+D_slow ~ 21 rcs/degC, 60-500 m concentrated). The settle-transient rule (discard the first
+20 min) understates it: the drift continues over hours.
+
+![Hood drift](figs_remote_dark/fig20_hood_drift.png)
