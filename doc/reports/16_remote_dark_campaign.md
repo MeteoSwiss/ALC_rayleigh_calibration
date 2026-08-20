@@ -214,3 +214,44 @@ timescale, not reached this campaign.
    Looschelders' six-unit stability claim.
 4. The gate-fold ripple channel (CL31/CL51) is already a product; fold it into the same output
    format so a station page can carry one `b̂(z)` with per-component provenance.
+
+---
+
+## 8. Operator-driven checks (2026-08-20, evening session)
+
+**The Schiphol noise budget, corrected by a good question.** First version of the clear-night
+noise-vs-altitude comparison used the cache's spread-around-the-night-median as "noise" and found
+near-range excesses of x2.4-5.4 over the shot+floor model. The operator asked why the noise falls
+so much with altitude and whether z^2 was divided twice. Verification from raw L1 (successive
+differences, no cache): no double division (P-view floor slope -0.02 for 3-14 km, where a double
+division forces -2; cache matches the direct computation within 5-12 % aloft) - BUT the question
+exposed that below ~1.5 km the v1 metric included REAL boundary-layer variability, x5 the true
+fast noise. With the successive-difference metric the budget closes: signal shot + flat floor
+reproduces the measured fast noise everywhere, the near-range residual shrinking to x0.6-1.5
+per unit.
+
+![Noise budget v2](figs_remote_dark/fig8_noise_budget.png)
+
+**The Schiphol-D optical-module swap.** L1 metadata: unit D changed TUB150037 -> TUB160055 on
+2026-07-11 (A/B/C stable through 2025-2026). Preview from the two post-swap nights in the local
+mirror: the NEW module's noise floor is x0.53 of the old - the module change is loudly visible in
+the simple noise view. The full sky-side reproduction (per-era pairwise fits) awaits the balfrin
+cache extension (the CSCS key expired mid-run; renewal is an operator MFA action).
+
+![D swap preview](figs_remote_dark/fig9_d_swap_preview.png)
+
+**The window scan (operator's idea).** Slide the Rayleigh window in altitude; within one night
+the ratio of fitted constants between windows is SELF-REFERENCED (the night's amplitude cancels),
+so C-hat(z_win) maps the additive baseline's window bias plus whatever else sits in the window:
+
+![Window scan](figs_remote_dark/fig10_window_scan.png)
+
+Reading, honestly: all six units share a monotone tilt (+10-20 % with low windows, -10-25 % high)
+- that common part is the residual AEROSOL in and above the window (the contamination K in scan
+form), not dark. The instrument information is in the DEVIATIONS: between units on the same sky
+(Schiphol), and between measured and hood-predicted at Payerne (C: matching sign and ~5 km
+crossing below 5 km). Practical product available immediately: the p25-p75 band per altitude says
+WHERE the fit is stable - 4.5-6.5 km at all six units - directly answering "which fit altitudes
+carry more or less background noise". As a dark ESTIMATOR the scan inherits the same wall as
+everything single-station; as an operator diagnostic it is cheap and readable.
+
