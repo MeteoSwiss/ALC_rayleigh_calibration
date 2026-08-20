@@ -324,3 +324,47 @@ attempt returned theta = -100). The un-filterable remainder is exactly why M2 (c
 sky cancels without any aerosol model) is the route for the CHM15k amplitude.
 
 ![Aerosol filter](figs_remote_dark/fig14_aerosol_filter.png)
+
+**CL61 shape transferability, arbitrated by the literature (2026-08-21).** Assuming Payerne's
+hood shape for the network CL61s is NOT defensible: Le & O'Connor derive Pinstrument(r, T) as a
+PER-INSTRUMENT, PER-TEMPERATURE lookup table (no universal shape, T-dependence 15-31 C), and
+report early-production units degrading over time (laser power down, background up).
+Looschelders' Paris fleet does show similar darks across units above 40 m (band +-1.5e-14
+sr-1 m-1) - but that is n~8, one winter, one firmware era. The standard set by the literature is
+per-unit characterisation; the M1 template stays a Payerne-only diagnostic.
+
+**Multi-altitude fit as a bias estimator (fig15) - the idea INVERTS.** Fitting C-hat at sliding
+windows and extrapolating to high altitude does NOT converge to the unbiased constant: the bias
+is dark DIVIDED BY molecular signal, and the molecular dies faster with altitude than the dark
+does, so the dark bias GROWS aloft (CHM15k: -29.8 % at 4.5-6.5 km vs dark-corrected, still
+-24.3 % at 8-9.5 km; CL61: -22.5 % -> -83.1 %). There is no clean window: low windows are
+aerosol-biased, high windows dark-biased. The scan stays a diagnostic, not a corrector.
+
+![Altitude bias](figs_remote_dark/fig15_altitude_bias.png)
+
+**Opaque low cloud as a natural termination hood (fig16) - the operator's breakthrough idea.**
+Above a fully-attenuating night cloud the atmosphere is switched OFF - no molecular, no
+aerosol - so the recorded signal IS the instrument's additive background, per unit, per night,
+network-wide. Payerne winter 2025/26 validation (profiles masked below own CBH+1.2 km,
+16k-37k profiles/unit), hood as referee:
+
+- CL31: WORKS DIRECTLY - theta +0.74, RMS/|hood| 0.68, the ~5 km transmitter-ripple mode
+  reproduced in shape AND amplitude. First remote dark retrieval for the instrument whose
+  molecular channel is provably blind (injection gain -0.03). Analog APD does not saturate in
+  the cloud return, hence the clean baseline.
+- CL61: right shape family, x2.1 amplitude - exactly what the PHYSICAL model predicts: the
+  AC-coupling undershoot is signal-induced, so the huge cloud return deepens it relative to the
+  quiescent hood state. The known pulse response (tau_u = 30.5 us) makes this correctable by
+  deconvolution -> cloud scenes become per-unit dark measurements.
+- CHM15k: FAILS (x12.9) - the photon-counting chain saturates in liquid clouds (the same
+  physics that forbids its cloud calibration) and the post-saturation baseline artefact dwarfs
+  the dark. Its absolute dark stays covered-night / co-location.
+
+![Cloud dark](figs_remote_dark/fig16_cloud_dark.png)
+
+The assembled network recipe, with the circuit-physics models as keystone: per PRODUCT LINE a
+functional form derived from the electronics (CL31 two under-damped resonances; CL61 fast lobe
++ slow undershoot; CHM15k gexp); per UNIT its parameters fitted from opaque-cloud night stacks
+(CL31 directly, CL61 after pulse-response correction); the noise floor + change detection as
+the tripwire; Payerne's hood as standing referee. Open items: buffer/multiple-scattering
+sensitivity sweep, CL61 undershoot deconvolution, network rollout on E-PROFILE archives.
