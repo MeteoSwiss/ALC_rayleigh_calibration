@@ -297,3 +297,30 @@ constants exactly where the 910-nm units are noisiest; if the estimator is ever 
 Huber/median robust loss is safe and marginally better on some units. The ~33-40 % CV floor
 common to all four estimators is real night-to-night transmission variability - no fit-space
 choice removes it; the levers that matter remain window choice (above) and aerosol screening.
+
+**Plain-language recap, on operator request (fig13) + the aerosol-variability filter (fig14).**
+Two different "electronic" quantities were being mixed in conversation, so fig13 separates them
+per instrument type, in absolute units, against the hood: the NOISE (random scatter per profile)
+is retrieved from ordinary clear nights and closes against the hood at x0.96 / x0.92 / x0.98
+(CL31 / CHM15k / CL61) - that channel is SOLVED for all types and is the swap tripwire of fig12.
+The DARK (fixed additive bias) remains the hard one, and fig13's top row is the honest state:
+CL31 fit output untrustable (injection gain -0.03), CHM15k shape partial but amplitude x3.9,
+CL61 = the HOOD'S OWN SHAPE imposed with only the amplitude from sky (x1.13) - the red-on-black
+match in earlier figures is BY CONSTRUCTION, not a discovery; the assumption-free blue curve is
+what the sky alone gives, and it is far from the truth.
+
+![Explainer](figs_remote_dark/fig13_explainer.png)
+
+fig14 tests the operator's filtering idea: aerosol concentration varies night-to-night, the dark
+does not - so split nights by CAMS aerosol load and extrapolate. Result: the tercile split PROVES
+the evidence intercept is aerosol-dominated (theta vs hood: cleanest third -0.7 / +0.4, dirtiest
+-4.9 / -11.8 for CHM15k / CL61) and clean-night selection removes a factor ~2.5-3 of it (RMS),
+but the filter SATURATES - even the cleanest nights carry aerosol, and the formal zero-aerosol
+extrapolation with the CAMS profile as regressor removes nothing (theta -4.4 vs -4.7 unfiltered:
+the residual is NOT proportional to the CAMS-modelled shape at 0.4 deg). Design lesson re-learned
+and recorded in exp_aerosol_filter.py: the intercept is identifiable only through night-to-night
+TRANSMISSION variation (regress raw S on C_n*M; night-normalising destroys the leverage - first
+attempt returned theta = -100). The un-filterable remainder is exactly why M2 (co-location: same
+sky cancels without any aerosol model) is the route for the CHM15k amplitude.
+
+![Aerosol filter](figs_remote_dark/fig14_aerosol_filter.png)
