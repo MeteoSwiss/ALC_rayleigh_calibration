@@ -152,17 +152,22 @@ def main():
         except Exception:                                                   # noqa: BLE001
             note = "constant fit failed"
         ax.set_title(f"{itype} (Payerne {ident}) — {Y.shape[0]} profiles, {n_days} days\n"
-                     f"cloud impact RMS(0.5-3 km) = {imp / hs:.2f} × hood dark   |   {note}",
-                     fontsize=10)
+                     f"impact RMS(0.5-3 km) = {imp / hs:.2f} × hood   |   {note}",
+                     fontsize=9)
         lin = float(np.sqrt(np.nanmean(diff[jm] ** 2))
                     / max(np.sqrt(np.nanmean((dim[jm] - hood_rel[jm]) ** 2)), 1e-300))
         ax.set_xlabel("offset, P-view " + scales[ident][1])
-        # x-limits from the ABOVE-cloud structure — the cloud peak at z'=0 is off-scale
-        sc = 1e15 if ident == "C" else 1e5
-        vm = (ZREL >= 400)
-        ref = np.concatenate([smooth(diff)[vm], smooth(hood_rel)[vm]]) * sc
-        span = np.nanmax(np.abs(ref[np.isfinite(ref)]))
-        ax.set_xlim(-2.2 * span, 2.2 * span)
+        # x-limits from the ABOVE-cloud structure, robust (p95, z' >= 1 km) so neither the
+        # cloud peak nor the CHM15k first-km saturation spike sets the scale — they clip,
+        # and the off-scale factor is annotated instead
+        vm = (ZREL >= 1000)
+        ref = np.concatenate([smooth(diff)[vm], smooth(hood_rel)[vm]]) * sc0
+        span = float(np.nanpercentile(np.abs(ref[np.isfinite(ref)]), 95))
+        ax.set_xlim(-3.0 * span, 3.0 * span)
+        pk = float(np.nanmax(np.abs(smooth(diff)[(ZREL >= 100) & (ZREL < 1000)])) * sc0)
+        if pk > 3.0 * span:
+            ax.text(0.03, 0.03, f"0–1 km spike off-scale (×{pk / span:.0f})",
+                    transform=ax.transAxes, fontsize=8, color="crimson")
         if ident == "A":
             ax.set_ylabel("height above cloud base (km)")
         ax.grid(alpha=0.25)
