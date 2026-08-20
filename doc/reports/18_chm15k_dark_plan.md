@@ -152,3 +152,14 @@ triage (status_detector / status_laser / window_transmission) goes into the P1 v
 pass alongside the profile-shape check.
 
 ![Exeter covered day](figs_remote_dark/fig22_exeter_cover.png)
+
+**P1 results figure (fig23) + the Berus verdict.** The one-page view: the temporal pattern
+classifies the 226 candidates without opening files (runs = cover/outage; synchronised columns
+= weather; isolated singles = snow; the Payerne hood = the green-star control). Case
+verifications on the right: **BERUS (DWD, 2026-02-04..11) is a TRUE COVER** — textbook
+collapsed profile AND healthy housekeeping (status_detector 100, status_laser 98 firing,
+window_transmission -2 = blocked): an operating-state dark, 8 consecutive days with full
+diurnal temperature cycles, free in the archive. It becomes the first P1-reduction target
+after the Payerne validation. Exeter stays classified as a detector-fault era (fig22).
+
+![P1 results](figs_remote_dark/fig23_p1_results.png)
