@@ -70,6 +70,37 @@ few units carry them.
 
 ## 3. Staged execution
 
+### Stage 0a — EXECUTED: the Schiphol quadruple proof-of-concept (operator's proposal)
+
+Four CHM15k at one coordinate (0-20000-0-06240 A–D, 170 shared clear nights, all four already in
+the v4 cache) — the cleanest possible test of M2's machinery, because co-location makes the
+contamination K(z) common-mode: unit v IS the atmospheric reference for unit u, no CAMS anywhere.
+Per gate, across nights: S_u = ρ_uv(z)·S_v + db_uv(z), after per-night calibration normalisation
+(S/C_n — without it the units' ~20 % calibration spread pollutes both channels).
+
+![Schiphol quadruple POC](figs_remote_dark/fig7_poc_amsterdam.png)
+
+**Validated:**
+
+* **the multiplicative channel reproduces prior knowledge blind**: ρ_A/B = 0.777 at 500–1000 m
+  recovering to 0.94 by 1.6–3 km — the documented Schiphol-B static overlap deficit (~0.8
+  expected in that band), obtained with no overlap model at all;
+* **dark differences are measurable from sky data**: per-unit offsets Δs = −0.65 (A), −0.42 (B),
+  +0.36 (C), +0.71 (D) in Payerne-dark units, internally consistent (six pairs → four nodes,
+  residual 17 % of the typical difference);
+* the two-basis projection [hood family, mean-signal leakage] is necessary and works: the
+  ρ-noise×signal leakage direction carries up to 0.3 units of Δs on two of the four units, and is
+  now absorbed explicitly instead of contaminating silently.
+
+**Design corrections the POC forces on the fleet stage (the point of a POC):**
+
+1. **a rank-1 shared D is insufficient** — the leak-controlled node profiles still leave family
+   R² ≈ 0.2: co-located CHM15k darks differ in SHAPE, not only amplitude. Stage 2's shared basis
+   becomes rank-2 (or per-unit gexp shape parameters within hood-prior bounds);
+2. **per-night calibration normalisation is mandatory** fleet-wide, not optional;
+3. the common-mode absolute is invisible here by construction — confirming, from the other side,
+   that the Payerne anchor is irreducible.
+
 ### Stage 0 — the decision gate, on the 43 existing caches (local, ~half a day)
 
 Recompute the per-unit free-b evidence from the caches (seconds each, v4 machinery), stack the
