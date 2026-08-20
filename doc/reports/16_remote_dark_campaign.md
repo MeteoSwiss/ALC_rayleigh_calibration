@@ -235,10 +235,25 @@ per unit.
 **The Schiphol-D optical-module swap.** L1 metadata: unit D changed TUB150037 -> TUB160055 on
 2026-07-11 (A/B/C stable through 2025-2026). Preview from the two post-swap nights in the local
 mirror: the NEW module's noise floor is x0.53 of the old - the module change is loudly visible in
-the simple noise view. The full sky-side reproduction (per-era pairwise fits) awaits the balfrin
-cache extension (the CSCS key expired mid-run; renewal is an operator MFA action).
+the simple noise view. Full reproduction below, once the balfrin extension landed.
 
 ![D swap preview](figs_remote_dark/fig9_d_swap_preview.png)
+
+**The swap, fully reproduced (2026-08-20, balfrin extension).** With Jun-Aug 2026 cached on
+balfrin (20-23 clear nights/unit; 14-15 post-swap), the test is complete and season-matched
+(pre = Jun 01-Jul 09, post = Jul 12-Aug 13; the swap day and its eve belong to neither era).
+Verdict: the hardware change is detected unambiguously from the sky alone - unit D's noise
+floor steps x0.55 ON the swap date while the three co-located controls move x1.00-1.01, and
+the change is a uniform floor drop above ~2 km (signal-shot dominates below). Two further
+findings. (i) BURN-IN: the new TUB160055 floor is NOT stationary - it rises +16 %/30 d
+through its first month (controls -0.6..+0.4 %/30 d); re-check after a few months. (ii) The
+additive-baseline (dark) change is NOT resolvable: above 3 km the era change of the v4
+evidence intercept for D sits inside the controls' seasonal envelope; below ~2 km the
+common-mode dominates everyone. A module swap is loudly visible in the NOISE channel and
+quietly invisible in the DARK channel at these SNRs - for network change-detection, the
+per-night noise floor is the tripwire.
+
+![D swap full](figs_remote_dark/fig12_d_swap_full.png)
 
 **The window scan (operator's idea).** Slide the Rayleigh window in altitude; within one night
 the ratio of fitted constants between windows is SELF-REFERENCED (the night's amplitude cancels),
