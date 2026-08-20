@@ -396,6 +396,15 @@ isolates the signal-induced pulse response, dark and internal-pulse terms cancel
   offset (fig16's x2 excess explained). Recipe: gates >= ~2 km above CBH + per-gate Q-slope
   removal (lever x3.3 between terciles).
 
+- CHM15k (added on operator request): the same terciles dissect the SATURATION artefact.
+  Charge lever compressed to x1.6 (vs x4.7 / x3.3 on the analog Vaisalas) - dead-time clipping
+  erases most of the true brightness differences, the photon-counting fingerprint. The response
+  is colossal (RMS 320 x hood-dark over 0.5-3 km above CBH, ~1000x in the first km), still
+  charge-dependent (linearity 1.57) so NOT a fixed subtractable pattern, and grows away from
+  the cloud instead of relaxing - no linear-filter tail. Confirms fig16: the natural hood is
+  unusable for the CHM15k dark; but the fingerprint itself is a per-unit health probe (its
+  drift tracks detector ageing) and its charge-compression is a remote dead-time measurement.
+
 ![Cloud impact](figs_remote_dark/fig18_cloud_impact.png)
 
 Standing summary of the natural-hood chain: opaque night clouds switch the atmosphere off;

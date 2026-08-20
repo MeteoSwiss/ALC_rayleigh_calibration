@@ -91,8 +91,9 @@ def main():
     import sys
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     from scipy.optimize import curve_fit
-    fig, axes = plt.subplots(1, 2, figsize=(14.5, 6.4), sharey=True)
-    for ax, ident, itype in zip(axes, "BC", ("CL31", "CL61")):
+    fig, axes = plt.subplots(1, 3, figsize=(15.5, 6.4), sharey=True)
+    scales = {"A": (1e3, "(×1e-3)"), "B": (1e5, "(×1e-5)"), "C": (1e15, "(×1e-15)")}
+    for ax, ident, itype in zip(axes, "ABC", ("CHM15k", "CL31", "CL61")):
         Y, Q, CB, n_days = collect(ident)
         t1, t2 = np.nanpercentile(Q, [33.3, 66.7])
         dim = np.nanmedian(Y[Q <= t1], axis=0)
@@ -114,17 +115,15 @@ def main():
         hood_rel = np.interp(med_cb + ZREL, trng, b_rcs / zt ** 2,
                              left=np.nan, right=np.nan)
 
-        ax.plot(smooth(dim) * 1e15 if ident == "C" else smooth(dim) * 1e5,
-                ZREL / 1e3, "-", color="steelblue", lw=1.4,
+        sc0 = scales[ident][0]
+        ax.plot(smooth(dim) * sc0, ZREL / 1e3, "-", color="steelblue", lw=1.4,
                 label=f"dim tercile (n={int((Q <= t1).sum())})")
-        ax.plot(smooth(bright) * 1e15 if ident == "C" else smooth(bright) * 1e5,
-                ZREL / 1e3, "-", color="darkorange", lw=1.4,
+        ax.plot(smooth(bright) * sc0, ZREL / 1e3, "-", color="darkorange", lw=1.4,
                 label=f"bright tercile (n={int((Q >= t2).sum())}, Q ×{lever:.1f})")
-        ax.plot(smooth(diff) * 1e15 if ident == "C" else smooth(diff) * 1e5,
-                ZREL / 1e3, "-", color="crimson", lw=2.0,
+        ax.plot(smooth(diff) * sc0, ZREL / 1e3, "-", color="crimson", lw=2.0,
                 label="bright − dim = pulse-response tail")
-        ax.plot(smooth(hood_rel) * 1e15 if ident == "C" else smooth(hood_rel) * 1e5,
-                ZREL / 1e3, "k--", lw=1.6, label="hood dark (shifted by median CBH)")
+        ax.plot(smooth(hood_rel) * sc0, ZREL / 1e3, "k--", lw=1.6,
+                label="hood dark (shifted by median CBH)")
         ax.axvline(0, color="k", lw=0.5)
 
         # quantify: impact size vs the hood-dark scale in the same window
@@ -135,10 +134,12 @@ def main():
         note = ""
         d_s = smooth(diff)
         try:
-            if ident == "C":
-                m = jm & (d_s < 0)
-                p = np.polyfit(ZREL[m], np.log(-d_s[m]), 1)
-                note = f"decay L = {-1 / p[0]:.0f} m (hood slow pole: 4570 m)"
+            if ident in "AC":
+                sgn = -1.0 if np.nanmedian(d_s[jm]) < 0 else 1.0
+                m = jm & (sgn * d_s > 0)
+                p = np.polyfit(ZREL[m], np.log(sgn * d_s[m]), 1)
+                ref_note = " (hood slow pole: 4570 m)" if ident == "C" else                     " (CHM15k: no single hood pole)"
+                note = f"decay L = {-1 / p[0]:.0f} m{ref_note}"
             else:
                 fm = (ZREL >= 200) & (ZREL <= 3000)
 
@@ -153,19 +154,21 @@ def main():
         ax.set_title(f"{itype} (Payerne {ident}) — {Y.shape[0]} profiles, {n_days} days\n"
                      f"cloud impact RMS(0.5-3 km) = {imp / hs:.2f} × hood dark   |   {note}",
                      fontsize=10)
-        ax.set_xlabel("offset, P-view " + ("(×1e-15)" if ident == "C" else "(×1e-5)"))
+        lin = float(np.sqrt(np.nanmean(diff[jm] ** 2))
+                    / max(np.sqrt(np.nanmean((dim[jm] - hood_rel[jm]) ** 2)), 1e-300))
+        ax.set_xlabel("offset, P-view " + scales[ident][1])
         # x-limits from the ABOVE-cloud structure — the cloud peak at z'=0 is off-scale
         sc = 1e15 if ident == "C" else 1e5
         vm = (ZREL >= 400)
         ref = np.concatenate([smooth(diff)[vm], smooth(hood_rel)[vm]]) * sc
         span = np.nanmax(np.abs(ref[np.isfinite(ref)]))
         ax.set_xlim(-2.2 * span, 2.2 * span)
-        if ident == "B":
+        if ident == "A":
             ax.set_ylabel("height above cloud base (km)")
         ax.grid(alpha=0.25)
         ax.legend(fontsize=8, loc="best")
         print(f"{itype}: {Y.shape[0]} prof / {n_days} d, Q lever ×{lever:.1f}, "
-              f"impact/hood = {imp / hs:.2f}, {note}")
+              f"impact/hood = {imp / hs:.2f}, charge-linearity = {lin:.2f}, {note}")
     fig.suptitle("The cloud's fingerprint on the profile above it — brightness terciles in the "
                  "cloud-relative frame: (bright − dim) isolates the signal-induced detector "
                  "response, and its shape measures the circuit constants from the sky",
