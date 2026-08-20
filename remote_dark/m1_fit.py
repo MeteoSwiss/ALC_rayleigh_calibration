@@ -179,7 +179,9 @@ def _family_step(itype, rng, fit_mask, S, sig, M, Aer, A, B, d, g, ok_n, fam0,
             lob[iphi], hib[iphi] = pr[iphi] - 0.7, pr[iphi] + 0.7
         def resid(p):
             return (models.damped_sinusoids(zf, p, 2) - yf / zf ** 2) * wf * zf ** 2
-        r = least_squares(resid, np.clip(p0, lob + 1e-12, hib - 1e-12),
+        # plain clip: an epsilon margin INVERTS the frozen-c interval (lob+eps > hib-eps when
+        # the box is +-1e-30) and least_squares then rejects the start point
+        r = least_squares(resid, np.minimum(np.maximum(p0, lob), hib),
                           bounds=(lob, hib), max_nfev=3000)
         fam = models.Family(fam0.itype, "damped2", r.x, dict(fam0.meta))
     elif fam0.kind == "gexp":
