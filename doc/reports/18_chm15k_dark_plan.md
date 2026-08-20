@@ -194,3 +194,29 @@ windows. Consequence, now part of the verifier: the FIRST-GATES VETO - a true co
 sweep's summary CSV lacks a 0-400 m column, so the veto runs in the per-candidate
 verification pass (226 days, cheap) and the column is added to future sweeps. The manually
 verified cases (Berus TRUE COVER, Exeter fault, Payerne control, KLS snow) are unaffected.
+
+## The Christmas-2025 clean-airmass experiment (fig25) — the false-positive family becomes a method
+
+Operator's idea: the synchronised 2025-12-25/26 event = an exceptionally clean, shallow
+airmass over NL+DE, i.e. the closest the atmosphere gets to "off while still measuring".
+77 CHM15k hold those nights as certified clear in the P0 caches. Per unit, the relative
+residual delta(z) = (S - C M)/(C M); the 77-station median = shared atmosphere + model
+(~+15 % of molecular at 1.5-3 km even on these nights - the fig14 "cleanest nights still
+carry aerosol" number, now seen directly); each unit's DEVIATION from it = its instrument
+systematic, measured with the airmass as the common reference a single station never has
+(distributed co-location).
+
+Validation inside the data: Schiphol A -1.1 % / D +1.5 % at 1-3 km (clean units), C +12.6 %,
+and B at +21.7 % (1-3 km) / +55 % (0.5-1.5 km) - the known over-corrected-overlap unit
+reproduced blind. Bulk of the network within IQR -21..+10 %. Outliers are flags, not darks:
+BRAUNSCHWEIG +2113 % (in-airmass -> sick unit, inspection queue) ; Jan Mayen / Davos /
+Flesland were OUTSIDE the airmass (polar night / Alps) and must be excluded - region
+membership (from the P1 synchrony itself) is part of the method.
+
+Standing method gained: winter anticyclonic clean events recur and the sweep's synchronised
+family AUTO-DETECTS them -> repeat the experiment every event = a time series of per-unit
+systematics (% of molecular), the second triage column next to the P0 bound. Caveats: 2
+nights; deviations mix dark + overlap (below ~1.6 km overlap dominates - B; 1-3 km more
+dark-weighted); single-unit noise above ~4 km.
+
+![Christmas experiment](figs_remote_dark/fig25_xmas_experiment.png)
