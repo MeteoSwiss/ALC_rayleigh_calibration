@@ -407,8 +407,8 @@ def build_site(site_key):
     # four inclusion rules, plus the monthly noise sums of the "average first" mode -- computed
     # from the NATIVE L1 daily files (the _streams_* cache is hourly by design; an hourly stream
     # has one sample per window and carries no noise statistics).  See nf_v3.py.
-    payload["nf"] = NF.compute_nf(v3, site_key, s["wmo"], t0, t1, union, have, hours, days,
-                                  corr, corr_of, calib, dark, Z_AGL, station_alt, hour_month,
+    payload["nf"] = NF.compute_nf(v3, site_key, s["wmo"], t0, t1, union, have,
+                                  calib, dark, Z_AGL, station_alt, hour_month,
                                   months, bool(s.get("dark_npz")))
     payload["hopkin"] = hopkin_payload(v3, s["wmo"], calib)
     payload["pcolor"] = pcolor_payload(v3, aligned, aligned_disp, union, union_day, corr, corr_of,

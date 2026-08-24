@@ -153,7 +153,9 @@ never calibrated WV-free.
   `nf_v3.py` from the NATIVE L1 files (`l1_l2_io.read_l1_native` — the `_streams_*` cache is
   HOURLY, never use it for noise statistics), windows 5 min (default)/30/60/3 h, four modes
   (par instrument / intersection / moyenne-d'abord / masque scène, referee = the site CHM15k,
-  `nf_ref` in variants_v3). SNR filtering conditions the sample on signal: at Payerne 5 min the
+  `nf_ref` in variants_v3; scene thresholds = ABSOLUTE β_att 0.1/0.25/0.5 Mm⁻¹sr⁻¹ measured
+  AND detected by the referee — operator decisions 2026-08-24). SNR filtering conditions the
+  sample on signal: at Payerne 5 min the
   CL31 keeps 25 % of band hours and the measured sampling bias (CHM15k median under the CL31
   mask) is **+26 %** — shown live on the page; the scene/intersection/aggregate modes are the
   unbiased comparisons. Masks frozen at site-default constants; L2 inherits L1 masks;

@@ -32,14 +32,12 @@ detected windows; the hour is admitted when that fraction >= NF_FMIN (0.5).  The
 "median of surviving samples" alternative would need one full value block per (mode x window)
 and is deliberately not shipped; check_v3.py quantifies the approximation.
 
-Scene thresholds (all in the referee's CALIBRATED units, Mm-1 sr-1 at the target wavelength,
-constants FROZEN at the site's default variants so the mask cannot drift with the user's
-variant clicks):
-  t_all   "detectable par tous"  — 3 sigma / sqrt(n) of the LEAST sensitive instrument present,
-          converted to calibrated units (Angstrom factor + nominal WV where applicable)
-  t_ray   ">= Rayleigh"          — the molecular attenuated backscatter beta_mol(day, z) at the
-          target wavelength (CAMS where a 910 nm stream ships bmt, US-standard otherwise)
-  t_ref   "detecte par la reference" — 3 sigma / sqrt(n) of the referee itself
+Scene thresholds (operator decision 2026-08-24): three ABSOLUTE attenuated-backscatter levels,
+0.1 / 0.25 / 0.5 Mm-1 sr-1 at the target wavelength, measured AND detected by the referee —
+a window passes when the referee's calibrated window median satisfies
+beta_att >= max(threshold, 3 sigma_ref/sqrt(n)), i.e. the scene is at least that bright and
+the referee actually detects it.  The referee's constants are FROZEN at the site's default
+variant so the mask cannot drift with the user's variant clicks.
 """
 from __future__ import annotations
 import base64
@@ -56,7 +54,8 @@ NF_WINS = (300, 1800, 3600, 10800)          # 5 min / 30 min / 60 min / 3 h
 NF_FMIN = 0.5                               # sub-hourly admission: >= half the hour's data
 SNR_MIN = IC.SNR_MIN                        # 3.0 — same gate as the operational product
 MIN_SAMPLES = IC._SNR_MIN_SAMPLES           # < 5 samples: too short to estimate noise, keep all
-THR_KEYS = ("t_all", "t_ray", "t_ref")      # bit order in the scene block (thr*4 + win)
+THR_KEYS = ("b010", "b025", "b050")         # bit order in the scene block (thr*4 + win)
+THR_BETA = {"b010": 0.10, "b025": 0.25, "b050": 0.50}   # Mm-1 sr-1 at the target wavelength
 
 
 # ---------------------------------------------------------------------------- encoders
@@ -215,7 +214,7 @@ def _stream_stats(site_key, wmo, ident, d0, d1, t0, t1, z_agl, station_alt, use_
 
 
 # ---------------------------------------------------------------------------- main entry
-def compute_nf(v3, site_key, wmo, t0, t1, union, have, hours, days, corr, corr_of, calib,
+def compute_nf(v3, site_key, wmo, t0, t1, union, have, calib,
                dark_disp, z_agl, station_alt, hour_month, months, use_dark):
     """-> the payload's "nf" dict (see module docstring).
 
@@ -226,7 +225,6 @@ def compute_nf(v3, site_key, wmo, t0, t1, union, have, hours, days, corr, corr_o
     idents = [i["ident"] for i in v3["instruments"]]
     ref_id = v3.get("nf_ref")
     union_h = union.astype("datetime64[h]").astype("i8")
-    day_index = {d: i for i, d in enumerate(days)}
     n_u, nz = union_h.size, z_agl.size
     nW = len(NF_WINS)
 
@@ -290,11 +288,12 @@ def compute_nf(v3, site_key, wmo, t0, t1, union, have, hours, days, corr, corr_o
                                     passing * weight, weight)
         common |= (_admit(num, den).astype("u1") << w)
 
-    # --- scene bits (referee vs three thresholds) ---------------------------------------------
+    # --- scene bits: the referee's calibrated beta_att vs three ABSOLUTE thresholds -----------
+    # A window passes threshold T when the referee both MEASURES beta_att >= T and DETECTS it
+    # (>= 3 sigma/sqrt(n) of its own window noise) — "beta_att detected by the reference".
     scene = None
     scene_why = None
     consts = {}
-    ref_c, ref_lbl = (None, None), None
     if ref_id is None:
         scene_why = "nf_ref non déclaré pour ce site"
     else:
@@ -304,70 +303,22 @@ def compute_nf(v3, site_key, wmo, t0, t1, union, have, hours, days, corr, corr_o
             scene_why = (f"constantes indisponibles pour la référence {ref_id} ({ref_lbl}) — "
                          f"masque scène impossible")
     if scene_why is None:
-        # site-level beta_mol(day, z) at the target wavelength, Mm-1 sr-1 (units of the page)
-        bmt_day = next((c["bmt"] for c in corr.values() if c.get("bmt") is not None), None)
-        if bmt_day is None:
-            bmt_static = IC._molecular_beta(z_agl, station_alt, 1064.0)
-        # instrument -> (C(t) series, Angstrom factor, nominal WV array) for the t_all threshold
-        thr_inst = {}
-        for ident in idents:
-            cs, lbl = cseries(ident)
-            consts.setdefault(ident, lbl)
-            if cs is None:
-                print(f"   nf: t_all ignore {ident} ({lbl}: constantes indisponibles)", flush=True)
-                continue
-            c = corr[corr_of[("L1", ident)]]
-            thr_inst[ident] = (cs, float(c.get("f") or 1.0), c.get("wv"))
         scene = np.zeros((n_u, nz), "u2")
         for w, W in enumerate(NF_WINS):
             e = stats[ref_id][W]
             wids = e["wids"]
-            tc = ((wids * W + W // 2)).astype("datetime64[s]")
-            dstr = [str(t)[:10].replace("-", "") for t in tc.astype("datetime64[D]")]
-            didx = np.array([day_index.get(ds, -1) for ds in dstr])
+            tc = (wids * W + W // 2).astype("datetime64[s]")
             cref = IC.interp_calib(ref_c[0], ref_c[1], tc)
             rn_ref = np.nan_to_num(e["rn"])
             dref = np.asarray(dark_disp[ref_id], "f8") if dark_disp.get(ref_id) else \
                 np.zeros(nz)
             with np.errstate(all="ignore"):
                 beta_cal = (np.nan_to_num(e["med"]) - dref[None, :]) * 1e6 / cref[:, None]
-                sig_ref = np.nan_to_num(e["sig"]) * 1e6 / cref[:, None] / \
+                det = SNR_MIN * np.nan_to_num(e["sig"]) * 1e6 / cref[:, None] / \
                     np.sqrt(np.maximum(rn_ref, 1))
-            # thresholds, per (window, display gate)
-            thr = {}
-            thr["t_ref"] = SNR_MIN * sig_ref
-            if bmt_day is not None:
-                safe = np.where(didx >= 0, didx, 0)
-                thr["t_ray"] = np.where(np.isfinite(bmt_day[safe]) & (didx >= 0)[:, None],
-                                        bmt_day[safe], np.nan)
-                # a day without CAMS betas falls back to the static US-standard profile
-                fb = IC._molecular_beta(z_agl, station_alt, 1064.0)
-                thr["t_ray"] = np.where(np.isfinite(thr["t_ray"]), thr["t_ray"], fb[None, :])
-            else:
-                thr["t_ray"] = np.broadcast_to(bmt_static[None, :], beta_cal.shape)
-            t_all = np.zeros_like(beta_cal)
-            for ident, (cs, f_ang, wv) in thr_inst.items():
-                ei = stats[ident][W]
-                wpos_i = {int(wd): j for j, wd in enumerate(ei["wids"].tolist())}
-                rows = np.array([wpos_i.get(int(wd), -1) for wd in wids.tolist()])
-                okr = rows >= 0
-                sig_i = np.full((wids.size, nz), 0.0)
-                n_i = np.zeros((wids.size, nz))
-                sig_i[okr] = np.nan_to_num(ei["sig"][rows[okr]])
-                n_i[okr] = np.nan_to_num(ei["rn"][rows[okr]])
-                ci = IC.interp_calib(cs[0], cs[1], tc)
-                with np.errstate(all="ignore"):
-                    scal = sig_i * 1e6 / ci[:, None] * f_ang / np.sqrt(np.maximum(n_i, 1))
-                    if wv is not None:
-                        safe = np.where(didx >= 0, didx, 0)
-                        wvv = np.where(np.isfinite(wv[safe]) & (didx >= 0)[:, None],
-                                       wv[safe], 1.0)
-                        scal = scal / wvv
-                scal[n_i == 0] = 0.0            # an absent instrument cannot raise the bar
-                t_all = np.maximum(t_all, scal)
-            thr["t_all"] = SNR_MIN * t_all
             for t, key in enumerate(THR_KEYS):
-                passing = (rn_ref > 0) & np.isfinite(beta_cal) & (beta_cal >= thr[key])
+                thrv = np.maximum(THR_BETA[key], det)
+                passing = (rn_ref > 0) & (beta_cal >= thrv)
                 num, den = _hour_accumulate(union_h, wids, W, passing * rn_ref, rn_ref)
                 scene |= (_admit(num, den).astype("u2") << (t * 4 + w))
 

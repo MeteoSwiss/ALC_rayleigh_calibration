@@ -229,7 +229,7 @@ def check_nf(P, site):
         print(f"  common: 60-min intersection reconstruction — mismatch {mism * 100:.3f} %")
         worst = max(worst, mism)
 
-    # -- scene, 60 min, all three thresholds ---------------------------------------------------
+    # -- scene, 60 min, the three absolute beta_att thresholds ---------------------------------
     if nf.get("scene") and nf.get("ref") in per_inst:
         rid = nf["ref"]
         pr = per_inst[rid]
@@ -248,57 +248,20 @@ def check_nf(P, site):
         n_h[okr] = pr["rn"][pr["rows"][okr]]
         with np.errstate(all="ignore"):
             beta_cal = (np.nan_to_num(med_h) - dref[None, :]) * 1e6 / cref[:, None]
-            sig_ref = sig_h * 1e6 / cref[:, None] / np.sqrt(np.maximum(n_h, 1))
-        hday = np.asarray(P["hour_day"])
-        corrs = {k: P["corr"][k] for k in P["corr"]}
-        bmt = next((defloat(c["bmt"]) for c in corrs.values() if c.get("bmt")), None)
-        thr = {"t_ref": NF.SNR_MIN * sig_ref}
-        fbmol = IC._molecular_beta(z_agl, salt, 1064.0)
-        if bmt is not None:
-            tr = bmt[hday]
-            thr["t_ray"] = np.where(np.isfinite(tr), tr, fbmol[None, :])
-        else:
-            thr["t_ray"] = fbmol[None, :] * np.ones((hour_epoch.size, 1))
-        t_all = np.zeros((hour_epoch.size, nz))
-        for ident in idents:
-            method_i, variant_i = v3["default"][ident]
-            rec_i = P["calib"].get(f"{ident}|{method_i}|{variant_i}")
-            if not (rec_i and rec_i.get("ok")) or ident not in per_inst:
-                continue
-            kdi = np.array([np.datetime64(x) for x in rec_i["kal"]["d"]])
-            ci = IC.interp_calib(kdi, np.asarray(rec_i["kal"]["v"], "f8"),
-                                 hours + np.timedelta64(30, "m"))
-            pi = per_inst[ident]
-            oki = pi["okrows"]
-            sig_i = np.zeros((hour_epoch.size, nz))
-            n_i = np.zeros((hour_epoch.size, nz))
-            sig_i[oki] = np.nan_to_num(pi["sig"][pi["rows"][oki]])
-            n_i[oki] = pi["rn"][pi["rows"][oki]]
-            c = corrs[P["corr_of"][f"L1|{ident}"]]
-            with np.errstate(all="ignore"):
-                scal = sig_i * 1e6 / ci[:, None] * float(c.get("f") or 1.0) / \
-                    np.sqrt(np.maximum(n_i, 1))
-                wv = defloat(c["wv"]) if c.get("wv") else None
-                if wv is not None:
-                    wvv = np.where(np.isfinite(wv[hday]), wv[hday], 1.0)
-                    scal = scal / wvv
-            scal[n_i == 0] = 0.0
-            t_all = np.maximum(t_all, scal)
-        thr["t_all"] = NF.SNR_MIN * t_all
+            det = NF.SNR_MIN * sig_h * 1e6 / cref[:, None] / np.sqrt(np.maximum(n_h, 1))
         sc = _debits(nf["scene"], "<u2")
         for t, key in enumerate(NF.THR_KEYS):
-            ref_pass = (n_h > 0) & np.isfinite(np.nan_to_num(beta_cal)) & \
-                (np.nan_to_num(beta_cal) >= thr[key])
+            thrv = np.maximum(NF.THR_BETA[key], det)
+            ref_pass = (n_h > 0) & (np.nan_to_num(beta_cal) >= thrv)
             mineb = (sc >> (t * 4 + 2) & 1).astype(bool)
             comp = okr[:, None] & np.ones((1, nz), bool)
             # tolerate the exact threshold boundary (interp of C at bin center vs bin mean)
             with np.errstate(all="ignore"):
-                nearline = np.abs(np.nan_to_num(beta_cal) - thr[key]) <= \
-                    0.02 * np.abs(thr[key])
+                nearline = np.abs(np.nan_to_num(beta_cal) - thrv) <= 0.02 * np.abs(thrv)
             hard = comp & ~nearline
             mism = float((mineb[hard] != ref_pass[hard]).mean()) if hard.any() else 0.0
-            print(f"  scene {key}: 60-min reconstruction — mismatch {mism * 100:.3f} % "
-                  f"(hors bande ±2 % du seuil)")
+            print(f"  scene {key} (beta>={NF.THR_BETA[key]}): 60-min reconstruction — "
+                  f"mismatch {mism * 100:.3f} % (hors bande ±2 % du seuil)")
             worst = max(worst, mism)
 
     # -- p2 monthly sums, W = 3600 -------------------------------------------------------------

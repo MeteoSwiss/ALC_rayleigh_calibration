@@ -85,9 +85,10 @@ les masques). Deux menus + un seuil :
     mensuelles `sn`/`ss` par porte). Statistiquement le plus propre.
   - `masque scène (réf. CHM15k)` : masque construit depuis le **référent** (`nf_ref`, le CHM15k
     du site — décision opérateur 2026-08-24) et appliqué à tous ; la sélection dépend de
-    l'atmosphère, pas du bruit de chacun. Trois seuils en unités calibrées : `détectable par
-    tous` (3σ/√n du moins sensible présent, Ångström + WV nominal), `≥ Rayleigh` (β_mol(jour,z)
-    à 1064 nm, CAMS/US-standard — défaut), `détecté par la réf.` (3σ/√n du référent).
+    l'atmosphère, pas du bruit de chacun. Trois seuils **β_att absolus** (décision opérateur) :
+    **0,1 / 0,25 / 0,5 Mm⁻¹ sr⁻¹** à 1064 nm — la fenêtre passe quand le référent mesure
+    β_att ≥ max(seuil, sa propre limite 3σ/√n), « β_att détecté par la référence ».
+    Défaut : 0,25.
 - Les masques sont des **bits par (heure appariée × porte)** : u1 par instrument (bit =
   fenêtre), u1 intersection, u2 scène (bit = seuil×4+fenêtre) ; constantes **gelées aux
   variantes par défaut** du site — changer de variante ne change jamais l'échantillon. Panneaux

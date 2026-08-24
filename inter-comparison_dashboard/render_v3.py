@@ -1399,8 +1399,8 @@ ne biaise pas une médiane) ; le profil de période est seulement MASQUÉ là o�
 < 3. La fenêtre choisie pilote la courbe « % détecté » (diagnostic)">moyenne d'abord, SNR
 après</option>
           <option value="scene" title="le masque est construit depuis l'instrument référent (le
-plus sensible du site) et appliqué à TOUS — la sélection dépend de l'atmosphère, pas du bruit de
-chacun ; choisir le seuil à droite">masque scène (réf.)</option>
+CHM15k du site) et appliqué à TOUS — la sélection dépend de l'atmosphère, pas du bruit de
+chacun ; choisir le seuil β_att absolu à droite">masque scène (réf.)</option>
         </select>
         <select id="nfwin" title="fenêtre d'évaluation du SNR (alignée sur l'horloge). 5 et
 30 min : décision précalculée au build sur les flux natifs — l'heure est admise si au moins la
@@ -1410,16 +1410,13 @@ moitié de ses données tombe dans des fenêtres détectées ; 60 min et 3 h : d
           <option value="2">sur 60 min</option>
           <option value="3">sur 3 h</option>
         </select>
-        <select id="nfthr" title="seuil du masque scène, en unités calibrées de la référence">
-          <option value="0" title="seuil = la limite de détection 3σ/√n de l'instrument le MOINS
-sensible présent, convertie en unités calibrées — toute scène gardée est en principe détectable
-par tous (couverture minimale, équité maximale)">seuil : détectable par tous (3σ max)</option>
-          <option value="1" title="seuil = la rétrodiffusion moléculaire β_mol(jour, z) à
-1064 nm (CAMS, repli US-standard) — « scène au moins aussi brillante que l'atmosphère
-moléculaire », indépendant des instruments">seuil : ≥ Rayleigh (β_mol)</option>
-          <option value="2" title="seuil = la limite de détection 3σ/√n du référent lui-même —
-couverture maximale ; l'instrument bruité contribue des valeurs bruitées mais NON biaisées sur
-les scènes qu'il ne détecte pas individuellement">seuil : détecté par la réf. (3σ réf.)</option>
+        <select id="nfthr" title="seuil de scène absolu : la fenêtre est gardée quand la
+RÉFÉRENCE mesure β_att ≥ seuil (à 1064 nm) ET le détecte (≥ 3σ/√n de son propre bruit) — le
+même masque est appliqué à tous les instruments, qui contribuent des valeurs bruitées mais NON
+biaisées sur les scènes qu'ils ne détectent pas individuellement">
+          <option value="0">seuil : β_att ≥ 0,1 Mm⁻¹ sr⁻¹</option>
+          <option value="1">seuil : β_att ≥ 0,25 Mm⁻¹ sr⁻¹</option>
+          <option value="2">seuil : β_att ≥ 0,5 Mm⁻¹ sr⁻¹</option>
         </select>
         <span class="warnflag ok" id="nfinfo">ⓘ</span>
       </div>

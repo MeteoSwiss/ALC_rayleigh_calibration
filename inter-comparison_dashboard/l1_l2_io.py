@@ -24,6 +24,7 @@ from __future__ import annotations
 import glob
 import os
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -263,27 +264,40 @@ def _scan_meta(jobs):
 def _l1_files_native(files):
     """One day's L1 file(s) at NATIVE time resolution — no retiming, no dark subtraction, no
     noise filter.  The nf_v3 window-SNR statistics need the raw per-sample stream; everything
-    else (decoding, fill handling, screening INPUTS cbh/vv) is identical to _l1_files."""
+    else (decoding, fill handling, screening INPUTS cbh/vv) is identical to _l1_files.
+
+    Each file is retried a few times: under the threaded reader, HDF5 sporadically fails a
+    clean open (HDF5-DIAG "unable to open file"), and a silently skipped day makes the read
+    NON-DETERMINISTIC — the build and its verification (check_v3) would then see different
+    hours and the mask comparison fails on data vintage, not wiring."""
     ts, rcss, cbhs, vvs = [], [], [], []
     rng = None
     for f in files:
-        try:
-            with Dataset(f) as nc:
-                tu = getattr(nc.variables["time"], "units", "days since 1970-01-01")
-                t = IC._decode_time(np.asarray(nc.variables["time"][:], "f8"), tu)
-                r = np.asarray(nc.variables["range"][:], "f8")
-                rcs = IC._clean(nc.variables["rcs_0"][:])
-                if rcs.shape != (t.size, r.size):
-                    rcs = rcs.T if rcs.shape == (r.size, t.size) else None
-                if rcs is None or t.size == 0:
-                    continue
-                if rng is None:
-                    rng = r
-                elif r.size != rng.size:
-                    continue
-                cbh = IC._read2d(nc, "cloud_base_height", t.size, r.size)
-                vv = IC._read1d(nc, "vertical_visibility", t.size)
-        except Exception:
+        got = None
+        for attempt in range(3):
+            try:
+                with Dataset(f) as nc:
+                    tu = getattr(nc.variables["time"], "units", "days since 1970-01-01")
+                    t = IC._decode_time(np.asarray(nc.variables["time"][:], "f8"), tu)
+                    r = np.asarray(nc.variables["range"][:], "f8")
+                    rcs = IC._clean(nc.variables["rcs_0"][:])
+                    if rcs.shape != (t.size, r.size):
+                        rcs = rcs.T if rcs.shape == (r.size, t.size) else None
+                    if rcs is None or t.size == 0:
+                        got = ()
+                        break
+                    cbh = IC._read2d(nc, "cloud_base_height", t.size, r.size)
+                    vv = IC._read1d(nc, "vertical_visibility", t.size)
+                    got = (t, r, rcs, cbh, vv)
+                    break
+            except Exception:
+                time.sleep(0.3 * (attempt + 1))
+        if not got:
+            continue
+        t, r, rcs, cbh, vv = got
+        if rng is None:
+            rng = r
+        elif r.size != rng.size:
             continue
         ts.append(t)
         rcss.append(np.asarray(rcs, "f4"))          # f4: 60+ days of CL61 must fit in memory
