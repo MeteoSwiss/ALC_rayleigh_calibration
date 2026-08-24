@@ -149,6 +149,15 @@ never calibrated WV-free.
   architecture + editing guide in `inter-comparison_dashboard/README.md`; **`variants_v3.py` is
   the file to edit when a new run lands**. Anti-fossil rule: state-dependent numbers in page
   prose are injected at build (`prose_tokens`), never hard-coded.
+- **Noise filter (2026-08-24)**: « Filtre bruit » = SNR≥3 admission masks precomputed by
+  `nf_v3.py` from the NATIVE L1 files (`l1_l2_io.read_l1_native` — the `_streams_*` cache is
+  HOURLY, never use it for noise statistics), windows 5 min (default)/30/60/3 h, four modes
+  (par instrument / intersection / moyenne-d'abord / masque scène, referee = the site CHM15k,
+  `nf_ref` in variants_v3). SNR filtering conditions the sample on signal: at Payerne 5 min the
+  CL31 keeps 25 % of band hours and the measured sampling bias (CHM15k median under the CL31
+  mask) is **+26 %** — shown live on the page; the scene/intersection/aggregate modes are the
+  unbiased comparisons. Masks frozen at site-default constants; L2 inherits L1 masks;
+  curtains/PWV stay static. Verification: `check_v3.py` (gate 0.1 %).
 - Cloud calibration is dark-immune (+0.08 % CL31, ~0.001 % CL61, measured) and its fixed
   100–2400 m window makes a static dark CBH-flat by construction — never rerun cloud for dark.
 - L2 as distributed: CHM15k **and CL61** = operational Rayleigh v1.0 (the CL61's v1.0

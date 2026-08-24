@@ -67,6 +67,7 @@ from monitoring.kalman import kalman_best_estimate
 import build_l1_l2_dashboard as BD          # cache reader, dark_for, pwv, l2_applied
 import l1_l2_calib as CAL
 import l1_l2_io as IO
+import nf_v3 as NF
 import sites
 import variants_v3 as V3
 
@@ -402,6 +403,13 @@ def build_site(site_key):
         dark=dark, dark_kind=V3.dark_kind(site_key), calib=calib,
         l2_applied=BD.l2_applied_constants(npz, t0, t1),
     )
+    # Noise-filter ingredients: per-hour admission bits for the four evaluation windows and the
+    # four inclusion rules, plus the monthly noise sums of the "average first" mode -- computed
+    # from the NATIVE L1 daily files (the _streams_* cache is hourly by design; an hourly stream
+    # has one sample per window and carries no noise statistics).  See nf_v3.py.
+    payload["nf"] = NF.compute_nf(v3, site_key, s["wmo"], t0, t1, union, have, hours, days,
+                                  corr, corr_of, calib, dark, Z_AGL, station_alt, hour_month,
+                                  months, bool(s.get("dark_npz")))
     payload["hopkin"] = hopkin_payload(v3, s["wmo"], calib)
     payload["pcolor"] = pcolor_payload(v3, aligned, aligned_disp, union, union_day, corr, corr_of,
                                        calib, dark)

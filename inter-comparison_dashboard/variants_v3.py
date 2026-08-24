@@ -369,6 +369,10 @@ SITE_V3 = {
                  "C": ("cloud", "cloud_l55s008")},
         default_dark={"A": True, "B": True, "C": True},
         iref=0,
+        # Noise-filter roles (operator decision 2026-08-24): the SCENE mask referee is the
+        # CHM15k (most sensitive, 1064 nm so no WV ambiguity); the sampling-bias diagnostic is
+        # measured under the CL31's mask (the noisiest unit, where the selection bias lives).
+        nf_ref="A", nf_noisiest="B",
         # Each state = (constants variant, profile-side WV mode).  A COHERENT state uses the same
         # laser-line hypothesis on both sides; a crossed one mixes two definitions of the signal
         # and is drawn pale.  A flat residual-vs-PWV slope is the signature of the right spectrum.
@@ -398,6 +402,9 @@ SITE_V3 = {
         ],
         default={i: ("rayleigh", "v2.2") for i in "ABCD"},
         iref=0,
+        # Four identical CHM15k: the scene referee is unit A (also the comparison default);
+        # no meaningful "noisiest" unit, so the sampling-bias diagnostic is omitted.
+        nf_ref="A", nf_noisiest=None,
         title="Amsterdam — quatre CHM15k co-localisés : L1 + étalonnage v2.2",
         subtitle="""Rétrodiffusion atténuée sur les mêmes heures et la même grille d'altitude pour
     les quatre CHM15k de Schiphol. <span class="muted">Aucune archive L2 locale : pas de panneau
@@ -411,6 +418,9 @@ SITE_V3 = {
         ],
         default={"0": ("rayleigh", "v2.2"), "C": ("cloud", "cloud_l55s008")},
         iref=0,
+        # CHM15k referee (operator rule: CHM15k is the P3 scene referee wherever present);
+        # both units are quiet — no sampling-bias diagnostic.
+        nf_ref="0", nf_noisiest=None,
         title="Lindenberg — CHM15k face au CL61 : L1 + étalonnage v2.2",
         subtitle="""Rétrodiffusion atténuée sur les mêmes heures et la même grille d'altitude pour
     le CHM15k (1064 nm) et le CL61 (910 nm) co-localisés. <span class="muted">Aucune archive L2

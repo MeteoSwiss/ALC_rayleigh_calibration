@@ -60,6 +60,43 @@ Reconstruction : `python build_v3.py` puis `python render_v3.py` (payloads sur
   dark du canal nuage ; hors Payerne, les runs « dark » sont étiquetés **dark ESTIMÉ ciel clair**
   (une seule id de variante, deux sources très différentes).
 
+## Filtre bruit (SNR) — 2026-08-24
+
+Sélecteur « **Filtre bruit** » : retire ou masque les données non détectées à **SNR ≥ 3**
+(SNR = médiane de fenêtre / (σ robuste/√n), le critère « SNR3 » opérationnel, évalué sur le
+signal **dark-soustrait** là où le b(z) mesuré existe — la case « dark mesuré » ne change PAS
+les masques). Deux menus + un seuil :
+
+- **Fenêtre d'évaluation** : 5 min (défaut) / 30 min / 60 min / 3 h, alignée horloge. Le payload
+  étant horaire, les décisions sous-horaires sont **précalculées au build** sur les flux L1
+  natifs (`nf_v3.py`, lu via `l1_l2_io.read_l1_native`) : l'heure est admise si ≥ 50 % de ses
+  données (`NF_FMIN`) tombent dans des fenêtres détectées — la valeur horaire reste la médiane
+  inconditionnelle (l'alternative « médiane des survivants » coûterait un bloc de valeurs par
+  mode × fenêtre ; l'approximation est chiffrée par `check_v3.py`, non bloquant).
+- **Mode** — car un filtrage SNR conditionne l'échantillon au signal : le CL31 (bruyant) ne
+  garderait que ses scènes chargées et sa médiane serait biaisée haute vs CL61/CHM15k :
+  - `par instrument` : le filtre littéral, chaque canal sous son propre SNR. Le **biais
+    d'échantillonnage est affiché** sous l'histogramme : médiane du référent sous le masque du
+    CL31 vs sans restriction — de l'échantillonnage pur, mesuré sur l'instrument silencieux.
+  - `masque commun (∩)` : un pixel n'entre que si TOUS les instruments le détectent —
+    échantillon identique, couverture dictée par le plus bruité.
+  - `moyenne d'abord, SNR après` : rien n'est retiré (un bruit à moyenne nulle ne biaise pas une
+    médiane) ; le profil de période est masqué là où le SNR de l'**agrégat** < 3 (sommes
+    mensuelles `sn`/`ss` par porte). Statistiquement le plus propre.
+  - `masque scène (réf. CHM15k)` : masque construit depuis le **référent** (`nf_ref`, le CHM15k
+    du site — décision opérateur 2026-08-24) et appliqué à tous ; la sélection dépend de
+    l'atmosphère, pas du bruit de chacun. Trois seuils en unités calibrées : `détectable par
+    tous` (3σ/√n du moins sensible présent, Ångström + WV nominal), `≥ Rayleigh` (β_mol(jour,z)
+    à 1064 nm, CAMS/US-standard — défaut), `détecté par la réf.` (3σ/√n du référent).
+- Les masques sont des **bits par (heure appariée × porte)** : u1 par instrument (bit =
+  fenêtre), u1 intersection, u2 scène (bit = seuil×4+fenêtre) ; constantes **gelées aux
+  variantes par défaut** du site — changer de variante ne change jamais l'échantillon. Panneaux
+  L2 : masques hérités du L1 (mêmes photons). La courbe pointillée (axe du haut des profils) =
+  % d'heures retenues par porte. Rideaux et panneau PWV : statiques, non filtrés.
+- Vérification (`check_v3.py`, bloquant à 0,1 %) : admission 60 min reconstruite via
+  `retime_hourly`/`snr_mask` (l'implémentation opérationnelle), intersection et scène
+  reconstruites, sommes p2 directes, force brute 5 min sur 2 jours.
+
 ## Provenance des données
 
 Runs par variante sous `C:/DATA/Projects/202606_E-PROFILE_calibration/` (`calout_v22_04` réseau,
