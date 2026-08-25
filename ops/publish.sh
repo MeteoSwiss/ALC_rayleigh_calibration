@@ -115,10 +115,17 @@ fi
 # --- 2. HTML + assets -> web server docroot ------------------------------------------------------
 # Exclude the image trees (they live in the bucket), the SQLite index, and the build dotfiles.
 # --chmod makes files world-readable so nginx (www-data) can serve them regardless of the build umask.
+# NOTE ON --delete: rsync does NOT delete excluded paths on the receiver (that would need
+# --delete-excluded), so every --exclude here also PROTECTS that path in the docroot. That is what
+# keeps 'intercomparison/' alive: the inter-comparison dashboard is built on a workstation from
+# local L1/CAMS archives (inter-comparison_dashboard/build_v3.py + render_v3.py) and uploaded
+# straight to the VM, so it never exists in $SITE and an unprotected --delete would wipe it on the
+# next daily publish.
 if [ -n "${ALC_VM_RSYNC_TARGET:-}" ]; then
   echo "publish: rsync HTML/assets -> $ALC_VM_RSYNC_TARGET"
   err=$(rsync -az --delete --chmod=D755,F644 -e "$VM_SSH" \
     --exclude 'diag/' --exclude 'ombsens/' --exclude 'flagex/' --exclude 'nc/' --exclude 'data/' --exclude 'fullcal_l1_2026/' \
+    --exclude 'intercomparison/' \
     --exclude 'calib_index.sqlite' --exclude '.last_build' \
     --exclude '.processed_days' --exclude '.last_success' --exclude '.git*' \
     "$SITE/" "$ALC_VM_RSYNC_TARGET/" 2>&1 1>/dev/null); lrc=$?
