@@ -163,6 +163,25 @@ DARK_CLOUD_OK_WHY = ("la constante nuage est immune au dark (+0,08 % mesuré) �
 DARK_NO_MEAS_WHY = ("pas de mesure capot pour cette unité (campagne télescope couvert à Payerne "
                     "uniquement)")
 DARK_HINT = "cohérence : profils et constantes corrigés ensemble"
+# --------------------------------------------------------------------------- overlap (CHM15k)
+# The CHM15k near-range signal is attenuated by an incomplete, TEMPERATURE-DEPENDENT laser/telescope
+# overlap (Hervo et al. 2016, AMT).  The L1 rcs_0 already carries the instrument's STATIC reference
+# overlap; the residual is modelled per instrument as Dif(z) = a(z)*T_int + b(z) [%], so the
+# correction is rcs_0 * (1 + Dif/100) -- the reference overlap cancels.  Models (one NetCDF per
+# instrument, from overlap_probe_eprofile) live in ALC_OVERLAP_DIR; the apply kernel is
+# validation/paper/overlap.py, verified against the MATLAB chain.
+#
+# HONEST SCOPE, quoted on the page from the model itself: a and b vanish once the overlap is
+# complete (~700 m on a CHM15k), so the correction reshapes the NEAR RANGE only and is an exact
+# no-op over the 500-3000 m statistics band -- it moves the profile panels below ~0.5 km, not the
+# ladder/statistics numbers, which is also why pairing it with dark-free constants stays coherent
+# (the calibration runs never saw it, and it does not touch their fit window).
+OVERLAP_WHY = ("Corrige le résidu de recouvrement dépendant de la température interne "
+               "(Hervo et al. 2016) : rcs₀ × (1 + (a(z)·T + b(z))/100), le recouvrement de "
+               "référence du L1 s'annulant. Appliqué au L1 ET au L2 (facteur sans dimension, "
+               "même instrument, même optique).")
+OVERLAP_NA_WHY = ("le modèle de recouvrement en température ne concerne que le CHM15k — la raie "
+                  "et l'optique des Vaisala sont différentes et n'ont pas de modèle équivalent")
 # Short forms for legends and chart titles (the long labels do not fit a plotly legend).
 VARIANT_SHORT = {
     "v2.0": "v2.0", "v2.2": "v2.2 (λ910,74)", "v2.2dark": "v2.2+dark",

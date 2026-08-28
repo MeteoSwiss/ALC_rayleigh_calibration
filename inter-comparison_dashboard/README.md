@@ -98,6 +98,35 @@ les masques). Deux menus + un seuil :
   `retime_hourly`/`snr_mask` (l'implémentation opérationnelle), intersection et scène
   reconstruites, sommes p2 directes, force brute 5 min sur 2 jours.
 
+## Correction de recouvrement CHM15k (Hervo 2016) — 2026-08-25
+
+Case « **recouvrement T (Hervo 2016)** », colonne *Recouvrement*, offerte **uniquement pour les
+CHM15k** (le modèle et la physique sont propres à cet instrument ; les Vaisala affichent « — »).
+
+- Le L1 `rcs_0` porte déjà le recouvrement de **référence statique** de l'instrument ; ce qui
+  reste est un résidu qui dépend de la **température interne** : `Dif(z) = a(z)·T_int + b(z)` [%],
+  d'où `rcs_corrigé = rcs₀ · (1 + Dif/100)` — le recouvrement de référence s'annule.
+- Noyau d'application : [`validation/paper/overlap.py`](../validation/paper/overlap.py) (vérifié
+  contre la chaîne MATLAB / `overlap_probe_eprofile`). Modèles : un NetCDF par instrument dans
+  `ALC_OVERLAP_DIR` (défaut `D:/TEMP_MODELS/202606`), indexés par (`wigos_station_id`,
+  `instrument_id`) — les 6 CHM15k des trois sites en ont un.
+- Le payload n'embarque que `a(z)`, `b(z)` sur la grille d'affichage (6 chiffres significatifs) et
+  la **température interne par heure** (`temp_int`, portée par le même retimage que le signal) : le
+  navigateur recalcule le facteur, borné comme le noyau (`fmin`/`fmax`).
+- Ordre : **après** le dark (offset électronique additif), **avant** la division par C_L. Le
+  facteur étant **sans dimension**, il s'applique aussi au **L2** (même instrument, même optique) —
+  contrairement au dark, qui est en unités `rcs₀`.
+- **Portée honnête, chiffrée au build et affichée en infobulle** : `a` et `b` s'annulent une fois
+  le recouvrement complet (~690 m à Payerne, 750–840 m ailleurs), donc la correction **remodèle le
+  proche champ uniquement** et est un **no-op exact au-dessus** ; sur la bande de statistiques
+  500–3000 m elle déplace la médiane de **+0,01 %** (Payerne). C'est aussi pourquoi l'appairage
+  avec des constantes non corrigées reste cohérent : les runs d'étalonnage ne l'ont jamais vue et
+  elle ne touche pas leur fenêtre d'ajustement. Les masques du filtre bruit, gelés au build, ne
+  changent pas non plus (même doctrine que le dark).
+- Vérification (`check_v3.py`, bloquant à 1e-5) : le facteur reconstruit depuis le payload est
+  comparé à `overlap.correct_rcs` sur la grille d'affichage — écart 2,1e-06 (précision de stockage
+  de `a`/`b`), et le facteur est exactement 1 au-dessus de `ztop`.
+
 ## Provenance des données
 
 Runs par variante sous `C:/DATA/Projects/202606_E-PROFILE_calibration/` (`calout_v22_04` réseau,

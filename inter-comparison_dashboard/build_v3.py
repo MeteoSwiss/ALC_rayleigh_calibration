@@ -62,6 +62,7 @@ os.environ.setdefault("ALC_VAL_CAMS_04", "A:/CAMS_Monthly_04")
 import numpy as np
 
 from validation.paper import intercompare as IC
+from validation.paper import overlap as OV
 from validation.paper import run_paper_validation as RP
 from monitoring.kalman import kalman_best_estimate
 import build_l1_l2_dashboard as BD          # cache reader, dark_for, pwv, l2_applied
@@ -142,18 +143,25 @@ def f32block(A):
 
 # ---------------------------------------------------------------------------- panels
 def stream_block(d, ch_alt_grid):
-    """One cached stream -> (hours, screened block, qf-only block) on the display grid.
+    """One cached stream -> (hours, screened block, qf-only block, internal temperature).
 
     Mirrors build_l1_l2_dashboard.build_panel with the calibration and the corrections REMOVED --
-    what is left is exactly the raw signal the browser will transform.
+    what is left is exactly the raw signal the browser will transform.  The internal temperature
+    rides along through the SAME retiming so the overlap T-model (Hervo 2016) can be evaluated
+    per hour on the same axis as the signal blocks.
     """
     beta = np.asarray(d["beta"], "f8")
     scr = IC.screen(beta, d)
     disp = beta.copy()
     disp[d["qf"] > 0] = np.nan
-    g, (S, Dq) = IC.retime_hourly(d["time"], [scr, disp], min_cov_s=IC.MIN_AVG_S, snr_idx=())
+    tmp = d.get("temp_int")
+    arrs = [scr, disp]
+    if tmp is not None and np.ndim(tmp) == 1 and len(tmp) == len(d["time"]):
+        arrs.append(np.asarray(tmp, "f8"))
+    g, out = IC.retime_hourly(d["time"], arrs, min_cov_s=IC.MIN_AVG_S, snr_idx=())
     alt = np.asarray(d["alt"], "f8")
-    return g, IC.regrid(S, alt, ch_alt_grid), IC.regrid(Dq, alt, ch_alt_grid)
+    T = out[2] if len(out) > 2 else None
+    return g, IC.regrid(out[0], alt, ch_alt_grid), IC.regrid(out[1], alt, ch_alt_grid), T
 
 
 def corr_arrays(d, station_alt, alt_asl, days):
@@ -219,6 +227,62 @@ def corr_arrays(d, station_alt, alt_asl, days):
                 bml, bmt = us_l, us_t
             Bl[i], Bt[i] = bml, bmt
         out["bml"], out["bmt"] = Bl, Bt
+    return out
+
+
+def overlap_payload(v3, wmo, z_agl, temp_u, have):
+    """Per-CHM15k ingredients for the temperature-dependent overlap correction (Hervo et al. 2016).
+
+    The E-PROFILE L1 rcs_0 already carries the instrument's STATIC reference overlap; what is left
+    is a residual that depends on the internal temperature.  validation/paper/overlap.py (verified
+    against the MATLAB/overlap_probe_eprofile chain) models it per instrument as
+
+        Dif(z) = a(z) * T_int + b(z)   [%]   ->   rcs_corrected = rcs_0 * (1 + Dif/100)
+
+    so the browser only needs a(z), b(z) on the display grid and the per-hour internal temperature
+    -- the reference overlap cancels.  a and b are interpolated exactly the way correct_rcs() does
+    (held at the first gate below the model, ZERO above its top gate, i.e. a true no-op there).
+
+    A CHM15k with no model file, or with no usable internal temperature, is reported with the
+    reason so the page can grey the box out instead of silently doing nothing.
+    """
+    out = {}
+    for inst in v3["instruments"]:
+        ident = inst["ident"]
+        if inst["itype"] != "CHM15k":
+            continue                                    # model (and the physics) are CHM15k-only
+        model = OV.load_overlap_model(wmo, ident)
+        if model is None:
+            out[ident] = dict(ok=False, why=(f"aucun modèle de recouvrement pour ce flux dans "
+                                             f"{OV.MODEL_DIR.name} (fichier "
+                                             f"Overlap_correction_model_*_{ident}.nc absent)"))
+            continue
+        T = temp_u.get(ident)
+        T = None if T is None else np.asarray(T, "f8")[have]
+        if T is None or not np.any(np.isfinite(T)):
+            out[ident] = dict(ok=False, why="température interne (temp_int) absente du L1 de ce "
+                                            "flux — le modèle en dépend")
+            continue
+        a = np.interp(z_agl, model["range"], model["a"], left=model["a"][0], right=0.0)
+        b = np.interp(z_agl, model["range"], model["b"], left=model["b"][0], right=0.0)
+        # what the operator sees quoted on the page: the correction at the band floor and the
+        # height above which it is exactly 1 (a and b both vanish)
+        nz_last = np.where((np.abs(a) > 1e-12) | (np.abs(b) > 1e-12))[0]
+        ztop = float(z_agl[nz_last[-1]]) if nz_last.size else 0.0
+        tmed = float(np.nanmedian(T))
+        fband = float(np.clip(1.0 + (a[np.argmax(z_agl >= ZMIN)] * tmed +
+                                     b[np.argmax(z_agl >= ZMIN)]) / 100.0,
+                              OV._FACTOR_MIN, OV._FACTOR_MAX))
+        out[ident] = dict(
+            ok=True, file=model["file"],
+            a=[float(f"{x:.6g}") for x in a], b=[float(f"{x:.6g}") for x in b],
+            t=[None if not np.isfinite(x) else float(f"{x:.4g}") for x in T],
+            fmin=float(OV._FACTOR_MIN), fmax=float(OV._FACTOR_MAX),
+            ztop=round(ztop, 1), tmed=round(tmed, 1), fband=round(fband, 5),
+            nt=int(np.isfinite(T).sum()), nh=int(T.size))
+        print(f"   overlap {ident}: {model['file']}  actif < {ztop:.0f} m, "
+              f"T med {tmed:.1f} degC, facteur a {ZMIN:.0f} m = {fband:.4f}, "
+              f"{int(np.isfinite(T).sum())}/{T.size} h avec T", flush=True)
     return out
 
 
@@ -294,13 +358,21 @@ def build_site(site_key):
           f"streams {len(sources)}x{len(idents)}", flush=True)
 
     # --- raw panels ---------------------------------------------------------------------------
-    raw, hours_of = {}, {}
+    raw, hours_of, temp_of = {}, {}, {}
     for src in sources:
         for ident in idents:
-            g, S, Dq = stream_block(cache[(src, ident)], alt_asl)
+            g, S, Dq, T = stream_block(cache[(src, ident)], alt_asl)
             raw[(src, ident)] = (S, Dq)
             hours_of[(src, ident)] = g
+            if src == "L1" and T is not None:
+                temp_of[ident] = T
     union = np.unique(np.concatenate(list(hours_of.values())))
+    temp_u = {}
+    for ident, T in temp_of.items():
+        pos = np.searchsorted(union, hours_of[("L1", ident)])
+        U = np.full(union.size, np.nan)
+        U[pos] = T
+        temp_u[ident] = U
     aligned, aligned_disp = {}, {}
     for k, (S, Dq) in raw.items():
         pos = np.searchsorted(union, hours_of[k])
@@ -410,6 +482,7 @@ def build_site(site_key):
     payload["nf"] = NF.compute_nf(v3, site_key, s["wmo"], t0, t1, union, have,
                                   calib, dark, Z_AGL, station_alt, hour_month,
                                   months, bool(s.get("dark_npz")))
+    payload["overlap"] = overlap_payload(v3, s["wmo"], Z_AGL, temp_u, have)
     payload["hopkin"] = hopkin_payload(v3, s["wmo"], calib)
     payload["pcolor"] = pcolor_payload(v3, aligned, aligned_disp, union, union_day, corr, corr_of,
                                        calib, dark)

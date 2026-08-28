@@ -25,6 +25,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 from validation.paper import intercompare as IC
+from validation.paper import overlap as OV
 import build_l1_l2_dashboard as BD
 import l1_l2_io as IO
 import nf_v3 as NF
@@ -356,6 +357,50 @@ def check_nf(P, site):
     return worst
 
 
+# Payload storage precision: a/b are written with 6 significant figures, so the reconstructed
+# factor agrees with the reference kernel to ~6e-7 (0.00005 % on the signal) -- far below any
+# physical relevance, but tight enough that a real wiring error cannot hide under it.
+TOL_OVERLAP = 1e-5
+
+
+def check_overlap(P, site):
+    """Verify the shipped overlap ingredients against validation/paper/overlap.correct_rcs.
+
+    The browser computes factor(h,z) = clip(1 + (a(z)*T_h + b(z))/100, fmin, fmax) from the payload;
+    the reference kernel is run here on a UNIT signal (so its output IS the factor) with the same
+    temperatures and the same display grid.  Also asserts the no-op claim the page quotes in its
+    tooltip: the factor is exactly 1 above the model's top active gate."""
+    ov = P.get("overlap")
+    if not ov:
+        print("\noverlap: no block in payload (rebuild needed) -- SKIPPED")
+        return 0.0
+    z = np.asarray(P["z"], "f8")
+    worst = 0.0
+    print("\noverlap (Hervo 2016 T-model): payload vs validation/paper/overlap.correct_rcs")
+    for ident, o in ov.items():
+        if not o.get("ok"):
+            print(f"  {ident}: unavailable -- {o.get('why', '')[:80]}")
+            continue
+        model = OV.load_overlap_model(P["wmo"], ident)
+        if model is None:
+            print(f"  {ident}: payload says ok but no model file on this host -- SKIPPED")
+            continue
+        T = np.array([np.nan if t is None else t for t in o["t"]], "f8")
+        a = np.asarray(o["a"], "f8")
+        b = np.asarray(o["b"], "f8")
+        with np.errstate(all="ignore"):
+            mine = np.clip(1.0 + (np.outer(T, a) + b[None, :]) / 100.0, o["fmin"], o["fmax"])
+        mine[~np.isfinite(T), :] = 1.0
+        ref = OV.correct_rcs(np.ones((T.size, z.size)), z, T, model)
+        d = float(np.nanmax(np.abs(mine - ref)))
+        above = z > o["ztop"]
+        noop = float(np.nanmax(np.abs(mine[:, above] - 1.0))) if above.any() else 0.0
+        print(f"  {ident}: max |payload - kernel| {d:.2e} over {T.size} h x {z.size} gates; "
+              f"factor above ztop={o['ztop']:.0f} m departs from 1 by {noop:.2e}")
+        worst = max(worst, d, noop)
+    return worst
+
+
 def main():
     site = sys.argv[1] if len(sys.argv) > 1 else "payerne"
     only = sys.argv[2] if len(sys.argv) > 2 else None
@@ -471,13 +516,16 @@ def main():
 
     # ---- noise-filter blocks vs independent recomputation ---------------------------------------
     nf_worst = check_nf(P, site)
+    ov_worst = check_overlap(P, site)
 
     # ---- the mechanical gate, LAST so every section above always prints -------------------------
     print(f"\nworst absolute deviation new-vs-v2: {worst_pp:.4f} pt "
           f"(medrelbias/relbias), {worst_r:.5f} (r_log); noise-filter mismatch "
           f"{nf_worst * 100:.3f} %")
-    if worst_pp > TOL_PP or worst_r > TOL_R or nf_worst > 0.001:
-        print(f"FAIL: deviation exceeds tolerance ({TOL_PP} pt / {TOL_R} / nf 0.1 %)")
+    print(f"overlap factor deviation: {ov_worst:.2e} (tolerance {TOL_OVERLAP:.0e})")
+    if worst_pp > TOL_PP or worst_r > TOL_R or nf_worst > 0.001 or ov_worst > TOL_OVERLAP:
+        print(f"FAIL: deviation exceeds tolerance ({TOL_PP} pt / {TOL_R} / nf 0.1 % / "
+              f"overlap {TOL_OVERLAP:.0e})")
         sys.exit(1)
     print("PASS")
 

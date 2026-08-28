@@ -301,6 +301,12 @@ function computeSel(id, src, sel) {
   /* measured hood dark b(z), in rcs_0 units, subtracted BEFORE the calibration division — the
      per-hour band values are stored per gate, so this is exact, not a band-mean approximation. */
   const dark = (src === 'L1' && sel.dark && P.dark[id]) ? P.dark[id] : null;
+  /* temperature-dependent overlap residual (Hervo 2016): factor = 1 + (a(z)*T_int + b(z))/100,
+     applied AFTER the dark (the dark is an additive electronic offset, the overlap a
+     multiplicative property of the optical path) and BEFORE the calibration division.  The factor
+     is DIMENSIONLESS, so unlike the dark it is equally valid on the L2 product — same instrument,
+     same optics, same hour.  Twin of validation/paper/overlap.correct_rcs. */
+  const ovr = (sel.ov && P.overlap && P.overlap[id] && P.overlap[id].ok) ? P.overlap[id] : null;
   const wvArr = state.wv === 'none' ? null
               : (state.wv === 'ctor' && cr.wv2 ? cr.wv2 : cr.wv);
   const needWL = cr.lam !== null && Math.abs(cr.lam - P.target) >= 1.0;
@@ -310,9 +316,16 @@ function computeSel(id, src, sel) {
   for (let h = 0; h < nh; h++) {
     const d = P.hour_day[h], o = h * nz, dof = d * nz;
     const scale = src === 'L1' ? 1e6 / cl[h] : 1.0;
+    const Tov = ovr ? ovr.t[h] : null;
     for (let g = 0; g < nz; g++) {
       let v = raw[o + g];
       if (dark) v -= dark[g];
+      /* a null temperature keeps factor 1 (no correction) rather than blanking the hour —
+         the same rule correct_rcs applies to non-finite T */
+      if (ovr && Tov !== null) {
+        let f = 1 + (ovr.a[g] * Tov + ovr.b[g]) / 100;
+        v *= Math.min(Math.max(f, ovr.fmin), ovr.fmax);
+      }
       v *= scale;
       if (wvArr) v /= wvArr[dof + g];
       if (useMol) v = cr.bmt[dof + g] + (v - cr.bml[dof + g]) * cr.f;
@@ -697,7 +710,8 @@ function drawLadder(V) {
          and both profile states are coherent user choices. */
       const rdark = sel.method === 'rayleigh'
         ? (DARK_RUNS.indexOf(vn) >= 0 && !!P.dark[id]) : sel.dark;
-      const A = computeSel(id, 'L1', { method:sel.method, variant:vn, dark:rdark });
+      const A = computeSel(id, 'L1', { method:sel.method, variant:vn, dark:rdark,
+                                       ov:sel.ov });
       if (!A) return;
       let delta = '—', disp = '—';
       if (k === kref) {
@@ -1086,6 +1100,24 @@ function buildControls() {
         'télescope couvert avant la division par C_L' : DARK_NO_MEAS_WHY.replace(/"/g, '&quot;')}">
       <input type="checkbox" class="dchk" data-id="${id}" ${sel.dark ? 'checked' : ''}
        ${hasDark ? '' : 'disabled'}> dark mesuré (capot)</label>${warn}`;
+    /* overlap: offered only where it means something (CHM15k), greyed WITH THE REASON when the
+       model or the internal temperature is missing — the omit-vs-grey doctrine */
+    const ovr = (P.overlap || {})[id];
+    let ovCell;
+    if (inst.itype !== 'CHM15k') {
+      ovCell = `<span class="muted" title="${OVERLAP_NA_WHY.replace(/"/g, '&quot;')}">—</span>`;
+    } else {
+      const ok = ovr && ovr.ok;
+      const tip = ok
+        ? `${OVERLAP_WHY} Modèle ${ovr.file} : actif sous ${ovr.ztop.toFixed(0)} m, no-op ` +
+          `au-dessus (facteur exactement 1) ; T interne médiane ${ovr.tmed.toFixed(1)} °C → ` +
+          `facteur ${ovr.fband.toFixed(4)} à ${S().zmin.toFixed(0)} m, sur ${ovr.nt}/${ovr.nh} ` +
+          `heures avec température.`
+        : (ovr ? ovr.why : 'modèle absent du payload — relancer build_v3.py');
+      ovCell = `<label class="chk" title="${tip.replace(/"/g, '&quot;')}">
+        <input type="checkbox" class="ochk" data-id="${id}" ${sel.ov ? 'checked' : ''}
+         ${ok ? '' : 'disabled'}> recouvrement T (Hervo 2016)</label>`;
+    }
     return `<tr>
       <td><span class="swatch" style="background:${inst.color}"></span><b>${inst.label}</b>
           <span class="muted">${inst.itype}</span></td>
@@ -1093,13 +1125,15 @@ function buildControls() {
       <td><select class="vsel" data-id="${id}">${opts}</select>${badge}</td>
       <td>${nightsBadge(id, sel.method, sel.variant)}</td>
       <td>${darkCell}</td>
+      <td>${ovCell}</td>
       <td><label class="chk"><input type="radio" name="iref" value="${k}"
            ${state.iref === k ? 'checked' : ''}> référence</label></td></tr>`;
   }).join('');
   const anyDark = P.instruments.some(i => state.pick[i.ident].dark);
   document.getElementById('instr').innerHTML =
     `<thead><tr><th>Instrument</th><th>Méthode</th><th>Variante d'étalonnage</th>
-      <th>Disponibilité</th><th>Fond électronique</th><th>Différences /</th></tr></thead>
+      <th>Disponibilité</th><th>Fond électronique</th><th>Recouvrement</th>
+      <th>Différences /</th></tr></thead>
      <tbody>${rows}</tbody>`;
   document.getElementById('darkhint').innerHTML = anyDark
     ? `<span class="muted">${DARK_HINT}</span>` : '';
@@ -1221,6 +1255,10 @@ function bindRow() {
     }
     buildControls(); draw();
   }));
+  document.querySelectorAll('#instr .ochk').forEach(c => c.addEventListener('change', e => {
+    state.pick[e.target.dataset.id].ov = e.target.checked;
+    buildControls(); draw();
+  }));
   document.querySelectorAll('#instr input[name=iref]').forEach(r =>
     r.addEventListener('change', e => { state.iref = +e.target.value; draw(); }));
 }
@@ -1250,7 +1288,7 @@ function setSite(key) {
        on a Rayleigh channel the pairing rule (dark iff dark-run) overrides default_dark */
     let dk = !!(dd[i.ident] && P.dark[i.ident]);
     if (method === 'rayleigh') dk = DARK_RUNS.indexOf(variant) >= 0 && !!P.dark[i.ident];
-    state.pick[i.ident] = { method, prev:null, dark:dk, variant };
+    state.pick[i.ident] = { method, prev:null, dark:dk, variant, ov:false };
   });
   state.iref = P.iref;
   state.r0 = 0; state.r1 = P.months.length - 1;
@@ -1327,6 +1365,8 @@ def html(payloads):
         f"const DARK_NO_MEAS_WHY = {json.dumps(V3.DARK_NO_MEAS_WHY)};\n"
         f"const DARK_HINT = {json.dumps(V3.DARK_HINT)};\n"
         f"const REFERENCE_VARIANTS = {json.dumps(list(V3.REFERENCE_VARIANTS))};\n"
+        f"const OVERLAP_WHY = {json.dumps(V3.OVERLAP_WHY)};\n"
+        f"const OVERLAP_NA_WHY = {json.dumps(V3.OVERLAP_NA_WHY)};\n"
         f"const REFERENCE_NOTE = {json.dumps(V3.REFERENCE_NOTE)};\n")
 
     return f"""<!doctype html>

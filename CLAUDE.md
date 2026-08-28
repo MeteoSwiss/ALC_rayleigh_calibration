@@ -160,6 +160,15 @@ never calibrated WV-free.
   mask) is **+26 %** — shown live on the page; the scene/intersection/aggregate modes are the
   unbiased comparisons. Masks frozen at site-default constants; L2 inherits L1 masks;
   curtains/PWV stay static. Verification: `check_v3.py` (gate 0.1 %).
+- **CHM15k overlap option (2026-08-25)**: dashboard checkbox « recouvrement T (Hervo 2016) »,
+  CHM15k rows only — the temperature-dependent overlap residual, rcs₀·(1 + (a(z)·T_int + b(z))/100),
+  kernel `validation/paper/overlap.py` (validated vs MATLAB), models one NetCDF per instrument in
+  `ALC_OVERLAP_DIR` (default `D:/TEMP_MODELS/202606`; all 6 CHM15k of the 3 sites covered).
+  Applied after the dark, before the C_L division, and to **L2 as well** (dimensionless factor,
+  same optics — unlike the rcs₀-unit dark). It is a **no-op above ~700–840 m** (a and b vanish at
+  full overlap), so it reshapes the near range only and moves the 500–3000 m band median by
+  +0.01 %: the ladder/statistics and the dark-free constants pairing stay coherent. Verified in
+  `check_v3.py` against the reference kernel (gate 1e-5; observed 2.1e-06 = a/b storage precision).
 - Cloud calibration is dark-immune (+0.08 % CL31, ~0.001 % CL61, measured) and its fixed
   100–2400 m window makes a static dark CBH-flat by construction — never rerun cloud for dark.
 - L2 as distributed: CHM15k **and CL61** = operational Rayleigh v1.0 (the CL61's v1.0
