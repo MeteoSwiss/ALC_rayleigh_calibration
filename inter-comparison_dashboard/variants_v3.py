@@ -24,7 +24,8 @@ NOWV = DATA / "diag_v22_nowv"                 # same runner, water-vapour correc
 
 # --------------------------------------------------------------------------- CL61 WV spectrum
 # The water-vapour correction integrates the LASER LINE over the 910 nm absorption band, so its
-# amplitude is set by (lambda0, FWHM).  The operational model uses 910.74 nm / FWHM 1.0 nm.  The
+# amplitude is set by (lambda0, FWHM).  The operational model USED 910.74 nm / FWHM 1.0 nm until
+# mid-2026.  The
 # authors of the Le & O'Connor preprint report, from a Vaisala personal communication (response to
 # referee RC1), the manufacturer's true spectrum: lambda0 = 910.55 nm, sigma = 0.08 nm, i.e.
 # FWHM = 2*sqrt(2*ln2)*sigma = 0.188 nm.  That line is narrow enough to sit BETWEEN the strong
@@ -33,9 +34,11 @@ NOWV = DATA / "diag_v22_nowv"                 # same runner, water-vapour correc
 # attenuation than the CL61; our own LUT gives 9.3x; our empirical cloud-scene measurement says the
 # raw CL61 signal carries only ~8 % of the modelled absorption).
 #
-# The 910.55 / sigma 0.08 run is therefore the PHYSICALLY CORRECT hypothesis and is flagged as the
-# page's reference; the others (910.74 operational, 910.55/FWHM 1.0, 910.55/FWHM 0.1, no WV at all)
-# stay as the comparison ladder that brackets it.
+# The 910.55 / sigma 0.08 run is therefore the PHYSICALLY CORRECT hypothesis -- and, since the
+# 2026-08 operational upgrade, what E-PROFILE actually ships (see REFERENCE_VARIANTS for the
+# night-for-night evidence).  The page badges it with a star; the others (910.74 = the RETIRED
+# operational model, 910.55/FWHM 1.0, 910.55/FWHM 0.1, no WV at all) stay as the comparison
+# ladder that brackets it.
 LAM_RUNS = {                                  # variant suffix -> runner output tree
     "l55s008": DATA / "diag_v22_l55s008",     # 910.55 nm, sigma 0.08 -> FWHM 0.188  (constructeur)
     "l55w10":  DATA / "diag_v22_l55w10",      # 910.55 nm, FWHM 1.0   (line position only)
@@ -76,16 +79,16 @@ _CL61_ONLY = {v for m in VARIANTS.values() for v in m if "_l55" in v}
 _CL31_ONLY = {v for m in VARIANTS.values() for v in m if "_cl31" in v}
 VARIANT_LABEL = {
     "v2.0":         "v2.0 (opérationnel)",
-    "v2.2":         "v2.2 — WV λ910,74 / FWHM 1,0 (modèle actuel)",
+    "v2.2":         "v2.2 — WV λ910,74 / FWHM 1,0 (ancien modèle opérationnel)",
     "v2.2dark":     "v2.2 + fond soustrait (dark)",
     "v2.2sansWV":   "v2.2 — sans correction WV",
-    "v2.2_l55s008": "v2.2 — WV λ910,55 σ0,08 (spectre constructeur) ★",
-    "v2.2_l55s008dark": "v2.2 — WV λ910,55 σ0,08 + fond soustrait (dark) ★",
+    "v2.2_l55s008": "v2.2 — WV λ910,55 σ0,08 (spectre constructeur — modèle opérationnel) ★",
+    "v2.2_l55s008dark": "v2.2 — WV λ910,55 σ0,08 (opérationnel) + fond soustrait (dark) ★",
     "v2.2_l55w10":  "v2.2 — WV λ910,55 / FWHM 1,0",
     "v2.2_l55w01":  "v2.2 — WV λ910,55 / FWHM 0,1",
-    "cloudWV":      "nuage — WV λ910,74 / FWHM 1,0 (modèle actuel)",
+    "cloudWV":      "nuage — WV λ910,74 / FWHM 1,0 (ancien modèle opérationnel)",
     "cloudNoWV":    "nuage — sans correction WV",
-    "cloud_l55s008": "nuage — WV λ910,55 σ0,08 (spectre constructeur) ★",
+    "cloud_l55s008": "nuage — WV λ910,55 σ0,08 (spectre constructeur — modèle opérationnel) ★",
     "cloud_l55w10":  "nuage — WV λ910,55 / FWHM 1,0",
     "cloud_l55w01":  "nuage — WV λ910,55 / FWHM 0,1",
     "cloud_cl31l910": "nuage — WV λ910,0 / FWHM 6,0 (constructeur)",
@@ -193,13 +196,22 @@ VARIANT_SHORT = {
     "cloud_l55w01": "nuage λ910,55 F0,1",
     "cloud_cl31l910": "nuage λ910,0 F6,0", "cloud_cl31wieg": "nuage λ910,0 F3,4",
 }
-# Variants that carry the manufacturer spectrum — the page badges them as the reference hypothesis.
+# Variants that carry the manufacturer spectrum.  Until 2026-08 these were a CANDIDATE hypothesis;
+# they are now what the operational chain ships -- verified 2026-08-31 by downloading the current
+# per-night NetCDFs from the EWC bucket and comparing night-for-night: the operational values
+# reproduce diag_v22_l55s008 (cloud 70/70 nights within 2 %, median ratio 1.0000; Rayleigh 37/40)
+# and match NO nominal-spectrum run (0/65).  The star therefore badges the OPERATIONAL model, and
+# the 910,74 variants are the retired one, kept as the comparison ladder.
 # The fully-corrected state (spectrum + measured dark) leads: it is what a method flip picks first.
 REFERENCE_VARIANTS = ("v2.2_l55s008dark", "v2.2_l55s008", "cloud_l55s008")
 REFERENCE_NOTE = ("Spectre d'émission constructeur (Vaisala, comm. pers. citée dans la réponse au "
                   "relecteur RC1 du preprint Le & O'Connor) : lambda0 = 910,55 nm, sigma = 0,08 nm, "
-                  "soit FWHM = 0,188 nm. Le modèle opérationnel (910,74 / FWHM 1,0) sur-corrige "
-                  "l'absorption d'environ un facteur 9.")
+                  "soit FWHM = 0,188 nm. C'est désormais le spectre de la CHAÎNE "
+                  "OPÉRATIONNELLE : les constantes par nuit publiées par E-PROFILE "
+                  "(téléchargées le 2026-08-31) reproduisent nuit par nuit le rejeu "
+                  "« l55s008 » (nuage 70/70 nuits à mieux que 2 %, rapport médian "
+                  "1,0000) et ne correspondent à aucun rejeu au spectre nominal. L'ancien modèle "
+                  "(910,74 / FWHM 1,0) sur-corrigeait l'absorption d'environ un facteur 9.")
 # Per-PROFILE cloud-calibration dumps (rayleigh_availability/cloud_profile_dump.py, one output
 # folder per water-vapour configuration).  They feed the Hopkin-style CBH heatmap, which is the
 # per-profile view of the same constant the page divides by -- so the panel follows the operator's
@@ -314,16 +326,23 @@ def source_for(site_key, ident, itype, method, variant, wmo):
     return f"variante « {variant} » inconnue"
 
 
-_SPECTRUM_WARN = """<b>★ Spectre d'émission du CL61 — hypothèse de référence.</b> Les auteurs
+_SPECTRUM_WARN = """<b>★ Spectre d'émission du CL61 — désormais le modèle opérationnel.</b> Les auteurs
     du preprint Le &amp; O'Connor rapportent, d'une communication personnelle Vaisala (réponse au
     relecteur RC1), la raie réelle du CL61 : <b>λ₀ = 910,55 nm, σ = 0,08 nm</b>, soit
     <b>FWHM = 0,188 nm</b>. Le modèle opérationnel (910,74 nm / FWHM 1,0) <b>sur-corrige
     l'absorption d'un facteur ≈ 9</b> — corroboré trois fois indépendamment : le HITRAN
     raie-par-raie des auteurs donne au CL51 ≈ 10× l'atténuation WV du CL61, notre propre LUT donne
     9,3×, et notre mesure empirique sur scènes nuageuses dit que le signal brut du CL61 ne porte
-    que ~8 % de l'absorption modélisée. Les variantes marquées <b>★</b> (constantes) et le mode
+    que ~8 % de l'absorption modélisée. <b>La chaîne opérationnelle a adopté ce spectre</b> :
+    les constantes par nuit publiées par E-PROFILE (téléchargées le 2026-08-31, versions
+    220/1000) reproduisent <b>nuit par nuit</b> le rejeu « l55s008 » — nuage 70/70 nuits à
+    mieux que 2 %, rapport médian 1,0000 ; Rayleigh 37/40 — et ne correspondent à aucun rejeu au
+    spectre nominal (0/65). Les variantes marquées <b>★</b> (constantes) et le mode
     <b>« λ910,55 σ0,08 »</b> de la correction WV de comparaison portent ce spectre : les choisir des
-    <b>deux côtés</b> est l'état physiquement cohérent. Les autres λ ne sont là que pour encadrer."""
+    <b>deux côtés</b> est l'état opérationnel <i>et</i> physiquement cohérent. Les λ910,74 sont
+    l'<b>ancien</b> modèle, gardées pour encadrer. <b>Attention à la fraîcheur des NetCDF locaux</b> :
+    les variantes « v2.0 » / « nuage λ910,74 » lisent la copie locale, antérieure à la bascule ;
+    une copie rafraîchie depuis le bucket porterait, elle, le nouveau spectre."""
 
 _PAY_WARN = [
     # {tokens} are substituted at BUILD time from the current calibration series
@@ -396,10 +415,10 @@ SITE_V3 = {
         # laser-line hypothesis on both sides; a crossed one mixes two definitions of the signal
         # and is drawn pale.  A flat residual-vs-PWV slope is the signature of the right spectrum.
         pwv=dict(ident="C", ref="A", method="rayleigh",
-                 states=[["v2.2", "nom", "λ910,74 FWHM 1,0 des deux côtés — modèle actuel",
+                 states=[["v2.2", "nom", "λ910,74 FWHM 1,0 des deux côtés — ancien modèle",
                           "#d62728", "circle"],
                          ["v2.2_l55s008", "ctor", "λ910,55 σ0,08 des deux côtés — spectre "
-                          "constructeur ★", "#2f9e44", "diamond"],
+                          "constructeur, modèle opérationnel ★", "#2f9e44", "diamond"],
                          ["v2.2sansWV", "none", "sans WV des deux côtés", "#1f77b4", "square"],
                          ["v2.2", "none", "cal. avec WV × comparaison sans WV — croisé",
                           "#f1a8a8", "circle-open"],

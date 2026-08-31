@@ -142,8 +142,19 @@ never calibrated WV-free.
   `water_vapor.LASER_SPECTRUM`, cloud `set_defaults` reads it too); **`ALC_WV_DISABLE=1`** turns
   the WV correction off. Runs per hypothesis: `diag_v22_l55s008` (★), `_l55w10`, `_l55w01`,
   `_nowv`, `_l55s008dark` (★+dark, the CL61 Rayleigh reference), CL31 ladder `_cl31l910`/`_cl31wieg`.
-- Three CL61 wavelengths coexist ON PURPOSE: 910.74→WV correction table (update to 910.55/0.188
-  pending final arbitration), 910.0→molecular Rayleigh reference (0.33 % effect), 910.55→η tables.
+- **The 910.55/0.188 spectrum is now OPERATIONAL (verified 2026-08-31).** The arbitration is
+  settled: the per-night NetCDFs published by E-PROFILE (EWC bucket `nc/<wmo>_<ident>/`,
+  `calibration_version` 220 Rayleigh / 1000 cloud) reproduce our `diag_v22_l55s008` reruns
+  **night-for-night** — cloud 70/70 nights within 2 % at a median ratio of 1.0000, Rayleigh 37/40 —
+  and match NO nominal-spectrum run (0/65). Consequences: ★ variants = the operational model, the
+  910.74 ones = retired; the operational Rayleigh constant is **dark-free** (it matches
+  `v2.2_l55s008`, not `_l55s008dark`); CHM15k (1064 nm, no WV term) and CL31 (wide 6 nm line,
+  insensitive: all its spectra agree within 0.5 %) are unaffected — only the CL61 moved.
+  ⚠ **The local `NC_DIR` copy (`C:/Users/hervo/Downloads`) predates the switch** (nights to
+  2026-08-06, no `calibration_version`), so the dashboard's `v2.0`/`cloudWV` variants still show
+  the retired configuration until those files are refreshed from the bucket.
+- Two other CL61 wavelengths coexist ON PURPOSE: 910.0→molecular Rayleigh reference (0.33 %
+  effect), 910.55→η tables.
 - **Dashboard v3** = `inter-comparison_dashboard/index.html` (one page, 3 sites, per-instrument
   method/variant/dark controls, all-variants ladder table, per-config Hopkin, binned-PWV panel);
   architecture + editing guide in `inter-comparison_dashboard/README.md`; **`variants_v3.py` is

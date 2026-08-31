@@ -1081,7 +1081,7 @@ function buildControls() {
         title="${(why || '').replace(/"/g, '&quot;')}">${vLabel(inst.itype, v)}${ok ? '' : ' — indisponible'}</option>`;
     }).join('');
     const badge = REFERENCE_VARIANTS.indexOf(sel.variant) >= 0
-      ? `<span class="pill ref" title="${REFERENCE_NOTE.replace(/"/g, '&quot;')}">★ hypothèse de référence</span>` : '';
+      ? `<span class="pill ref" title="${REFERENCE_NOTE.replace(/"/g, '&quot;')}">★ modèle opérationnel</span>` : '';
     /* profile-side measured-dark checkbox: only where the covered-telescope campaign measured b(z) */
     const hasDark = !!P.dark[id];
     /* two half-states: profile dark-corrected but constants not (no twin run), and the reverse
