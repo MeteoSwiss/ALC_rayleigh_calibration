@@ -125,12 +125,14 @@ fi
 # keeps 'intercomparison/' alive: the inter-comparison dashboard is built on a workstation from
 # local L1/CAMS archives (inter-comparison_dashboard/build_v3.py + render_v3.py) and uploaded
 # straight to the VM, so it never exists in $SITE and an unprotected --delete would wipe it on the
-# next daily publish.
+# next daily publish. 'dust/' is protected for the same reason: the Saharan-dust dashboard
+# (/emer-met/dustboard) is built and published by its own systemd timers on zueub439 and likewise
+# never exists in $SITE.
 if [ -n "${ALC_VM_RSYNC_TARGET:-}" ]; then
   echo "publish: rsync HTML/assets -> $ALC_VM_RSYNC_TARGET"
   err=$(rsync -az --delete --chmod=D755,F644 -e "$VM_SSH" \
     --exclude 'diag/' --exclude 'ombsens/' --exclude 'flagex/' --exclude 'nc/' --exclude 'data/' --exclude 'fullcal_l1_2026/' \
-    --exclude 'intercomparison/' \
+    --exclude 'intercomparison/' --exclude 'dust/' \
     --exclude 'calib_index.sqlite' --exclude '.last_build' \
     --exclude '.processed_days' --exclude '.last_success' --exclude '.git*' \
     "$SITE/" "$ALC_VM_RSYNC_TARGET/" 2>&1 1>/dev/null); lrc=$?
