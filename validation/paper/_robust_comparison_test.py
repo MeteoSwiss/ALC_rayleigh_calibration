@@ -51,12 +51,12 @@ TYPE_COLORS = {"CL31": "#ff7f0e", "CL51": "#9467bd", "CL61": "#1f77b4"}
 # --------------------------------------------------------------------------- data on a common grid
 def _read_gated_ungated(ch, start, end):
     """Read L1 twice: with the operational per-gate SNR>=3 gate (in _l1_day, on the native profiles),
-    and WITHOUT it (IC.L1_SNR_GATE=False). Same hourly time grid; only the gate NaNs differ."""
-    IC.L1_SNR_GATE = True
+    and WITHOUT it. Same hourly time grid; only the gate NaNs differ."""
+    IC.set_noise_filter("snr3")
     l1g = IC.read_l1(ch["wmo"], ch["ident"], start, end)
-    IC.L1_SNR_GATE = False
+    IC.set_noise_filter("none")
     l1u = IC.read_l1(ch["wmo"], ch["ident"], start, end)
-    IC.L1_SNR_GATE = True
+    IC.set_noise_filter("snr3")
     return l1g, l1u
 
 

@@ -130,6 +130,11 @@ ITYPE = {
 }
 RAYLEIGH_TYPES = {"CL61", "CHM15k", "Mini-MPL"}
 CLOUD_TYPES = {"CL31", "CL51", "CL61"}
+# Research override (unset = operational routing above): force a method on extra instrument types,
+# e.g. ALC_RAYLEIGH_TYPES_EXTRA="CL31,CL51" or ALC_CLOUD_TYPES_EXTRA="CHM15k,Mini-MPL", to
+# demonstrate why the operational routing excludes them.
+RAYLEIGH_TYPES |= {t for t in os.environ.get("ALC_RAYLEIGH_TYPES_EXTRA", "").split(",") if t.strip()}
+CLOUD_TYPES |= {t for t in os.environ.get("ALC_CLOUD_TYPES_EXTRA", "").split(",") if t.strip()}
 
 # Operational L2 archive (for the OmB operational-constant overlay) and the
 # authoritative Kalman method per instrument type for the OmB/sensitivity C_L

@@ -188,8 +188,8 @@ def compare(code, start, end, return_profiles=False):
         with np.errstate(all="ignore"):
             cprof = np.nanmedian(W, axis=0)
             cprof_raw = np.nanmedian(beta_raw[np.asarray(sel)], axis=0)   # unscreened (grey layer)
-        if IC.L1_SNR_GATE:
-            cprof[~IC.snr_mask(W)] = np.nan     # per-gate SNR>=3 (only when the legacy SNR filter is on)
+        if IC.noise_filter_mode() == "snr3":
+            cprof[~IC.snr_mask(W)] = np.nan     # per-gate SNR>=3 (only in the SNR3 noise-filter mode)
         if not np.isfinite(cprof).any():
             continue    # every CHM profile in the window was screened out (clouds/fog/qf)
         ci = np.interp(ea["grid"], z_chm_agl, cprof, left=np.nan, right=np.nan)

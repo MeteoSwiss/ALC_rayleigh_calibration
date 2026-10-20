@@ -3,7 +3,7 @@
      + median + 25-75% band + the latest- and earliest-completing instrument (quality-controlled).
  (2) temperature-model correction applied at 25 deg C (a*25+b) from D:/TEMP_MODELS/202606: binscatter
      + median + 25-75% + the largest and smallest correction."""
-import numpy as np, os
+import numpy as np, os, sys
 import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 from scipy.signal import medfilt
@@ -65,7 +65,7 @@ khi = int(np.argmax(z90)); klo = int(np.argmin(z90))
 a.plot(sm(curves[khi]), rng, color='lime', lw=2, label=f'latest to complete ({wmos[khi].split("-")[-1]}, z₉₀={z90[khi]:.0f} m)')
 a.plot(sm(curves[klo]), rng, color='deepskyblue', lw=2, label=f'earliest to complete ({wmos[klo].split("-")[-1]}, z₉₀={z90[klo]:.0f} m)')
 a.set_xlabel("overlap  O(z)"); a.set_ylabel("Range AGL [m]"); a.set_xlim(0, 1.02); a.set_ylim(0, 1600)
-a.set_title(f"(1) Applied overlap — {len(curves)} network CHM15k ({nrej} rejected by QC)\n(clear-sky night noise, M2 anchored)")
+a.set_title(f"(1) Applied overlap — {len(curves)} network CHM15k ({nrej} rejected by QC)\n(overlap estimation from clear-sky night noise)")
 a.legend(fontsize=8.5, loc='lower right', framealpha=0.85)
 cb = fig.colorbar(im, ax=a, pad=0.01); cb.set_label("station density (per altitude)", fontsize=8)
 
@@ -89,10 +89,12 @@ b.set_title(f"(2) Temperature-model correction at 25 °C\n({len(C)} models, a·2
 b.legend(fontsize=8.5, loc='upper right', framealpha=0.85)
 cbc = fig.colorbar(imc, ax=b, pad=0.01); cbc.set_label("station density (per altitude)", fontsize=8)
 
-plt.suptitle("Network CHM15k applied overlap (clear-sky noise) vs temperature-model correction at 25 °C  —  April–June 2026", fontsize=13)
+plt.suptitle("Network CHM15k applied overlap (overlap estimation from clear-sky noise) vs temperature-model correction at 25 °C  —  April–June 2026", fontsize=13)
 plt.tight_layout(rect=[0, 0, 1, 0.96])
 out = os.path.normpath(os.path.join(S, "..", "..", "doc", "reports", "figs_overlap_from_noise",
                                     "08_network_overlap_vs_correction.png"))            # canonical paper figure
+if len(sys.argv) > 1:                                    # optional output path (paper build)
+    out = sys.argv[1]
 os.makedirs(os.path.dirname(out), exist_ok=True)
 plt.savefig(out, dpi=125, bbox_inches='tight'); print("saved", out)
 print(f"overlap: {len(curves)} kept, {nrej} rejected | z90 median={np.median(z90):.0f}m, {np.min(z90):.0f}-{np.max(z90):.0f}m")
