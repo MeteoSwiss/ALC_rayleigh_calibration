@@ -38,6 +38,12 @@ FLAG_MEANINGS = {
     -9: "Another layer with lower signal",           # Rayleigh-specific
     -10: "Closest CAMS data too far",                # both (910 nm WV: station outside CAMS domain)
     -11: "Rayleigh window contaminated (classification)",  # Rayleigh-specific (Cloudnet ice/cloud in the fit window)
+    # Polar-summer low-sun fallback (v2.3 option polar_night_fallback, calibration/rayleigh/polar.py).
+    # 0.25: a calibration from the lowest-sun profiles of a night WITHOUT darkness (SZA never above
+    # sza_night_threshold). A usable calibration (in SUCCESS_FLAGS), kept distinguishable from 1/0.5.
+    # -14: such a night rejected (sun too high, or far-range residual solar background too large).
+    0.25: "Low-sun success (polar summer)",           # Rayleigh-specific
+    -14: "Low-sun night rejected (polar summer)",    # Rayleigh-specific
     # Cloud-specific rejection reasons: when no profile survives the cloud filters, the dominant
     # rejection (the filter that removed the most profiles) is reported instead of the generic -1.
     -20: "Cloud: window transmission too low",       # Cloud-specific
@@ -89,12 +95,18 @@ def dominant_cloud_reject_flag(*stat_dicts):
     reason = max(real, key=real.get)
     return float(CLOUD_REJECT_FLAG.get(reason, -1)), reason, counts
 
-#: Flags that count as a usable calibration.
-SUCCESS_FLAGS = (1.0, 0.5)
+#: Polar-summer low-sun fallback (see FLAG_MEANINGS): success from the lowest-sun profiles of a
+#: night without darkness, and its rejection. Only produced with ``polar_night_fallback`` on.
+LOW_SUN_FLAG = 0.25
+LOW_SUN_REJECT_FLAG = -14
+
+#: Flags that count as a usable calibration. LOW_SUN_FLAG only exists when the (default-off)
+#: polar-summer fallback is enabled, so with the option off this is exactly the former (1, 0.5).
+SUCCESS_FLAGS = (1.0, 0.5, LOW_SUN_FLAG)
 
 
 def is_success(flag) -> bool:
-    """True if ``flag`` is a usable calibration (1 or 0.5)."""
+    """True if ``flag`` is a usable calibration (1, 0.5, or 0.25 = polar-summer low-sun)."""
     try:
         return float(flag) in SUCCESS_FLAGS
     except (TypeError, ValueError):
@@ -109,7 +121,7 @@ def flag_label(flag) -> str:
         return "Unknown"
     if f != f:  # NaN
         return "No calibration"
-    key = f if f == 0.5 else int(f)  # 0.5 is the only non-integer flag
+    key = f if f in FLAG_MEANINGS else int(f)  # non-integer flags (0.5, 0.25) are looked up as such
     return FLAG_MEANINGS.get(key, f"Unknown ({flag})")
 
 
