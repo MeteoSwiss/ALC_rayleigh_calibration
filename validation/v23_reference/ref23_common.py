@@ -20,6 +20,9 @@ import numpy as np
 REPO = Path(__file__).resolve().parents[2]
 OUT = Path("C:/DATA/Projects/202610_v23/reference_agreement")
 RUN_DIR = OUT / "runs"
+# Rayleigh re-run with the REVIEWED v2.3 budget (window-mean noise, vertical cap 15 %, molecular
+# climatology at the window height ASL; merged 2026-10-21). RUN_DIR holds the pre-review budget.
+RUN_DIR_REVIEWED = OUT / "runs_rayleigh_reviewed"
 FIG_DIR = OUT
 L1_ROOT = Path("D:/E-PROFILE_L1_2026")
 # 0.4 deg CAMS only (monthly 2025-01..2026-06, daily 2026-06-01..): never a 1-degree folder

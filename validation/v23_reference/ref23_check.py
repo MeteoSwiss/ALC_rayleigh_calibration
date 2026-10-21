@@ -7,8 +7,9 @@ A night where a stream is missing although its file exists now was processed whi
 unavailable (e.g. a temporarily moved folder) and its month must be re-run.  The task start times
 are reconstructed from the run log (completion time = pickle mtime, duration from the log line).
 
-Usage: python validation/v23_reference/ref23_check.py [--delete]
-       --delete removes the pickles of incomplete months so that `ref23_run.py run` redoes them.
+Usage: python validation/v23_reference/ref23_check.py [--delete] [--reviewed]
+       --delete removes the pickles of incomplete months so that `ref23_run.py run` redoes them;
+       --reviewed checks the Rayleigh-only re-run with the reviewed budget (runs_rayleigh_reviewed/).
 """
 from __future__ import annotations
 
@@ -41,11 +42,12 @@ def task_times():
     return out
 
 
-def main(delete=False):
+def main(delete=False, reviewed=False):
     times = task_times()
     bad = {}
     n_nights = 0
-    for f in sorted(RC.RUN_DIR.glob("*/*.pkl")):
+    root = RC.RUN_DIR_REVIEWED if reviewed else RC.RUN_DIR
+    for f in sorted(root.glob("*/*.pkl")):
         site, month = f.parent.name, f.stem
         s = RC.SITES[site]
         with open(f, "rb") as fh:
@@ -56,6 +58,10 @@ def main(delete=False):
             for ident, (itype, methods) in s["streams"].items():
                 if not RC.l1_file(s["wmo"], ident, d).exists():
                     continue
+                if reviewed and "ray" not in methods:
+                    continue
+                if reviewed:
+                    methods = ("ray",)
                 miss = []
                 if "fatal" in r:
                     miss.append("fatal")
@@ -78,7 +84,7 @@ def main(delete=False):
         for x in lst[:5]:
             print("    ", x)
         if delete:
-            (RC.RUN_DIR / site / f"{month}.pkl").unlink()
+            (root / site / f"{month}.pkl").unlink()
     for (site, month), (t0, t1) in sorted(times.items(), key=lambda kv: kv[1][0]):
         if site == "schiphol":
             print(f"schiphol {month}: ran {t0:%H:%M:%S} - {t1:%H:%M:%S}")
@@ -87,4 +93,4 @@ def main(delete=False):
 
 
 if __name__ == "__main__":
-    main(delete="--delete" in sys.argv)
+    main(delete="--delete" in sys.argv, reviewed="--reviewed" in sys.argv)

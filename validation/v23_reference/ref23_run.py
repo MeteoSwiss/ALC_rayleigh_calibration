@@ -194,6 +194,23 @@ def rayleigh_night(native, date_str, s, variant):
                    sub_c=np.asarray(b.sub_cl / b.lidar_constant if b.lidar_constant > 0
                                     else b.sub_cl, "f4"),
                    sub_s=np.asarray(b.sub_sigma_rel, "f4"))
+        # budget configuration actually used (the reviewed defaults since the 2026-10 merge), and
+        # the vertical term before its saturation (s_cap = s / sqrt(1 + (s/cap)^2), inverted), so
+        # the cap can be revised offline
+        try:
+            from calibration.rayleigh.uncertainty import resolve_params
+            prm = resolve_params(o)
+            cap = prm.get("vertical_cap_rel")
+            row.update(noise_estimator=str(prm.get("noise_estimator", "per_gate")),
+                       mol_href=str(prm.get("molecular_height_reference", "agl")),
+                       vertical_cap=(float(cap) if cap is not None else np.nan))
+            sv = float(b.sigma_vertical_rel)
+            if cap is not None and np.isfinite(sv) and sv < float(cap):
+                row["sig_vert_uncapped"] = sv / np.sqrt(1.0 - (sv / float(cap)) ** 2)
+            else:
+                row["sig_vert_uncapped"] = sv
+        except Exception:  # noqa: BLE001 - a diagnostic must never lose a night
+            pass
     times = Q.STATE["capture"].get("times")
     if times is not None and len(times):
         row.update(n_prof=int(len(times)), t_first=float(np.min(times)),
@@ -456,8 +473,9 @@ def ingredients(loaded, d, site_key, meta):
 
 
 # ------------------------------------------------------------------------------------- one night
-def process_night(site_key, d, cen):
-    """Read every instrument of the site once for night d and compute everything."""
+def process_night(site_key, d, cen, rayleigh_only=False):
+    """Read every instrument of the site once for night d and compute everything
+    (rayleigh_only: the Rayleigh streams and the two Rayleigh calibrations only)."""
     from calibration.io.instrument_day import load_instrument_day
     site = RC.SITES[site_key]
     wmo = site["wmo"]
@@ -466,6 +484,8 @@ def process_night(site_key, d, cen):
     loaded = {}
     meta = None
     for ident, (itype, _methods) in site["streams"].items():
+        if rayleigh_only and "ray" not in _methods:
+            continue
         fD = RC.l1_file(wmo, ident, d)
         if not fD.exists():
             continue
@@ -490,23 +510,24 @@ def process_night(site_key, d, cen):
         return rec
     # ingredients first: they only read the in-memory arrays
     t0 = time.perf_counter()
-    try:
-        rec["ing"] = ingredients(loaded, d, site_key, meta)
-    except Exception as exc:  # noqa: BLE001
-        rec["err"]["ing"] = f"{type(exc).__name__}: {exc}"[:300] + " | " + \
-            traceback.format_exc()[-600:]
+    if not rayleigh_only:
+        try:
+            rec["ing"] = ingredients(loaded, d, site_key, meta)
+        except Exception as exc:  # noqa: BLE001
+            rec["err"]["ing"] = f"{type(exc).__name__}: {exc}"[:300] + " | " + \
+                traceback.format_exc()[-600:]
     rec["t_ing"] = round(time.perf_counter() - t0, 3)
     for ident, (itype, idd) in loaded.items():
         s = cen[(wmo, ident)]
         methods = site["streams"][ident][1]
         if "ray" in methods:
             rec["ray"][ident] = {v: rayleigh_night(idd.native, ds, s, v) for v in VARIANTS}
-        if "cloud" in methods:
+        if "cloud" in methods and not rayleigh_only:
             rec["cloud"][ident] = cloud_day(idd, d, s, RC.l1_file(wmo, ident, d))
     return rec
 
 
-def run_task(site_key, month, dates, out_path):
+def run_task(site_key, month, dates, out_path, rayleigh_only=False):
     if out_path.exists():
         return str(out_path), 0, 0.0
     warnings.filterwarnings("ignore")
@@ -517,7 +538,7 @@ def run_task(site_key, month, dates, out_path):
     for ds in dates:
         d = datetime.strptime(ds, "%Y%m%d").date()
         try:
-            recs.append(process_night(site_key, d, cen))
+            recs.append(process_night(site_key, d, cen, rayleigh_only))
         except Exception as exc:  # noqa: BLE001
             recs.append(dict(site=site_key, date=ds, fatal=f"{type(exc).__name__}: {exc}",
                              tb=traceback.format_exc()[-1500:]))
@@ -539,7 +560,8 @@ def cmd_run(args):
         for d in nights:
             months.setdefault(d.strftime("%Y%m"), []).append(RC.ymd(d))
         for m, ds in sorted(months.items()):
-            tasks.append((sk, m, ds, RC.RUN_DIR / sk / f"{m}.pkl"))
+            root = RC.RUN_DIR_REVIEWED if args.rayleigh_only else RC.RUN_DIR
+            tasks.append((sk, m, ds, root / sk / f"{m}.pkl", bool(args.rayleigh_only)))
     todo = [t for t in tasks if not t[3].exists()]
     # longest first (the CL61 sites), so the pool does not end on one slow task
     weight = {"payerne": 3, "lindenberg": 3, "aosta": 3, "schiphol": 2, "budapest": 1, "magurele": 1}
@@ -603,6 +625,9 @@ def main():
     r.add_argument("--workers", type=int, default=12)
     r.add_argument("--sites", default="")
     r.add_argument("--limit", type=int, default=0)
+    r.add_argument("--rayleigh-only", action="store_true",
+                   help="only the Rayleigh streams and calibrations (re-run of the budget after "
+                        "its review), written to runs_rayleigh_reviewed/")
     t = sub.add_parser("test")
     t.add_argument("--site", default="payerne")
     t.add_argument("--date", default="20260715")
