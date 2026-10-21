@@ -142,7 +142,8 @@ def _create_calibration_file(
                                                              key=lambda kv: kv[1]))
     nc_version.comment = ("code = major*100 + minor*10 + patch of the calibration method, e.g. "
                           "100 = E-PROF v1.0, 120 = v1.2, 200 = v2 (C8), 220 = v2.2 "
-                          "(noise-aware molecular-window gates)")
+                          "(noise-aware molecular-window gates), 230 = v2.3 (v2.2 with a measured "
+                          "noise and a vertical-consistency test in its fallback tier)")
 
     # Housekeeping variables
     nc_lifetime = ncid.createVariable('laser_life_time', 'f8', ('time',), zlib=True, fill_value=-999.9)
@@ -253,7 +254,7 @@ def _write_v23_uncertainty_row(ncid: Dataset, idx: int, components: Optional[dic
 # carry flag_values/flag_meanings and be compared arithmetically ("rows older than 200").
 VERSION_CODES = {
     "eprof_v1.0": 100, "eprof_v1.1": 110, "eprof_v1.2": 120, "eprof_v0.25": 25,
-    "eprof_v2": 200, "eprof_v2p": 205, "eprof_v2.2": 220,
+    "eprof_v2": 200, "eprof_v2p": 205, "eprof_v2.2": 220, "eprof_v2.3": 230,
     "earlinet": 300, "bellini": 310, "main": 90, "improved": 95,
     "cloud_oconnor": 1000,          # the liquid-cloud (O'Connor) retrieval
 }

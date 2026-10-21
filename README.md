@@ -238,7 +238,7 @@ E-PROFILE aerosol-processing recommendation, applied to the OmB diagnostic (`cal
 ### 2026 
 
 - **WV correction** added (`water_vapor.py`): spectral two-way T²_wv from CAMS + HITRAN LUT; mandatory for 910 nm (flag −4 on missing CAMS, no fallback). Effect: Payerne CL61 Feb-28 C_L +20 %.
-- **Molecular methods** (`molecular_methods.py`): `eprof_v1.1`/`eprof_v1.2`/`eprof_v0.25`/`eprof_v2` (default)/`eprof_v2p`/`earlinet`/`bellini` (legacy aliases main/improved/matlab/optimal accepted); selectable via `molecular_method` in options.json.
+- **Molecular methods** (`molecular_methods.py`): `eprof_v1.1`/`eprof_v1.2`/`eprof_v0.25`/`eprof_v2` (default)/`eprof_v2p`/`eprof_v2.2`/`eprof_v2.3`/`earlinet`/`bellini` (legacy aliases main/improved/matlab/optimal accepted); selectable via `molecular_method` in options.json.
 - **E-PROF versioning**: `main`→v1.1, `improved`→v1.2, `optimal`→v2; historical baseline `eprof_v10` (pre-sign-error) tracked in `METHODS_DISPLAY` for paper comparison.
 - **Cloud calibration port** (`cloud/calibration.py`): bit-for-bit vs MATLAB O'Connor; reads E-PROFILE L2 and Cloudnet CL61 RAW; full WV correction included.
 - **Fog exclusion**: `vertical_visibility` threaded through all readers; flagged profiles excluded from Rayleigh + cloud calibration.

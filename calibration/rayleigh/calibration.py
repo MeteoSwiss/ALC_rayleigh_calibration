@@ -49,6 +49,7 @@ from .rayleigh_fit import (
     validate_calibration,
     RayleighFitResult,
 )
+from .molecular_methods import NOISE_INSTRUMENTS, VC_INSTRUMENTS, resolve_method
 from ..io.output import write_calibration_result, version_code
 from ..io.cams import ensure_cams_file
 from ..plotting import (
@@ -204,6 +205,34 @@ def _sigma_on_fit_grid(sigma_native, range_fit, n_profiles, options):
     except Exception:
         logger.debug("sigma propagation to the fit grid failed", exc_info=True)
         return None
+
+
+def _window_search_setup(options, instrument_type, sigma_signal, native_per_bin):
+    """Parameter overrides and noise profile handed to the molecular-window search.
+
+    Every method except eprof_v2.3 gets exactly what it always got (options.molecular_params and
+    sigma_signal). eprof_v2.3 (q19, doc/v2.3/vertical_consistency.md) differs on tier-2 nights only,
+    and only on the instrument types q19 validated (an explicit molecular_params entry wins):
+      * measured noise (NOISE_INSTRUMENTS): _sigma_on_fit_grid divides the native noise by
+        sqrt(binned profiles) only, which leaves sigma_signal sqrt(native profiles per bin) too large
+        (x4.2 on 15-s CHM15k). The search gets a corrected copy, the fallback of the noise
+        select_molecular_window measures on the binned stack. sigma_signal itself is left unchanged for
+        its other readers -- the v2.3 uncertainty budget applies its own time-binning correction
+        (uncertainty.time_binning_factor), so correcting it here would count that factor twice.
+      * vertical-consistency test (VC_INSTRUMENTS).
+    Any other type runs the eprof_v2.2 tier 2 unchanged. Returns (method_params or None, search sigma).
+    """
+    params = dict(getattr(options, "molecular_params", None) or {})
+    if resolve_method(getattr(options, "molecular_method", "eprof_v2")) != "eprof_v2.3":
+        return params or None, sigma_signal
+    itype = getattr(instrument_type, "value", instrument_type)
+    if itype not in NOISE_INSTRUMENTS:
+        params.setdefault("measured_noise", False)
+    if itype not in VC_INSTRUMENTS:
+        params.setdefault("use_vc", False)
+    if params.get("measured_noise", True) and sigma_signal is not None:
+        sigma_signal = np.asarray(sigma_signal, float) / np.sqrt(native_per_bin)
+    return params or None, sigma_signal
 
 
 # Cloudnet target-classification codes (ceiloclass). 0 = clear sky.
@@ -653,7 +682,10 @@ def calibrate_rayleigh(
     # model -- which is what lets the gates adapt to an ageing laser instead of assuming a healthy
     # one. Cheap (~0.1 s) and gap-safe (pairs are only formed across contiguous profiles).
     sigma_native = _native_noise(data)
+    n_native = len(data.time)
     data = average_ceilometer_data(data, average_time_s=avg_time_s, average_range_m=avg_range_m)
+    # native profiles averaged into each fit profile (eprof_v2.3 noise propagation, _window_search_setup)
+    native_per_bin = max(1.0, n_native / max(len(data.time), 1))
     if avg_time_s or avg_range_m:
         logger.info("Averaged Rayleigh input to %s profiles x %s range bins",
                     len(data.time), len(data.range_alc))
@@ -857,6 +889,8 @@ def calibrate_rayleigh(
     # noise-aware gates and for the offline sweep harness, which must be able to reproduce them
     # from fit_inputs alone.
     sigma_signal = _sigma_on_fit_grid(sigma_native, data.range_alc, rcs_use.shape[0], options)
+    window_params, sigma_window = _window_search_setup(options, info.instrument_type, sigma_signal,
+                                                       native_per_bin)
 
     # Classification screening, on the profiles the fit will actually use. The pre-fit mask joins the
     # temporal MAD screen (union, never replacing it); the veto profile is rebuilt over the same night
@@ -886,7 +920,7 @@ def calibrate_rayleigh(
             altitude=data.altitude, signal_stack=signal_stack,
             hours=np.asarray(data.hours_since_start)[keep_idx],
             sigma_signal=sigma_signal, sigma_native=sigma_native, n_profiles=rcs_use.shape[0],
-            extra_cell_mask=extra_cell_mask,
+            native_per_bin=native_per_bin, extra_cell_mask=extra_cell_mask,
         )
 
     fit_result = find_optimal_molecular_window(
@@ -902,8 +936,8 @@ def calibrate_rayleigh(
         max_rel_error=options.max_window_rel_error,
         method=getattr(options, "molecular_method", "eprof_v2"),
         signal_stack=signal_stack,
-        method_params=getattr(options, "molecular_params", None) or None,
-        sigma_signal=sigma_signal,
+        method_params=window_params,
+        sigma_signal=sigma_window,
         extra_cell_mask=extra_cell_mask,
     )
 

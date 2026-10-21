@@ -400,7 +400,8 @@ def cl_median_iqr_by_station(d: pd.DataFrame, itype: str) -> go.Figure:
 #: Numeric algorithm code -> the label an operator recognises (calibration/io/output.py
 #: VERSION_CODES). Used to name the series from the DATA rather than from a constant.
 _VERSION_NAMES = {25: "v0.25", 90: "main", 95: "improved", 100: "v1.0", 110: "v1.1", 120: "v1.2",
-                  200: "v2.0", 205: "v2.0p", 220: "v2.2", 300: "earlinet", 310: "bellini",
+                  200: "v2.0", 205: "v2.0p", 220: "v2.2", 230: "v2.3", 300: "earlinet",
+                  310: "bellini",
                   1000: "O'Connor"}
 
 

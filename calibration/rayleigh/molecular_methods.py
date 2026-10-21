@@ -50,6 +50,7 @@ EarthCARE ATLID is HSRL (direct molecular channel — no window search needed; s
 """
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import Optional, Dict, Any
 
@@ -60,7 +61,7 @@ from scipy.stats import linregress
 
 # Live selectable methods, keyed by E-PROF calibration version.
 METHODS = ("eprof_v1.1", "eprof_v1.2", "eprof_v0.25", "earlinet", "eprof_v2", "eprof_v2p",
-           "eprof_v2.2", "bellini")
+           "eprof_v2.2", "eprof_v2.3", "bellini")
 
 # Human-readable display labels (figures, reports, tables).
 METHOD_LABELS: Dict[str, str] = {
@@ -138,6 +139,29 @@ DEFAULT_PARAMS: Dict[str, Dict[str, Any]] = {
     "bellini":  dict(min_window_start_m=3000.0, max_window_end_m=7000.0, min_width_m=600.0,
                      max_width_m=3000.0, max_rel_error=15.0, max_ecl=0.40, border_m=200.0),
 }
+# eprof_v2.3 = eprof_v2.2 with its tier 2 repaired (q19, 2026-10; doc/v2.3/vertical_consistency.md).
+# Tier 1 is untouched (it never reads the noise), so v2.3 differs from v2.2 only on tier-2 nights.
+#  * measured_noise: the noise-relative gates use the noise of the night mean MEASURED on the binned
+#    stack (_binned_mean_noise). v2.2's propagated sigma is sqrt(native profiles per bin) too large
+#    (x4.2 on 15-s CHM15k), which left chi2red, both excess floors and the de-biased reference inert.
+#  * use_vc: a rescued window must be consistent with the rest of the column in R = signal/p_mol --
+#    no 750-m block above it (up to the SNR limit) or in the 1 km below it darker than the window by
+#    more than vc_eps_tol + vc_k sigma (aerosol in the window), and no block of that 1 km below brighter
+#    by more than vc_tol_lo + vc_k sigma (an aerosol tail still decaying into it). Candidates are taken
+#    best-first, so a failed first choice can be replaced. See _vertical_consistency.
+# Both are applied only where q19 validated them (calibrate_rayleigh._window_search_setup switches them
+# off elsewhere, so every other type keeps the eprof_v2.2 tier 2 exactly):
+DEFAULT_PARAMS["eprof_v2.3"] = dict(DEFAULT_PARAMS["eprof_v2.2"], measured_noise=True,
+                                    use_vc=True, vc_k=2.0, vc_eps_tol=0.10, vc_tol_lo=0.10,
+                                    vc_s_max=np.inf, vc_block_m=750.0)
+
+#: Types whose tier 2 uses the measured noise under eprof_v2.3. CHM15k: 26 units, tier-2 offset +6.9 ->
+#: +4.2 % with the noise alone; CL61: 6 units, offset unchanged (-2.5 %), scatter 16 -> 14 %. Not CL31
+#: (the measured noise opens tier 2 on ~19 % of its nights, with no tier-1 night to check them against).
+NOISE_INSTRUMENTS = ("CHM15k", "CL61")
+#: Types whose tier 2 runs the vertical-consistency test under eprof_v2.3 (26 CHM15k units). Not CL61:
+#: its R(z) falls 3-4.5 %/km on clean nights, which the test reads as aerosol (tier-2 constants -14 %).
+VC_INSTRUMENTS = ("CHM15k",)
 
 
 @dataclass
@@ -177,6 +201,8 @@ class WindowGrid:
     signal: Optional[NDArray[np.float64]] = None   # the collapsed signal (for re-fits, e.g. bellini)
     p_mol: Optional[NDArray[np.float64]] = None    # the molecular power profile
     range_alc: Optional[NDArray[np.float64]] = None  # range (m)
+    sigma: Optional[NDArray[np.float64]] = None      # 1-sigma noise of `signal` per gate (None = unknown);
+                                                     # read by the tier-2 vertical-consistency test
 
 
 @dataclass
@@ -412,6 +438,7 @@ def compute_window_grid(
         scattering_ratio_dbz=scattering_ratio_dbz,
         signal=np.asarray(signal, float), p_mol=np.asarray(p_mol, float),
         range_alc=np.asarray(range_alc, float),
+        sigma=None if sig_n is None else np.asarray(sig_n, float),
     )
 
 
@@ -564,13 +591,115 @@ def _select_earlinet(g: WindowGrid, min_window_start_m=2000.0, max_residual_pct=
     return _pack(g, i, j, "earlinet", elig, "lowest qualifying (shape+SNR)")
 
 
+def _vertical_consistency(g: WindowGrid, i: int, j: int, vc_k=2.0, vc_eps_tol=0.10, vc_tol_lo=0.10,
+                          vc_s_max=np.inf, vc_block_m=750.0, vc_snr_block=3.0, vc_z_cap_m=9000.0,
+                          vc_z_floor_m=1500.0, vc_below_m=1000.0, vc_min_gates=10, **_):
+    """Is window (i, j) consistent with the rest of the column? -> (ok, verdict).
+
+    Physics: aerosol only ADDS backscatter, and at ceilometer wavelengths the two-way extinction of a
+    residual layer inside the 2-9 km band is negligible (R-1 = 0.3 at 4 km -> alpha ~ 1e-3 /km at 1064 nm),
+    so on any night the cleanest part of the column has the LOWEST R = signal/p_mol. A window whose R
+    exceeds that of some block of the column above it (or within 1 km below it) by more than its noise
+    allows contains aerosol (or the profile is distorted in height), and its constant is biased.
+    Verdicts: 'accept'; 'aerosol' (some block, above the window or within 1 km below it, darker than the
+    window by > vc_eps_tol + vc_k sigma); 'tail' (a block within 1 km below brighter than the window by
+    > vc_tol_lo + vc_k sigma: the window sits in an aerosol tail still decaying into it -- the windows that
+    the strict tier rejects are typically just above such a tail, +3..5 % on average); 'unverifiable'
+    (no block at all; or, if vc_s_max is finite, no block >= 1 km above it measured to vc_s_max).
+    The usable column ends where the EXPECTED 300-m block SNR (H0: R = window level) drops below
+    vc_snr_block, <= vc_z_cap_m. A block ABOVE that is brighter (cirrus, an elevated layer) never rejects.
+    sigma is the measured noise of the night mean (WindowGrid.sigma, eprof_v2.3); with the propagated
+    sigma that eprof_v2.2 still uses (x4.2-4.4 too large) the test loses its power (q19).
+    """
+    if g.sigma is None or g.signal is None or g.p_mol is None or g.range_alc is None:
+        return True, "no-noise"                       # nothing measured -> behave as before
+    z = np.asarray(g.range_alc, float)
+    sig = np.asarray(g.signal, float)
+    p = np.asarray(g.p_mol, float)
+    sg = np.asarray(g.sigma, float)
+    ok = np.isfinite(sig) & np.isfinite(p) & (p > 0) & np.isfinite(sg) & (sg > 0)
+    dz = float(np.median(np.diff(z))) if z.size > 1 else 1.0
+    cb = int(round(g.center_m[i] / dz))
+    hb = int(round(g.half_m[j] / dz))
+    s, e = max(cb - hb, 0), min(cb + hb, z.size)
+    win = np.zeros(z.size, bool)
+    win[s:e] = True
+    win &= ok
+    if win.sum() < 3:
+        return False, "unverifiable"
+    with np.errstate(divide="ignore", invalid="ignore"):
+        R = np.where(ok, sig / p, np.nan)
+        w = np.where(ok, (p / np.where(ok, sg, 1.0)) ** 2, 0.0)      # 1/sigma_R^2
+    sw = float(np.sum(w[win]))
+    if not sw > 0:
+        return False, "unverifiable"
+    Rw = float(np.sum(w[win] * R[win]) / sw)
+    sRw = 1.0 / np.sqrt(sw)
+    if not Rw > 0:
+        return False, "unverifiable"
+    zs, ze = float(z[s]), float(z[e - 1])
+    # top of the usable column (11-gate running median of sigma keeps one noisy gate from cutting it)
+    h = 5
+    sgp = np.concatenate([np.full(h, np.nan), np.where(ok, sg, np.nan), np.full(h, np.nan)])
+    with np.errstate(invalid="ignore"), warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        sg_s = np.nanmedian(np.lib.stride_tricks.sliding_window_view(sgp, 2 * h + 1), axis=1)
+        snr_blk = Rw * p / sg_s * np.sqrt(max(1, int(round(300.0 / dz))))
+    above = np.where(z > ze)[0]
+    bad = ~(np.isfinite(snr_blk[above]) & (snr_blk[above] >= vc_snr_block) & (z[above] <= vc_z_cap_m))
+    n_up = int(np.argmax(bad)) if bad.any() else above.size
+    z_hi = float(z[above[n_up - 1]]) if n_up > 0 else ze
+    nb = max(1, int(round(vc_block_m / dz)))
+    up = np.where(ok & (z > ze) & (z <= z_hi))[0]
+    blocks = [up[k:k + nb] for k in range(0, up.size, nb)]
+    if len(blocks) > 1 and blocks[-1].size < vc_min_gates:
+        blocks[-2] = np.concatenate([blocks[-2], blocks[-1]])
+        blocks = blocks[:-1]
+    is_up = [True] * len(blocks)
+    lo = np.where(ok & (z >= max(vc_z_floor_m, zs - vc_below_m)) & (z < zs))[0][::-1]
+    bl = [lo[k:k + nb] for k in range(0, lo.size, nb)]
+    blocks += bl
+    is_up += [False] * len(bl)
+    exc, sgm, zc, up_flag = [], [], [], []
+    for blk, u in zip(blocks, is_up):
+        if blk.size < vc_min_gates:
+            continue
+        swb = float(np.sum(w[blk]))
+        if not swb > 0:
+            continue
+        Rb = float(np.sum(w[blk] * R[blk]) / swb)
+        if not Rb > 0:
+            continue
+        r = Rw / Rb
+        exc.append(r - 1.0)
+        sgm.append(r * np.hypot(sRw / Rw, (1.0 / np.sqrt(swb)) / Rb))
+        zc.append(float(np.mean(z[blk])))
+        up_flag.append(u)
+    exc, sgm, zc, up_flag = (np.asarray(exc), np.asarray(sgm), np.asarray(zc),
+                             np.asarray(up_flag, bool))
+    if exc.size == 0:
+        return False, "unverifiable"                   # neither above nor below: nothing to compare
+    # A window reaching the SNR limit (no block above) is NOT rejected for that alone: its flatness is
+    # tested by the tier-2 chi2red with the measured noise, and it is judged on the 1 km below it (the
+    # first design rejected it: ~30 % of clean noisy nights lost in the injection self-test, q19).
+    far = up_flag & (zc >= ze + 1000.0)
+    if np.isfinite(vc_s_max) and not np.any(sgm[far] <= vc_s_max):
+        return False, "unverifiable"
+    if np.max(exc - vc_k * sgm) > vc_eps_tol:
+        return False, "aerosol"
+    below = ~up_flag
+    if below.any() and np.isfinite(vc_tol_lo) and np.min(exc[below] + vc_k * sgm[below]) < -vc_tol_lo:
+        return False, "tail"
+    return True, "accept"
+
+
 def _select_optimal(g: WindowGrid, min_window_start_m=2000.0, min_r2=0.5,
                     max_residual_pct=12.0, max_scattering_ratio=1.1, max_ratio_std=0.30,
                     max_temporal_cv=0.5, max_rel_error=15.0, use_bg=False, w_ratio=0.25,
                     w_resid=0.20, w_snr=0.10, w_npts=0.10, w_tvar=0.35, w_rel=0.20,
                     objective="score", use_noise=False, max_chi2red=2.5, fallback_objective="score",
                     max_ratio_std_excess=0.30, max_temporal_cv_excess=0.5,
-                    w_chi2=0.0, **_) -> MethodWindow:
+                    w_chi2=0.0, use_vc=False, **vc) -> MethodWindow:
     """Best-of: physical gates + TEMPORAL-variability aerosol rejection + composite score.
 
     Molecular scattering is steady in time; aerosol advects and fluctuates. Windows whose
@@ -655,6 +784,44 @@ def _select_optimal(g: WindowGrid, min_window_start_m=2000.0, min_r2=0.5,
     if not np.any(elig):
         return _fail(g, "optimal", elig, "no eligible window")
 
+    n_norm = g.n_pts / (np.nanmax(g.n_pts) if np.nanmax(g.n_pts) > 0 else 1.0)
+    tvar_pen = np.where(np.isfinite(g.temporal_cv), g.temporal_cv, 0.0) if have_tvar else 0.0
+    rel_pen = np.where(np.isfinite(g.rel_error), g.rel_error, 0.0) / 100.0
+    quality = (
+        g.r2
+        - w_ratio * np.abs(g.scattering_ratio - 1.0)
+        - w_resid * (g.residual_pct / 100.0)
+        - w_snr * g.ratio_std
+        - w_tvar * tvar_pen
+        - w_rel * rel_pen
+        + w_npts * n_norm
+    )
+
+    if fallback and use_vc and g.sigma is not None:
+        # Tier-2 vertical-consistency test (eprof_v2.3). The fallback admits windows on nights the
+        # strict gates rejected, and those nights are aerosol-loaded (q16e: +9.4 % vs the unit's tier-1
+        # nights; q19). Candidates are taken best-first by the SAME objective; the first one consistent
+        # with the column is kept, so the test can move a rescue upward out of an aerosol tail instead
+        # of losing the night.
+        if fallback_objective == "lowest":
+            order_key = np.where(elig, g.start_m, np.inf)
+            pick = lambda cand: np.unravel_index(int(np.argmin(np.where(cand, order_key, np.inf))),
+                                                 cand.shape)
+        else:
+            pick = lambda cand: _argmax2d(np.where(cand, quality, -np.inf))
+        cand = elig.copy()
+        first = None
+        while np.any(cand):
+            i, j = (int(x) for x in pick(cand))
+            ok_vc, verdict = _vertical_consistency(g, i, j, **vc)
+            first = first or verdict
+            if ok_vc:
+                return _pack(g, i, j, "optimal", elig,
+                             f"noise-aware fallback + vertical consistency (first candidate: {first})")
+            cand[i, j] = False
+        return _fail(g, "optimal", elig,
+                     f"tier-2 windows failed the vertical-consistency test (first candidate: {first})")
+
     if fallback and fallback_objective == "lowest":
         # Keep the recovered window as LOW as the data allows (EARLINET's rule) instead of letting
         # the composite score pick the best-looking one anywhere in 2-6 km. Rationale: the
@@ -676,18 +843,6 @@ def _select_optimal(g: WindowGrid, min_window_start_m=2000.0, min_r2=0.5,
         return _pack(g, i, j, "optimal", elig,
                      "noise-aware fallback (lowest eligible window)")
 
-    n_norm = g.n_pts / (np.nanmax(g.n_pts) if np.nanmax(g.n_pts) > 0 else 1.0)
-    tvar_pen = np.where(np.isfinite(g.temporal_cv), g.temporal_cv, 0.0) if have_tvar else 0.0
-    rel_pen = np.where(np.isfinite(g.rel_error), g.rel_error, 0.0) / 100.0
-    quality = (
-        g.r2
-        - w_ratio * np.abs(g.scattering_ratio - 1.0)
-        - w_resid * (g.residual_pct / 100.0)
-        - w_snr * g.ratio_std
-        - w_tvar * tvar_pen
-        - w_rel * rel_pen
-        + w_npts * n_norm
-    )
     if str(objective) == "purity":
         # PURITY-FIRST objective (the whole point: pick the cleanest MOLECULAR window). R2/SNR are
         # eligibility FLOORS only; among eligible windows we MINIMISE aerosol indicators instead of
@@ -795,6 +950,37 @@ def _select_bellini(g: WindowGrid, min_window_start_m=3000.0, max_window_end_m=7
     return _pack(g, i, j, "bellini", keep, "ALICENET: max M_Ray (adjR2 + BG no-autocorr + border-sign)")
 
 
+def _binned_mean_noise(stack, min_rows=8, smooth_gates=11):
+    """1-sigma noise of the NIGHT-MEAN signal per gate, measured on the binned (masked) stack it is the mean of.
+
+    calibration._sigma_on_fit_grid propagates the native first-difference sigma with 1/sqrt(n_binned)
+    only, so eprof_v2.2's sigma_signal is sqrt(300 s / dt_native) too large (x4.2-4.4 measured on 15-s
+    CHM15k, x2.9 on CL61 whose native noise is not white) and every noise-relative tier-2 gate (chi2red,
+    both excess floors, the de-biased reference) ~18x too permissive (q19, 2026-10). eprof_v2.3 measures
+    it here directly, no white-noise assumption: robust first differences of consecutive binned profiles / sqrt(2) = one
+    binned profile, / sqrt(n_valid) = the night mean, 11-gate running median. Consecutive 5-min
+    differences also carry some atmospheric change: an upper bound on the noise. None if too short."""
+    try:
+        st = np.asarray(stack, float)
+        if st.ndim != 2 or st.shape[0] < min_rows:
+            return None
+        d = np.diff(st, axis=0)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            med = np.nanmedian(d, axis=0)
+            sb = 1.4826 * np.nanmedian(np.abs(d - med[None, :]), axis=0) / np.sqrt(2.0)
+            nd = np.sum(np.isfinite(d), axis=0)
+            nv = np.sum(np.isfinite(st), axis=0)
+            sb = np.where(nd >= min_rows - 1, sb, np.nan)
+            h = smooth_gates // 2
+            sp = np.concatenate([np.full(h, np.nan), sb, np.full(h, np.nan)])
+            sb = np.nanmedian(np.lib.stride_tricks.sliding_window_view(sp, smooth_gates), axis=1)
+        out = sb / np.sqrt(np.maximum(nv, 1))
+        return out if np.any(np.isfinite(out) & (out > 0)) else None
+    except Exception:                      # a diagnostic must never cost a calibration
+        return None
+
+
 # Keyed by E-PROF version; the private selectors keep their algorithm names.
 _SELECTORS = {
     "eprof_v1.1": _select_main,
@@ -804,6 +990,7 @@ _SELECTORS = {
     "eprof_v2": _select_optimal,
     "eprof_v2p": _select_optimal,
     "eprof_v2.2": _select_optimal,
+    "eprof_v2.3": _select_optimal,
     "bellini": _select_bellini,
 }
 
@@ -842,7 +1029,7 @@ def select_molecular_window(
     # cells (e.g. aerosol only at the start of the night, a cloud only at the end), then fits the
     # molecular window on the time-cleaned mean profile -> it uses the clean part of an
     # otherwise-contaminated night. The other methods use the full night mean.
-    if (method in ("eprof_v2", "eprof_v2p", "eprof_v2.2") and signal_stack is not None
+    if (method in ("eprof_v2", "eprof_v2p", "eprof_v2.2", "eprof_v2.3") and signal_stack is not None
             and np.ndim(signal_stack) == 2 and np.shape(signal_stack)[0] >= 5):
         flag = flag_contaminated_cells(
             signal_stack, p_mol, range_alc,
@@ -854,6 +1041,12 @@ def select_molecular_window(
         masked = np.where(flag, np.nan, np.asarray(signal_stack, float))
         with np.errstate(invalid="ignore"):
             clean_signal = np.nanmean(masked, axis=0)
+        if sigma_signal is not None and merged.get("measured_noise", False):
+            # eprof_v2.3: the noise of THIS mean, measured on the stack it averages (falls back to the
+            # propagated one where it cannot be measured)
+            meas = _binned_mean_noise(masked)
+            if meas is not None and np.size(meas) == np.size(sigma_signal):
+                sigma_signal = np.where(np.isfinite(meas), meas, np.asarray(sigma_signal, float))
         g = compute_window_grid(
             clean_signal, p_mol, range_alc, half_length_options_m,
             range_start_m=range_start_m, range_end_m=range_end_m,
