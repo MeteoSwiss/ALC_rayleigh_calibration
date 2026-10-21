@@ -105,6 +105,8 @@ try:
 except json.JSONDecodeError:
     MOLECULAR_PARAMS = {}
     print("ALC_MOLECULAR_PARAMS is not valid JSON - ignored", flush=True)
+# Uncertainty-model override ('ensemble' | 'v2.3'), same pattern: empty -> options.json wins.
+UNCERTAINTY_MODEL = os.environ.get("ALC_UNCERTAINTY_MODEL", "").strip()
 
 # --- Paths / configuration --------------------------------------------------
 # Paths are env-overridable (set them in ops/config.sh on the server); the defaults are the local
@@ -331,6 +333,8 @@ def _do_rayleigh(s, start, end, shared=None, screen=False):
         o.molecular_method = MOLECULAR_METHOD
     if MOLECULAR_PARAMS:
         o.molecular_params = dict(o.molecular_params or {}, **MOLECULAR_PARAMS)
+    if UNCERTAINTY_MODEL:
+        o.uncertainty_model = UNCERTAINTY_MODEL
     # Measured dark-baseline profile (rayleigh_availability/dark_profiles.py). Empty = off.
     if os.environ.get("ALC_DARK_PROFILE"):
         o.dark_profile_file = os.environ["ALC_DARK_PROFILE"]
@@ -501,7 +505,19 @@ def _do_cloud(s, start, end, shared=None):
 
 
 # --- Kalman best estimate (per method) --------------------------------------
-def _kalman_rows(rows):
+def _kalman_weighting():
+    """Weight each night of the Kalman best estimate by its reported relative uncertainty?
+    ALC_KALMAN_UNCERTAINTY_WEIGHTING (1/0) overrides options.json kalman_uncertainty_weighting
+    (default off = the operational, equally weighted filter)."""
+    env = os.environ.get("ALC_KALMAN_UNCERTAINTY_WEIGHTING", "").strip()
+    if env:
+        return env == "1"
+    return bool(CalibrationOptions.from_json(REPO / "options.json").kalman_uncertainty_weighting)
+
+
+def _kalman_rows(rows, weighted=None):
+    if weighted is None:
+        weighted = _kalman_weighting()
     out = []
     for method in ("rayleigh", "cloud"):
         pts = []
@@ -513,11 +529,19 @@ def _kalman_rows(rows):
             except (TypeError, ValueError):
                 continue
             if math.isfinite(v) and v > 0:
-                pts.append((datetime.strptime(r["date"], "%Y%m%d"), v))
+                try:
+                    u = float(r.get("uncertainty", "nan"))
+                except (TypeError, ValueError):
+                    u = float("nan")
+                pts.append((datetime.strptime(r["date"], "%Y%m%d"), v, u))
         if len(pts) < 5:
             continue
         pts.sort()
-        grid, state, std = kalman_best_estimate([p[0] for p in pts], [p[1] for p in pts])
+        # Uncertainty weighting (option): kalman_best_estimate keeps the empirical variance scale and
+        # only takes the night-to-night RATIO of the relative uncertainties (clipped to x4 in sigma).
+        uncs = [p[2] for p in pts] if weighted else None
+        grid, state, std = kalman_best_estimate([p[0] for p in pts], [p[1] for p in pts],
+                                                uncertainties=uncs)
         for g, sv, sd in zip(grid, state, std):
             out.append(dict(method=method,
                             date=np.datetime_as_string(g, unit="D").replace("-", ""),
