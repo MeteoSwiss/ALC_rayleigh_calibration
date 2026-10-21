@@ -18,21 +18,24 @@ What this module does (only when ``options.polar_night_fallback`` is True; defau
    pulls daylight profiles in.
 2. Selection = the lowest sun. The profiles closest to solar midnight are kept: SZA above a floor
    ``max(min(SZA_max - polar_sza_delta, SZA(polar_min_hours)), polar_min_sza)``, where
-   ``SZA(h)`` is the SZA ``h/2`` hours either side of solar midnight. The window is therefore always
-   contiguous, centred on solar midnight, at least ``polar_min_hours`` long, and never admits a sun
-   higher than ``90 - polar_min_sza`` deg. It is applied through the operational
-   ``filter_time_range`` itself (with the floor as threshold), so the SZA formula and the profile
-   bookkeeping are exactly the operational ones.
-3. Geometric rejection. If no ``polar_min_hours``-long window with every profile at SZA >=
-   ``polar_min_sza`` exists (sun too high), the night is rejected with ``LOW_SUN_REJECT_FLAG``.
-4. Solar-background QC. By day the CHM15k under-subtracts the solar background: an additive
-   residual that is constant in raw signal, i.e. constant in ``signal = rcs / r**2``, and biases the
-   pointwise C_L by ``delta / (slope * p_mol(z))`` (report 19, q15e: +6 %-pt at 4 km at noon,
-   growing as r**2/beta_mol). The residual is measured where the atmosphere is molecular and the
-   relative effect largest, the far-range band ``polar_residual_band_m`` (8-12 km): the median of
-   ``signal - slope * p_mol`` there, converted into the implied bias at the window centre. On dark
-   nights it is ~0 by construction; a low-sun night whose implied bias exceeds
-   ``polar_max_residual_pct`` is rejected (``LOW_SUN_REJECT_FLAG``).
+   ``SZA(h)`` is the SZA ``h/2`` hours either side of solar midnight (defaults: the 6 h centred on
+   solar midnight, never a sun higher than 12 deg). The window is always contiguous and centred on
+   solar midnight. It is applied through the operational ``filter_time_range`` itself (with the
+   floor as threshold), so the SZA formula and the profile bookkeeping are exactly the operational
+   ones.
+3. Background control = the SZA floor. The CHM15k solar background (bckgrd_rcs_0) is a function of
+   the SZA: <= 1.04 x the dark level above SZA 94 deg, 2-3 x between 78 and 88 deg (polar CHM15k,
+   2025-2026), and same-night calibrations restricted to SZA 80-100 deg show no solar bias beyond
+   +-1 % (doc/v2.3/polar_summer.md). ``polar_min_sza`` therefore caps the background. If the window
+   above the floor lasts less than the operational minimum clear duration (``min_time_range``) the
+   night is rejected with ``LOW_SUN_REJECT_FLAG`` ("sun too high").
+4. Far-range residual (diagnostic, optional QC). By day the CHM15k under-subtracts the solar
+   background: an additive residual, constant in ``signal = rcs / r**2``, that biases the pointwise
+   C_L by ``delta / (slope * p_mol(z))`` (report 19, q15e: +6 %-pt at 4 km at noon). It is measured
+   in the far-range band ``polar_residual_band_m`` (8-12 km), converted into the implied bias at the
+   window centre and reported in the message. A night is rejected on it only when
+   ``polar_max_residual_pct > 0`` (default off): on real data the statistic is dominated by upper-
+   tropospheric cirrus and noise and does not separate low-sun from dark nights.
 5. Flag. A low-sun calibration that passes every gate is flagged ``LOW_SUN_FLAG`` (0.25) instead of
    1 / 0.5, with an explicit message, so the series and the dashboard can tell it apart.
 
@@ -190,10 +193,13 @@ def apply_low_sun_fallback(data_all, data_night, date_str: str, options
     window_h = hours_above_sza(lat, geo.decl_rad, floor)
     ls = LowSunNight(sza_max=geo.sza_max, dark_hours=geo.dark_hours, sza_floor=floor,
                      window_hours=window_h)
-    if geo.sza_max <= min_sza or window_h + 1e-9 < min_hours:
+    # The SZA floor may shorten the window below polar_min_hours (Hopen around the solstice). It is
+    # used as long as it lasts at least the operational minimum clear duration (min_time_range).
+    min_window = float(getattr(options, "min_time_range", 3))
+    if geo.sza_max <= min_sza or window_h + 1e-9 < min_window:
         ls.rejected = True
-        ls.reason = (f"sun too high (night max SZA {geo.sza_max:.1f} deg; no {min_hours:.1f}-h window "
-                     f"with SZA >= {min_sza:.1f} deg)")
+        ls.reason = (f"sun too high (night max SZA {geo.sza_max:.1f} deg; the window with SZA > "
+                     f"{floor:.1f} deg lasts {window_h:.1f} h < {min_window:.1f} h)")
         logger.warning(ls.reason)
         return data_night, ls
 
@@ -215,40 +221,58 @@ def _with_threshold(options, threshold: float):
 # Solar-background QC: far-range residual baseline
 # ---------------------------------------------------------------------------------------------
 def far_range_residual(signal, p_mol, range_alc, slope: float, window_center_m: float,
-                       band_m=DEFAULT_RESIDUAL_BAND_M) -> Tuple[float, float]:
+                       band_m=DEFAULT_RESIDUAL_BAND_M, signal_stack=None) -> Tuple[float, float]:
     """Implied C_L bias (%) at the window centre of an additive residual measured at far range.
 
     The under-subtracted solar background is constant in ``signal = rcs / r**2``:
-    ``signal = slope * p_mol + delta``. ``delta`` is estimated as the MEDIAN of
-    ``signal - slope * p_mol`` over the far-range band (robust to a thin cirrus layer covering part
-    of the band and to noise spikes); the pointwise C_L at the window centre is then biased by
-    ``delta / (slope * p_mol(z_c))``. Returns ``(bias_pct, x_far)`` with ``x_far`` the band's
-    molecular-normalised signal ``1 + delta / (slope * median p_mol)``; NaNs when not measurable.
+    ``signal = slope * p_mol + delta``; the pointwise C_L at the window centre is then biased by
+    ``delta / (slope * p_mol(z_c))``. ``delta`` is estimated over the far-range band as
+      * with ``signal_stack`` (time x range, >= 3 profiles): the median over the profiles of each
+        profile's median residual -- robust to a layer present in less than half the profiles and
+        to noise spikes (the default estimator in calibrate_rayleigh);
+      * otherwise the median over the band gates of the night-mean residual.
+    Returns ``(bias_pct, x_far)`` with ``x_far`` the band's molecular-normalised signal
+    ``1 + delta / (slope * median p_mol)``; NaNs when not measurable.
     """
     sig = np.asarray(signal, float)
     pm = np.asarray(p_mol, float)
     rng = np.asarray(range_alc, float)
     if not (np.isfinite(slope) and slope > 0 and np.isfinite(window_center_m)):
         return np.nan, np.nan
-    m = (rng >= band_m[0]) & (rng <= band_m[1]) & np.isfinite(sig) & np.isfinite(pm) & (pm > 0)
+    okp = np.isfinite(pm) & (pm > 0)
+    band = (rng >= band_m[0]) & (rng <= band_m[1]) & okp
+    m = band & np.isfinite(sig)
     if m.sum() < 10:
         return np.nan, np.nan
     delta = float(np.median(sig[m] - slope * pm[m]))
-    ok = np.isfinite(pm) & (pm > 0)
-    pm_c = float(np.interp(window_center_m, rng[ok], pm[ok]))
+    if signal_stack is not None and np.ndim(signal_stack) == 2 and np.shape(signal_stack)[0] >= 3:
+        st = np.asarray(signal_stack, float)[:, band]
+        res = st - slope * pm[band][None, :]
+        n_ok = np.sum(np.isfinite(res), axis=1)
+        if np.sum(n_ok >= 10) >= 3:
+            per = np.array([np.median(r[np.isfinite(r)]) for r, k in zip(res, n_ok) if k >= 10])
+            delta = float(np.median(per))
+    pm_c = float(np.interp(window_center_m, rng[okp], pm[okp]))
     if not pm_c > 0:
         return np.nan, np.nan
     return 100.0 * delta / (slope * pm_c), 1.0 + delta / (slope * float(np.median(pm[m])))
 
 
-def low_sun_residual_qc(low_sun: LowSunNight, signal, p_mol, range_alc, fit_result, options):
-    """Background QC of a low-sun night: ``(None, None)`` if it passes, else ``(flag, message)``."""
+def low_sun_residual_qc(low_sun: LowSunNight, signal, p_mol, range_alc, fit_result, options,
+                        signal_stack=None):
+    """Background QC of a low-sun night: ``(None, None)`` if it passes, else ``(flag, message)``.
+
+    The residual is always measured and reported in the result message. Rejection only happens
+    when ``polar_max_residual_pct > 0`` (default 0 = off): on 2025-2026 data the statistic has the
+    same distribution on low-sun nights as on dark nights (upper-tropospheric cirrus and noise
+    dominate it), so any threshold rejects nights for reasons unrelated to the sun.
+    """
     band = tuple(getattr(options, "polar_residual_band_m", DEFAULT_RESIDUAL_BAND_M))
     bias, x_far = far_range_residual(signal, p_mol, range_alc, float(fit_result.slope),
-                                     float(fit_result.center_range_m), band)
+                                     float(fit_result.center_range_m), band, signal_stack)
     low_sun.residual_pct, low_sun.x_far = bias, x_far
-    thr = float(getattr(options, "polar_max_residual_pct", np.inf))
-    if np.isfinite(bias) and abs(bias) > thr:
+    thr = float(getattr(options, "polar_max_residual_pct", 0.0) or 0.0)
+    if thr > 0 and np.isfinite(bias) and abs(bias) > thr:
         low_sun.rejected = True
         low_sun.reason = (f"far-range residual baseline implies {bias:+.1f} % at the window "
                           f"(|limit| {thr:.1f} %; X({band[0] / 1e3:.0f}-{band[1] / 1e3:.0f} km) "

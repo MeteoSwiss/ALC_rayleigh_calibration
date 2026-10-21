@@ -159,7 +159,7 @@ SENS_FIELDS = ["period", "date_start", "date_end", "wavelength", "icao_alt_200",
 # what produced it, and the dashboard was left ASSERTING a hard-coded "v2.0" over v2.2 numbers.
 CSV_FIELDS = ["date", "method", "flag", "cal_value", "uncertainty",
               "n_profiles", "bottom_height", "top_height", "version", "message"]
-_SUCCESS = (1, 1.0, 0.5)
+_SUCCESS = (1, 1.0, 0.5, 0.25)          # 0.25 = polar-summer low-sun night (option polar_night_fallback)
 _HK_NAN = {k: float("nan") for k in ("laser_life_time", "status_detector", "status_laser",
                                      "temperature_optical_module", "window_transmission",
                                      "optical_module_id")}

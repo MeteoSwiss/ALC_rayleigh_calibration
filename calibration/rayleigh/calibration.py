@@ -1256,7 +1256,7 @@ def calibrate_rayleigh(
     if qc_flag is None and low_sun is not None:
         from .polar import low_sun_residual_qc
         qc_flag, qc_message = low_sun_residual_qc(
-            low_sun, signal, mol_props.p_mol, data.range_alc, fit_result, options)
+            low_sun, signal, mol_props.p_mol, data.range_alc, fit_result, options, signal_stack)
 
     _outcome = {None: "OK", -3: "method disagreement", -6: "too noisy",
                 -9: "lower-signal layer found", -11: "window contaminated"}.get(qc_flag, "rejected")

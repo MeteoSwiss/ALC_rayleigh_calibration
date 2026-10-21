@@ -89,8 +89,9 @@ FLAG_MEANINGS = {
 #: per-reason outcome breakdown.
 CLOUD_REJECT_FLAGS = (-20, -21, -22, -23, -24, -25, -26)
 
-# A calibration "succeeded" on a night if its flag is one of these.
-SUCCESS_FLAGS = (1.0, 0.5)
+# A calibration "succeeded" on a night if its flag is one of these (0.25 = polar-summer low-sun
+# calibration, only produced with the v2.3 option polar_night_fallback).
+SUCCESS_FLAGS = (1.0, 0.5, 0.25)
 
 # Discrete color per flag: greens = usable, warm = atmospheric/fit reject, greys = no data.
 FLAG_COLORS = {

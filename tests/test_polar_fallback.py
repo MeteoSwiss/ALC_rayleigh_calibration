@@ -219,11 +219,12 @@ def test_synthetic_polar_night_off_has_no_profiles(tmp_path):
     assert "nighttime window" in r.message
 
 
-def test_synthetic_polar_night_fallback_flagged_and_unbiased(tmp_path):
-    d = _synthetic_night(LAT, LON, DATE, C_TRUE)
+@pytest.mark.parametrize("lat,date", [(LAT, DATE), (-LAT, "20251221")], ids=["north", "south"])
+def test_synthetic_polar_night_fallback_flagged_and_unbiased(tmp_path, lat, date):
+    d = _synthetic_night(lat, LON, date, C_TRUE)
     o = _synthetic_options(tmp_path, polar_night_fallback=True)
     fi = {}
-    r = calibrate_rayleigh(DATE, _synthetic_info(LAT, LON), o, preloaded_data=d,
+    r = calibrate_rayleigh(date, _synthetic_info(lat, LON), o, preloaded_data=d,
                            fit_inputs_out=fi)
     assert r.flag == LOW_SUN_FLAG, r.message
     assert r.message.startswith("Low-sun (polar summer)")
@@ -234,7 +235,38 @@ def test_synthetic_polar_night_fallback_flagged_and_unbiased(tmp_path):
     assert ls.window_hours >= o.polar_min_hours - 1e-9
     assert ls.n_profiles == pytest.approx(60.0 * ls.window_hours, abs=2)
     assert abs(ls.residual_pct) < 3.0          # no solar residual was simulated
-    assert not is_success(r.flag)              # kept apart from 1/0.5 until promoted
+    assert is_success(r.flag) and r.is_successful    # usable, but distinguishable from 1 / 0.5
+
+
+def test_synthetic_floor_shortens_window_hopen_like(tmp_path):
+    """At 76.5 N on the solstice the SZA floor (78) cuts the 6-h window to ~4.4 h: still used
+    (>= min_time_range), rejected when min_time_range asks for more."""
+    lat = 76.5
+    d = _synthetic_night(lat, LON, DATE, C_TRUE)
+    fi = {}
+    r = calibrate_rayleigh(DATE, _synthetic_info(lat, LON),
+                           _synthetic_options(tmp_path, polar_night_fallback=True),
+                           preloaded_data=d, fit_inputs_out=fi)
+    ls = fi["low_sun"]
+    assert r.flag == LOW_SUN_FLAG, r.message
+    assert ls.sza_floor == 78.0 and 3.0 <= ls.window_hours < 6.0
+    r2 = calibrate_rayleigh(DATE, _synthetic_info(lat, LON),
+                            _synthetic_options(tmp_path, polar_night_fallback=True,
+                                               min_time_range=5.0),
+                            preloaded_data=d)
+    assert r2.flag == LOW_SUN_REJECT_FLAG and "sun too high" in r2.message
+
+
+def test_synthetic_residual_reported_not_rejected_by_default(tmp_path):
+    """The far-range residual is a diagnostic by default (polar_max_residual_pct = 0 = off)."""
+    d = _synthetic_night(LAT, LON, DATE, C_TRUE, delta_frac=0.05)
+    fi = {}
+    r = calibrate_rayleigh(DATE, _synthetic_info(LAT, LON),
+                           _synthetic_options(tmp_path, polar_night_fallback=True),
+                           preloaded_data=d, fit_inputs_out=fi)
+    assert r.flag == LOW_SUN_FLAG, r.message
+    assert fi["low_sun"].residual_pct > 1.0
+    assert "far-range residual" in r.message
 
 
 def test_synthetic_sun_too_high_rejected(tmp_path):
@@ -271,7 +303,10 @@ def test_far_range_residual_recovers_offset():
 # flags
 # --------------------------------------------------------------------------------------------
 def test_flags_distinct_and_labelled():
-    assert LOW_SUN_FLAG not in SUCCESS_FLAGS and LOW_SUN_REJECT_FLAG not in SUCCESS_FLAGS
+    # 0.25 is a usable calibration; -14 is not; the former success flags are unchanged
+    assert LOW_SUN_FLAG in SUCCESS_FLAGS and LOW_SUN_REJECT_FLAG not in SUCCESS_FLAGS
+    assert set(SUCCESS_FLAGS) - {LOW_SUN_FLAG} == {1.0, 0.5}
+    assert is_success(1) and is_success(0.5) and is_success(0.25) and not is_success(0)
     assert flag_label(LOW_SUN_FLAG) == FLAG_MEANINGS[0.25] != FLAG_MEANINGS[0]
     assert flag_label(LOW_SUN_REJECT_FLAG) == FLAG_MEANINGS[-14]
     # the pre-existing labels are unchanged
@@ -282,6 +317,7 @@ def test_flags_distinct_and_labelled():
     assert mcfg.flag_label(0.25, "rayleigh") == flag_label(0.25)
     assert mcfg.flag_label(-14, "rayleigh") == flag_label(-14)
     assert mcfg.cal_class(0.25) == "ok" and mcfg.cal_class(-14) == "nonight"
+    assert tuple(mcfg.SUCCESS_FLAGS) == tuple(SUCCESS_FLAGS)
 
 
 def test_options_json_roundtrip(tmp_path):

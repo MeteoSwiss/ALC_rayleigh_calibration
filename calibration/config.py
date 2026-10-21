@@ -178,16 +178,17 @@ class CalibrationOptions:
     # When the night window has no more than polar_trigger_dark_hours with SZA > sza_night_threshold
     # (solar geometry; north of ~56.6 N around the solstice there are none), calibrate on the lowest-
     # sun profiles instead: SZA > max(min(SZA_max - polar_sza_delta, SZA at +-polar_min_hours/2 from
-    # solar midnight), polar_min_sza). Such a night is flagged 0.25 (calibration.flags.LOW_SUN_FLAG);
-    # it is rejected (-14) when no polar_min_hours window with SZA >= polar_min_sza exists, or when
-    # the far-range (polar_residual_band_m) residual solar background implies a C_L bias above
-    # polar_max_residual_pct at the window centre.
+    # solar midnight), polar_min_sza), i.e. by default the 6 h centred on solar midnight with the sun
+    # never higher than 12 deg. Such a night is flagged 0.25 (calibration.flags.LOW_SUN_FLAG); it is
+    # rejected (-14) when that window lasts less than min_time_range, or -- only if
+    # polar_max_residual_pct > 0 -- when the far-range (polar_residual_band_m) residual background
+    # implies a larger C_L bias at the window centre (0 = off; see doc/v2.3/polar_summer.md).
     polar_night_fallback: bool = False
     polar_trigger_dark_hours: float = 0.0
-    polar_sza_delta: float = 3.0
-    polar_min_hours: float = 4.0
+    polar_sza_delta: float = 0.0
+    polar_min_hours: float = 6.0
     polar_min_sza: float = 78.0
-    polar_max_residual_pct: float = 10.0
+    polar_max_residual_pct: float = 0.0
     polar_residual_band_m: tuple = (8000.0, 12000.0)
     # Time collapse before the molecular fit: "mean" (efficient for the weak-signal
     # photon noise at 3-6 km) or "median" (robust but ~1.5x noisier there).
@@ -331,10 +332,10 @@ class CalibrationOptions:
             sza_night_threshold=float(data.get("sza_night_threshold", 100.0)),
             polar_night_fallback=bool(data.get("polar_night_fallback", 0)),
             polar_trigger_dark_hours=float(data.get("polar_trigger_dark_hours", 0.0)),
-            polar_sza_delta=float(data.get("polar_sza_delta", 3.0)),
-            polar_min_hours=float(data.get("polar_min_hours", 4.0)),
+            polar_sza_delta=float(data.get("polar_sza_delta", 0.0)),
+            polar_min_hours=float(data.get("polar_min_hours", 6.0)),
             polar_min_sza=float(data.get("polar_min_sza", 78.0)),
-            polar_max_residual_pct=float(data.get("polar_max_residual_pct", 10.0)),
+            polar_max_residual_pct=float(data.get("polar_max_residual_pct", 0.0)),
             polar_residual_band_m=tuple(float(v) for v in data.get("polar_residual_band_m",
                                                                    (8000.0, 12000.0))),
             time_aggregation=str(data.get("time_aggregation", "mean")),
@@ -392,8 +393,9 @@ class CalibrationResult:
 
     @property
     def is_successful(self) -> bool:
-        """Check if calibration was successful."""
-        return self.flag == 1 or self.flag == 0.5
+        """Check if calibration was successful (calibration.flags.SUCCESS_FLAGS)."""
+        from .flags import is_success
+        return is_success(self.flag)
 
     @property
     def flag_meaning(self) -> str:
