@@ -42,6 +42,12 @@ STAB = REPO / "validation" / "chm15k_stability"
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(STAB))
 
+# The operational v2.2 configuration (ops/config.sh, v2.2 cutover) runs the CL61 water-vapour
+# correction with the manufacturer line, not the code default 910.74/1.0 nm (which over-corrects
+# WV x9 and creates a spurious height gradient). Set it here so the recalibration reproduces the
+# published CL61 constants; inherited by the worker processes. Only the CL61 reads it.
+os.environ.setdefault("ALC_WV_SPECTRUM", '{"CL61": [910.55, 0.188]}')
+
 OUT = Path("C:/DATA/Projects/202610_v23/uncertainty")
 RUN_DIR = OUT / "runs"
 L1_ROOT = Path("D:/E-PROFILE_L1_2026")
@@ -139,11 +145,12 @@ def _install():
         orig = U.budget_for_night
 
         def timed(**kw):
-            t0 = time.process_time()
+            # perf_counter: process_time has a 15.6 ms granularity on Windows, coarser than the call
+            t0 = time.perf_counter()
             try:
                 return orig(**kw)
             finally:
-                _TIMER["t"] += time.process_time() - t0
+                _TIMER["t"] += time.perf_counter() - t0
         U.budget_for_night = timed
         U._timed = True
     return Q

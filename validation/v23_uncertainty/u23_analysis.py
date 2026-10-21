@@ -74,6 +74,10 @@ def load_runs():
     df["_r"] = [p[1] for p in parsed]
     df["_s"] = [p[2] for p in parsed]
     df["key"] = df["wmo"] + "_" + df["ident"]
+    # (e) residual-aerosol allowance, as in the module (not recorded by the first runs)
+    from calibration.rayleigh.uncertainty import DEFAULT_PARAMS
+    wl = df["type"].map({"CHM15k": 1064.0, "CL61": 910.0, "Mini-MPL": 532.0}).astype(float)
+    df["sig_aer"] = DEFAULT_PARAMS["aerosol_floor_rel"] * (wl / 1064.0) ** 3
     df["ok"] = df["flag"].isin([1.0, 0.5]) & np.isfinite(df["c"]) & (df["c"] > 0)
     # v2.2 success also requires the old 'u > C' gate (not applied in the v2.3 recording)
     df["ok22"] = df["ok"] & ~(df["u_ens"] > df["c"])
@@ -234,9 +238,12 @@ def add_vertical(df, cfg, col="sig_vert"):
 
 
 def total_sigma(df, vert_col="sig_vert", with_mol=True):
+    """Total relative sigma. with_mol=False drops the two ATMOSPHERIC terms common to co-located
+    units (molecular model, uniform aerosol), which cancel in a twin ratio."""
     parts = [df["sig_ens"] ** 2, df[vert_col].fillna(0.0) ** 2, df["sig_noise"].fillna(0.0) ** 2]
     if with_mol:
         parts.append(df["sig_mol"].fillna(0.0) ** 2)
+        parts.append(df["sig_aer"].fillna(0.0) ** 2)
     return np.sqrt(sum(parts))
 
 
@@ -256,6 +263,17 @@ def anomalies(df, cen):
         P = Published(wmo, ident, s["lon"])
         pubs[key] = P
         if not P.ok:
+            # no published series locally (the Mini-MPLs): running median of the recalibrated,
+            # sampled series itself (kappa = 0 for these types)
+            okg = g[g.ok]
+            if len(okg) >= 10:
+                t = okg.tday.values.astype(float)
+                lnc = np.log(okg.c.values)
+                base = running_median(t, lnc, exclude_self=True)
+                df.loc[okg.index, "anom"] = lnc - base
+                df.loc[okg.index, "kappa"] = 0.0
+                df.loc[okg.index, "in_pub"] = True          # usable truth (own series)
+                df.loc[okg.index, "truth_src"] = "own"
             continue
         kap = unit_kappa(key, s["type"], ktab)
         lncc = P.corrected(kap)
@@ -376,7 +394,8 @@ def sweep(df, tw, workers=16):
                     sv = np.where(np.isfinite(sv), sv, 0.0)
                     nomol = (base.sig_ens.values ** 2 + sv ** 2
                              + np.nan_to_num(base.sig_noise.values) ** 2)
-                    sig = np.sqrt(nomol + np.nan_to_num(base.sig_mol.values) ** 2)
+                    sig = np.sqrt(nomol + np.nan_to_num(base.sig_mol.values) ** 2
+                                  + np.nan_to_num(base.sig_aer.values) ** 2)
                     z = base.anom.values[has_anom] / sig[has_anom]
                     st = pull_stats(z)
                     unit_r = pd.Series(z).groupby(base.key.values[has_anom]).apply(
@@ -407,16 +426,47 @@ def cmd_sweep(args):
     tw = twin_anomalies(df, pubs, cen)
     tw.to_csv(OUT / "u23_twin_anomalies.csv", index=False)
     print(f"twin pair-nights: {len(tw)}")
+    base22 = df.ok & df.in_pub & np.isfinite(df.anom) & (df.type == "CHM15k") & (
+        df.key != "0-20000-0-06610_A")
+    s22 = pull_stats(df.anom[base22] / df.sig_ens[base22])
+    t22, _ = twin_pull_stats(tw, dict(zip(zip(df.key, df.date), df.sig_ens)))
+    print(f"v2.2 ensemble only: time-series pull rstd {s22['rstd']:.2f} out2 {100 * s22['out2']:.0f}% "
+          f"(n {s22['n']}), twins rstd {t22['rstd']:.2f} out2 {100 * t22['out2']:.0f}% "
+          f"(n {t22['n']}); observed sigma {100 * pull_stats(df.anom[base22])['rstd']:.1f} %, "
+          f"twin pair sigma {100 * pull_stats(tw.anom)['rstd']:.1f} %")
     sw, fits, base = sweep(df, tw)
     with open(OUT / "u23_prepared.pkl", "wb") as fh:
         pickle.dump(dict(df=df, tw=tw), fh)
     pd.set_option("display.width", 250)
-    pd.set_option("display.max_rows", 200)
+    pd.set_option("display.max_rows", 300)
+    print("\n--- curated candidates (est abs unless stated) ---")
+    cand = [("brief: 1 km below, SNR 3 above", dict(below=1000.0, above=1e9, snr=3.0)),
+            ("1 km below, <= 1 km above", dict(below=1000.0, above=1000.0, snr=3.0)),
+            ("0.5 km below, <= 1 km above", dict(below=500.0, above=1000.0, snr=3.0)),
+            ("window only + <= 1 km above", dict(below=0.0, above=1000.0, snr=3.0)),
+            ("window only + SNR 3 above", dict(below=0.0, above=1e9, snr=3.0)),
+            ("window only", dict(below=0.0, above=0.0, snr=3.0))]
+    rows = []
+    for lab, c in cand:
+        for est in ("abs", "debias"):
+            for resid in (False, True):
+                for D in (0.75, 1.0):
+                    x = sw[(sw.below == c["below"]) & (sw.above == c["above"]) & (sw.snr == c["snr"])
+                           & (sw.est == est) & (sw.resid == resid) & (sw.D == D)]
+                    if len(x):
+                        r = x.iloc[0]
+                        rows.append(dict(candidate=lab, est=est, resid=resid, D=D,
+                                         ts_rstd=r.rstd, ts_out2=r.out2,
+                                         unit_med=r.unit_rstd_med, twin_rstd=r.twin_rstd,
+                                         twin_out2=r.twin_out2, sig_med=r.sig_med))
+    ct = pd.DataFrame(rows)
+    ct.to_csv(OUT / "u23_candidates.csv", index=False)
+    print(ct.round(3).to_string(index=False))
     for D in (0.75, 1.0, 1.5):
         print(f"\n--- D = {D} km, sorted by |rstd - 1| ---")
         x = sw[sw.D == D].copy()
         x["dev"] = (x.rstd - 1).abs() + (x.twin_rstd - 1).abs()
-        print(x.sort_values("dev").head(25).to_string())
+        print(x.sort_values("dev").head(15).to_string())
 
 
 # --------------------------------------------------------------------------------------------
@@ -504,7 +554,7 @@ def cmd_verify(args):
     tasks = []
     for wmo, ident in VERIFY_UNITS:
         files = sorted((RUN_DIR / f"{wmo}_{ident}").glob("*.csv"))
-        for f in files[len(files) // 3: len(files) // 3 + 2]:
+        for f in files[len(files) // 3: len(files) // 3 + 4]:
             dates = pd.read_csv(f, dtype={"date": str})["date"].tolist()
             tasks.append((wmo, ident, dates, OUT / "verify" / f"{wmo}_{ident}" / f.name,
                           dict(DEFAULT_PARAMS, max_rel_uncertainty=1e9)))
@@ -535,43 +585,25 @@ def cmd_verify(args):
 # cost: runtime of the budget with the shipped defaults
 # --------------------------------------------------------------------------------------------
 def cmd_cost(args):
-    import time as _t
-    import logging
-    from calibration import calibrate_rayleigh
-    from calibration.io.data_loader import build_file_paths, load_data
-    import u23_validation as V
+    """Runtime from the process times the harness records per night (no extra L1 pass):
+    cpu_s = the whole night (L1 load + calibrate_rayleigh incl. the budget), cpu_budget_s = the
+    budget call alone. Recording run = upper bound (wide range); verify run = shipped defaults."""
     import pandas as pd
-    warnings.filterwarnings("ignore")
-    logging.disable(logging.CRITICAL)
-    V._install()
-    rec = load_runs()
-    rec = rec[rec.ok & (rec.type == "CHM15k")]
-    pick = rec.sample(n=min(args.n, len(rec)), random_state=1)
-    cen = census()
     rows = []
-    for _, r in pick.iterrows():
-        s = cen[(r.wmo, r.ident)]
-        info = V._info(s)
-        o_e = _options({}, "ensemble")
-        o_v = _options({}, "v2.3")
-        files = [f for f in build_file_paths(r.date, info, o_e) if f.exists()]
-        t0 = _t.perf_counter()
-        native = load_data(files, info.instrument_type, o_e.data_level)
-        t_read = _t.perf_counter() - t0
-        t = {}
-        for lab, o in (("ensemble", o_e), ("v2.3", o_v), ("ensemble2", o_e), ("v2.32", o_v)):
-            t0 = _t.perf_counter()
-            calibrate_rayleigh(r.date, info, o, preloaded_data=native)
-            t[lab] = _t.perf_counter() - t0
-        rows.append(dict(key=r.key, date=r.date, read=t_read,
-                         ens=min(t["ensemble"], t["ensemble2"]), v23=min(t["v2.3"], t["v2.32"])))
+    for lab, root in (("recording (wide range)", RUN_DIR), ("shipped defaults", OUT / "verify")):
+        frames = [pd.read_csv(f) for f in Path(root).glob("*/*.csv")]
+        if not frames:
+            continue
+        d = pd.concat(frames)
+        d = d[np.isfinite(d.cpu_budget_s) & (d.cpu_budget_s > 0)]
+        frac = d.cpu_budget_s / d.cpu_s
+        rows.append(dict(config=lab, nights=len(d), night_cpu_median_s=d.cpu_s.median(),
+                         budget_cpu_median_s=d.cpu_budget_s.median(),
+                         budget_cpu_p95_s=d.cpu_budget_s.quantile(0.95),
+                         budget_fraction_median=frac.median()))
     c = pd.DataFrame(rows)
     c.to_csv(OUT / "u23_cost.csv", index=False)
-    print(f"{len(c)} CHM15k nights: L1 read median {c.read.median():.2f} s; calibration "
-          f"ensemble {c.ens.median():.3f} s, v2.3 {c.v23.median():.3f} s "
-          f"(+{(c.v23 - c.ens).median():.3f} s, +{100 * ((c.v23 - c.ens) / c.ens).median():.0f} % "
-          f"of the calibration, +{100 * ((c.v23 - c.ens) / (c.ens + c.read)).median():.0f} % incl. "
-          f"the read)")
+    print(c.round(4).to_string(index=False))
 
 
 # --------------------------------------------------------------------------------------------
@@ -616,7 +648,8 @@ def unit_table(df):
                          obs_sigma=100 * pull_stats(g.anom)["rstd"],
                          rep22=100 * g.sig22.median(), rep23=100 * g.sig23.median(),
                          vert=100 * g.sig_vert.median(), noise=100 * g.sig_noise.median(),
-                         mol=100 * g.sig_mol.median(), ens=100 * g.sig_ens.median(),
+                         mol=100 * g.sig_mol.median(), aer=100 * g.sig_aer.median(),
+                         ens=100 * g.sig_ens.median(),
                          g_med=100 * g.g.median(), g_abs=100 * g.g.abs().median(),
                          pull22=s22["rstd"], pull23=s23["rstd"], out22=s22["out2"],
                          out23=s23["out2"]))
@@ -644,6 +677,11 @@ def cmd_report(args):
         print(txt)
         lines.append(txt)
 
+    n_old6 = int((df.ok & (df.u_ens > df.c)).sum())
+    txt = (f"old 'u > C' gate (-6): would fire on {n_old6} of {int(df.ok.sum())} successful nights "
+           f"({100 * n_old6 / max(int(df.ok.sum()), 1):.2f} %)")
+    print(txt)
+    lines.append(txt)
     report("CHM15k (Payerne A excluded)", chm & ~pay)
     report("CHM15k Payerne A", chm & pay)
     for typ in ("CL61", "Mini-MPL"):
@@ -682,6 +720,20 @@ def cmd_report(args):
            f"{100 * np.median(np.abs(ga.g.values[okg] - gb.g.values[okg])):.1f} %/km")
     print(txt)
     lines.append(txt)
+    # time-series tails of the twin units: is the partner ALSO beyond 2 sigma, same sign, that night?
+    zmap = dict(zip(zip(df.key, df.date), df.z23))
+    n_tail, n_common = 0, 0
+    for a, b, d in zip(tw.ka, tw.kb, tw.date):
+        za, zb = zmap.get((a, d), np.nan), zmap.get((b, d), np.nan)
+        for z1, z2 in ((za, zb), (zb, za)):
+            if np.isfinite(z1) and abs(z1) > 2 and np.isfinite(z2):
+                n_tail += 1
+                n_common += int(abs(z2) > 2 and np.sign(z2) == np.sign(z1))
+    txt = (f"time-series tails of twin units: {n_tail} unit-nights beyond 2 sigma, of which "
+           f"{100 * n_common / max(n_tail, 1):.0f} % have the twin partner beyond 2 sigma with the same "
+           f"sign the same night (common events)")
+    print(txt)
+    lines.append(txt)
     ut = unit_table(df)
     ut.to_csv(OUT / "u23_units.csv", index=False)
     rho22 = spearmanr(ut.rep22, ut.obs_sigma)[0]
@@ -689,8 +741,22 @@ def cmd_report(args):
     txt = f"Spearman(reported, observed) across {len(ut)} units: v2.2 {rho22:+.2f}, v2.3 {rho23:+.2f}"
     print(txt)
     lines.append(txt)
+    uc = ut[ut.type == "CHM15k"]
+    txt = (f"Spearman(reported, observed) across {len(uc)} CHM15k units: v2.2 "
+           f"{spearmanr(uc.rep22, uc.obs_sigma)[0]:+.2f}, v2.3 {spearmanr(uc.rep23, uc.obs_sigma)[0]:+.2f}")
+    print(txt)
+    lines.append(txt)
     ut["rank23"] = ut.rep23.rank(ascending=False).astype(int)
     ut["rank_obs"] = ut.obs_sigma.rank(ascending=False).astype(int)
+    md = ["| unit | type | nights | observed σ | reported σ v2.2 | reported σ v2.3 | rank v2.3 / observed "
+          "| median g [%/km] | pull v2.2 → v2.3 | > 2σ v2.2 → v2.3 |",
+          "|---|---|---|---|---|---|---|---|---|---|"]
+    for _, r in ut.sort_values("rep23", ascending=False).iterrows():
+        name = f"{r.site.title()} {r.key.rsplit('_', 1)[1]}"
+        md.append(f"| {name} | {r.type} | {r.n} | {r.obs_sigma:.1f} % | {r.rep22:.1f} % | "
+                  f"{r.rep23:.1f} % | {r.rank23} / {r.rank_obs} | {r.g_med:+.1f} | "
+                  f"{r.pull22:.1f} → {r.pull23:.2f} | {100 * r.out22:.0f} → {100 * r.out23:.0f} % |")
+    (OUT / "u23_units.md").write_text("\n".join(md), encoding="utf-8")
     pd.set_option("display.width", 250)
     print(ut.sort_values("rep23", ascending=False).round(2).to_string(index=False))
     (OUT / "u23_report.txt").write_text("\n".join(lines), encoding="utf-8")
@@ -752,7 +818,8 @@ def _figures(df, tw, ut, sig22, sig_nomol, plt):
     x = np.arange(len(u))
     bottom = np.zeros(len(u))
     for col, c, lab in (("ens", "0.6", "ensemble (v2.2)"), ("vert", "tab:red", "vertical"),
-                        ("mol", "tab:green", "molecular"), ("noise", "tab:purple", "photon noise")):
+                        ("mol", "tab:green", "molecular"), ("aer", "tab:olive", "uniform aerosol"),
+                        ("noise", "tab:purple", "photon noise")):
         v = u[col].values ** 2
         ax.bar(x, v, bottom=bottom, color=c, label=lab, width=0.8)
         bottom += v
@@ -761,6 +828,7 @@ def _figures(df, tw, ut, sig22, sig_nomol, plt):
     ax.set_xticklabels([f"{r.site[:14]} {r.key.rsplit('_', 1)[1]} ({r.type[:4]})"
                         for _, r in u.iterrows()], rotation=70, ha="right", fontsize=7)
     ax.set_yscale("log")
+    ax.set_ylim(1.0, None)
     ax.set_ylabel("variance, unit median [%^2] (stacked)")
     ax.set_title("v2.3 budget per unit (median of the nightly components) and the observed "
                  "night-to-night variance")
@@ -865,6 +933,30 @@ def cmd_windows(args):
     w.to_csv(OUT / "u23_window_displacement.csv", index=False)
     pd.set_option("display.width", 220)
     print(w.round(2).to_string(index=False))
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(figsize=(14, 4.8))
+    cols = [("zc_sd", "sd of the window centre"), ("within_month_sd", "sd about its 31-day median"),
+            ("consecutive_abs", "|change| between consecutive nights"),
+            ("summer_minus_winter", "summer minus winter median"),
+            ("p10_p90", "10th-90th percentile span")]
+    for i, (c, lab) in enumerate(cols):
+        v = w[c].dropna().values
+        ax.plot(v, np.full(v.size, i) + np.random.default_rng(i).uniform(-0.15, 0.15, v.size), "o",
+                color="tab:blue", alpha=0.5, ms=5)
+        ax.plot(np.median(v), i, "k|", ms=26, mew=3)
+    ax.axvline(1.0, color="tab:red", ls="--", label="D = 1 km (v2.3 default)")
+    ax.set_yticks(range(len(cols)))
+    ax.set_yticklabels([lab for _, lab in cols])
+    ax.set_xlabel("window-centre displacement [km] (one dot per unit, published 2025-26 nights; "
+                  "black bar = network median)")
+    ax.set_title("How far the molecular window moves between nights")
+    ax.legend(loc="lower right", fontsize=8)
+    ax.grid(alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(OUT / "u23_window_displacement.png", dpi=130)
+    plt.close(fig)
     for col in ("zc_sd", "zc_rsd", "within_month_sd", "consecutive_abs", "summer_minus_winter",
                 "p10_p90"):
         print(f"{col:22s} network median {w[col].median():.2f} km [IQR {w[col].quantile(0.25):.2f}"
@@ -946,15 +1038,17 @@ def cmd_kalman(args):
                     if common.size < 60:
                         continue
                     r = np.log(sa[ia] / sb[ib])
+                    # the Kalman state is piecewise constant between observations, so a robust
+                    # (median-based) spread collapses to 0: use the RMS and the 95th percentile
                     dev = r - running_median(common.astype(float), r)
                     trows.append(dict(pair=f"{ka}/{kb}", model=lab,
-                                      ratio_dev_rstd=pull_stats(dev)["rstd"],
+                                      ratio_dev_rms=float(np.sqrt(np.nanmean(dev ** 2))),
                                       ratio_dev_p95=float(np.nanpercentile(np.abs(dev), 95))))
     t = pd.DataFrame(trows)
     t.to_csv(OUT / "u23_kalman_twins.csv", index=False)
-    tp = t.pivot_table(index="pair", columns="model", values=["ratio_dev_rstd", "ratio_dev_p95"])
+    tp = t.pivot_table(index="pair", columns="model", values=["ratio_dev_rms", "ratio_dev_p95"])
     print((100 * tp).round(2).to_string())
-    for met in ("ratio_dev_rstd", "ratio_dev_p95"):
+    for met in ("ratio_dev_rms", "ratio_dev_p95"):
         d = 100 * (tp[(met, "w23")] / tp[(met, "flat")] - 1)
         print(f"twins {met}: v2.3-weighted vs flat median {d.median():+.1f} %, better on "
               f"{100 * np.mean(d < 0):.0f} % of pairs")
@@ -1045,30 +1139,40 @@ def cmd_profiles(args):
         a = ax[-1]
         rec = pay.get(("record", True))
         dfl = pay.get(("default", True))
+        ens = pay.get(("ensemble", True))           # the published (v2.2) result: window heights
+        alt = census()[PAYERNE].get("alt", 0.0)
         b = rec["budget"] if rec else None
         if b is not None and b.sub_cl.size:
             c0 = b.lidar_constant
             a.errorbar(b.sub_cl / c0, b.sub_centre_m / 1000, xerr=b.sub_sigma_rel, fmt="o",
                        color="0.75", ms=4, label="all recorded sub-windows")
         bd = dfl["budget"] if dfl else None
-        if bd is not None and bd.sub_cl.size:
+        if bd is not None and bd.sub_cl.size and ens and ens["zb"] is not None:
             c0 = bd.lidar_constant
+            zb, zt = ens["zb"] - alt, ens["zt"] - alt
             a.errorbar(bd.sub_cl / c0, bd.sub_centre_m / 1000, xerr=bd.sub_sigma_rel, fmt="o",
                        color="tab:blue", ms=5, label="used (shipped defaults)")
-            zc = 0.5 * (dfl["zb"] + dfl["zt"]) - 490.0
+            zc = 0.5 * (zb + zt)
             zline = np.linspace(bd.sub_centre_m.min(), bd.sub_centre_m.max(), 20)
-            a.plot(np.exp(bd.gradient_per_km * (zline - zc) / 1000.0), zline / 1000, "-",
+            # line through the weighted centroid of the used sub-windows
+            w = 1.0 / (bd.sub_sigma_rel ** 2 + 0.01 ** 2)
+            zm = np.sum(w * bd.sub_centre_m) / np.sum(w)
+            ym = np.sum(w * np.log(bd.sub_cl / c0)) / np.sum(w)
+            a.plot(np.exp(ym + bd.gradient_per_km * (zline - zm) / 1000.0), zline / 1000, "-",
                    color="tab:red", label=f"fit: {100 * bd.gradient_per_km:+.0f} %/km")
-            a.axhspan((dfl["zb"] - 490) / 1000, (dfl["zt"] - 490) / 1000, color="tab:green",
-                      alpha=0.15, label="operational window")
+            a.axhspan(zb / 1000, zt / 1000, color="tab:green", alpha=0.15,
+                      label="operational window")
+            verdict = "rejected (QC -6)" if dfl["flag"] == -6 else "kept"
             a.set_title(f"Payerne A, 2026-09-07 (classification screen on)\nv2.2 2s "
-                        f"{100 * bd.u_ensemble / c0:.0f} % -> v2.3 2s {100 * bd.rel_total:.0f} %",
-                        fontsize=9)
+                        f"{100 * bd.u_ensemble / c0:.0f} % -> v2.3 2s {100 * bd.rel_total:.0f} %, "
+                        f"{verdict}", fontsize=9)
         a.axvline(1.0, color="k", lw=0.8)
         a.set_xlabel("C_L(sub-window) / C_L(operational)")
         a.set_ylabel("range [km]")
         a.legend(fontsize=7, loc="lower right")
         a.grid(alpha=0.3)
+    for a in ax:
+        a.set_xlim(0.3, 2.3)                  # a few recorded points deep in the BL are off-scale
     fig.tight_layout()
     fig.savefig(OUT / "u23_profiles.png", dpi=130)
     plt.close(fig)

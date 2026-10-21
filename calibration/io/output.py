@@ -202,6 +202,11 @@ _V23_UNCERTAINTY_VARS = {
         comments=("US Standard 1976 vs the real temperature/pressure: climatology of the CAMS vs "
                   "US-1976 ln-bias of C_L (latitude, season, window height) plus its synoptic "
                   "residual; a floor only when the molecular reference is CAMS.")),
+    "lidar_constant_uncertainty_aerosol": dict(
+        long_name="Residual-aerosol part of the lidar-constant uncertainty (2 sigma)",
+        comments=("Fixed allowance for a vertically uniform aerosol in the window, invisible to any "
+                  "single-profile test: 1 sigma = 2 % at 1064 nm (CAMS in-window aerosol scaled by "
+                  "its observed transfer to C_L), scaled as (wavelength / 1064 nm)^3.")),
     "lidar_constant_uncertainty_noise": dict(
         long_name="Photon-noise part of the lidar-constant uncertainty (2 sigma)",
         comments=("Noise of the night-mean signal in the window, from the per-gate noise measured by "
@@ -229,7 +234,7 @@ def _ensure_v23_uncertainty_variables(ncid: Dataset, units: str) -> None:
     unc.coverage_factor = 2
     unc.comments = ("2-sigma (~95 %) absolute uncertainty. Rows with a valid "
                     "lidar_constant_uncertainty_vertical (uncertainty model v2.3): "
-                    "2 C_L sqrt(s_ens^2 + s_vert^2 + s_mol^2 + s_noise^2), see the four "
+                    "2 C_L sqrt(s_ens^2 + s_vert^2 + s_mol^2 + s_aer^2 + s_noise^2), see the five "
                     "lidar_constant_uncertainty_* components. Other rows (v2.2 and older): "
                     "the ensemble part alone (2 x robust sigma of the 125-member ensemble).")
 

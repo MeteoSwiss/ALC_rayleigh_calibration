@@ -33,8 +33,8 @@ FIXTURES = [
     ("0-20000-0-07014", "20260424", InstrumentType.MINI_MPL, 262415.5271364225, 16687.475435226414),
 ]
 V23_VARS = ("lidar_constant_uncertainty_ensemble", "lidar_constant_uncertainty_vertical",
-            "lidar_constant_uncertainty_molecular", "lidar_constant_uncertainty_noise",
-            "lidar_constant_height_gradient")
+            "lidar_constant_uncertainty_molecular", "lidar_constant_uncertainty_aerosol",
+            "lidar_constant_uncertainty_noise", "lidar_constant_height_gradient")
 
 
 def _info(wmo, itype, date):
@@ -109,13 +109,16 @@ def test_option_on_same_constant_full_budget(wmo, date, itype, c_ref, u_ref):
     b = fi["uncertainty_budget"]
     assert b.u_ensemble == pytest.approx(u_ref, rel=1e-12)          # (a) = the v2.2 value
     for name in ("sigma_ensemble_rel", "sigma_vertical_rel", "sigma_molecular_rel",
-                 "sigma_noise_rel"):
+                 "sigma_aerosol_rel", "sigma_noise_rel"):
         v = getattr(b, name)
         assert np.isfinite(v) and v >= 0, name
+    # the residual-aerosol allowance scales with the wavelength (532 nm: 1/8 of the 1064 nm value)
+    assert b.sigma_aerosol_rel == pytest.approx(0.02 * (itype.wavelength_nm / 1064.0) ** 3)
     assert r.uncertainty == pytest.approx(b.u_total)
     assert r.uncertainty >= b.u_ensemble
     total = 2 * r.lidar_constant * np.sqrt(b.sigma_ensemble_rel ** 2 + b.sigma_vertical_rel ** 2
-                                           + b.sigma_molecular_rel ** 2 + b.sigma_noise_rel ** 2)
+                                           + b.sigma_molecular_rel ** 2 + b.sigma_aerosol_rel ** 2
+                                           + b.sigma_noise_rel ** 2)
     assert r.uncertainty == pytest.approx(total, rel=1e-9)
     assert b.n_subwindows >= 3 and np.isfinite(b.gradient_per_km)
     with Dataset(_written(o)) as ds:

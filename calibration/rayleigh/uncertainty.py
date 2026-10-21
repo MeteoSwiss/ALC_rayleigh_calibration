@@ -17,26 +17,32 @@ of the nights outside 2 sigma; Payerne 6.1 % reported vs 22 % observed). Three t
 * the photon noise is only seen through 70 % random time subsets of the same profiles.
 
 The v2.3 budget (``uncertainty_model = "v2.3"``) keeps the reported constant unchanged (same
-ensemble median) and adds three terms in quadrature to the ensemble term:
+ensemble median) and adds four terms in quadrature to the ensemble term:
 
-    sigma^2 = sigma_ensemble^2 + sigma_vertical^2 + sigma_molecular^2 + sigma_noise^2
+    sigma^2 = sigma_ensemble^2 + sigma_vertical^2 + sigma_molecular^2 + sigma_aerosol^2
+              + sigma_noise^2
     lidar_constant_uncertainty = 2 sigma * C_L              (coverage factor k = 2)
 
 * ``sigma_vertical`` -- vertical consistency. C_L is recomputed with the operational Klett/C_L
   machinery (``_compute_cl_for_perturbation``: Klett from the ground with the reference in the
-  sub-window, aerosol LR as configured) in contiguous sub-windows tiling the usable molecular
-  range, from ``extend_below_m`` under the window bottom (but not below ``min_altitude_m``) up to
-  the window top or higher while the photon SNR allows. A noise-weighted straight line through
-  ln C_L(z) gives the gradient g = d ln C_L / dz and its standard error; the term is
-  ``|g| x window_displacement_m``, i.e. how much the constant changes if the window moves by a
-  representative inter-night displacement. The residual scatter of the sub-window constants about
-  that line that the noise does not explain (a layer, a kink) is added in quadrature.
+  sub-window, aerosol LR as configured) in contiguous 500 m sub-windows tiling the window, up to
+  ``extend_above_m`` above it while the photon SNR allows, and ``extend_below_m`` under it but never
+  under ``min_altitude_m`` (4 km: only free troposphere is probed under a window; under a low window
+  the layer below is the boundary-layer aerosol). A noise-weighted straight line through ln C_L(z) gives the
+  gradient g = d ln C_L / dz; the term is ``|g| x window_displacement_m``, i.e. how much the
+  constant changes if the window moves by a representative inter-night displacement (1 km). The
+  residual scatter of the sub-window constants about that line that the noise does not explain (a
+  layer, a kink) is added in quadrature.
 * ``sigma_molecular`` -- US-1976 vs the real atmosphere. Default: a climatology of the CAMS-vs-
   US-1976 ln-bias fitted on 22 618 CHM15k nights of 127 units (report 19, q15d), as a function of
   latitude, day of year, window height and station altitude, plus its synoptic residual.
   With ``molecular_source = "cams"`` the reference is already CAMS and only a floor remains.
+* ``sigma_aerosol`` -- a fixed allowance for a vertically uniform aerosol in the window, which no
+  single-profile test can see (2 % at 1064 nm, report 19 / q15d; scaled as (lambda/1064)^3).
 * ``sigma_noise`` -- the photon noise of the night-mean signal in the window, from the measured
-  per-gate noise profile of eprof_v2.2 (temporal first differences on the native profiles).
+  per-gate noise profile of eprof_v2.2 (temporal first differences on the native profiles),
+  corrected for its time-binning error (``time_binning_factor``) and referred to the expected
+  molecular signal.
 
 The QC gate ``u > C`` (flag -6, practically never fires) is replaced in v2.3 mode by a RELATIVE
 limit ``u / C > max_rel_uncertainty`` (2-sigma, default from the validation, see doc/v2.3).
@@ -60,13 +66,20 @@ logger = logging.getLogger(__name__)
 
 UNCERTAINTY_MODELS = ("ensemble", "v2.3")
 
-# Tunables of the v2.3 budget; overridable gate-by-gate through options.uncertainty_params.
-# The values are the ones validated in doc/v2.3/uncertainty.md (25+ CHM15k units, 2025-01..2026-07).
+# Tunables of the v2.3 budget; overridable key-by-key through options.uncertainty_params.
+# The values are the ones validated in doc/v2.3/uncertainty.md (30 CHM15k, 3 CL61, 3 Mini-MPL units,
+# 2025-01..2026-07; time-series and same-night twin pulls).
 DEFAULT_PARAMS = dict(
     # --- vertical consistency -------------------------------------------------------------
     subwindow_m=500.0,             # width of one sub-window (contiguous, aligned on the window bottom)
-    extend_below_m=1000.0,         # how far under the window bottom the sub-windows start ...
-    min_altitude_m=1500.0,         # ... but never below this range (m AGL)
+    # How far under the window bottom the sub-windows start, and the floor they never go below.
+    # Under a LOW window the layer below is the boundary-layer aerosol the window search avoided:
+    # probing it measures that aerosol, not the window (1 km below from 1.5 km: median |g| 13.7 %/km
+    # instead of 3.4, twin pulls 0.25-0.36 = over-covered x3). Under a HIGH window it is free
+    # troposphere, where a strong gradient is a real warning (Payerne 2026-09-07: C_L x2 1 km below
+    # the window). Hence 1 km below, but never under 4 km AGL (doc/v2.3/uncertainty.md section 3.4).
+    extend_below_m=1000.0,
+    min_altitude_m=4000.0,
     extend_above_m=1000.0,         # how far above the window top they may go ...
     snr_min=3.0,                   # ... while the mean per-gate SNR of the sub-window >= this
     max_altitude_m=10000.0,        # hard upper limit (m AGL)
@@ -77,10 +90,20 @@ DEFAULT_PARAMS = dict(
     # --- molecular model ----------------------------------------------------------------------
     molecular="climatology",       # "climatology" | "none"
     molecular_floor_rel=0.005,     # CAMS T/p error floor when molecular_source == "cams"
+    # --- residual, vertically uniform aerosol in the window ---------------------------------------
+    # Invisible to any single-profile test (R(z) stays flat). 1 sigma at 1064 nm from report 19 /
+    # q15d (CAMS in-window aerosol, scaled by its observed transfer to C_L: 2.2 % night-to-night),
+    # scaled to other wavelengths as (lambda / 1064 nm)^3 (beta_mol ~ lambda^-4, beta_aer ~ lambda^-1).
+    aerosol_floor_rel=0.02,
     # --- photon noise ---------------------------------------------------------------------------
     noise_time_aggregation_penalty=1.0,   # extra factor on the propagated noise (1 = white noise)
     # --- QC -----------------------------------------------------------------------------------
-    max_rel_uncertainty=1.0,       # flag -6 when u / C_L (2 sigma) exceeds this
+    # Flag -6 when u / C_L (2 sigma) exceeds this. 0.6 = a 1-sigma uncertainty of 30 %, ~4 x the
+    # median night (7.7 %): beyond it kalman_best_estimate stops down-weighting (its weight ratio is
+    # clipped to x4 in sigma), so such nights are rejected instead of being kept at a capped weight.
+    # On the validation set it rejects 7.7 % of the nights (Payerne 20 %), 3.4 x more often off by
+    # more than 25 % than the kept ones (doc/v2.3/uncertainty.md section 3.7).
+    max_rel_uncertainty=0.6,
 )
 
 # ---------------------------------------------------------------------------------------------
@@ -135,6 +158,8 @@ class UncertaintyBudget:
     sigma_vertical_rel: float
     sigma_molecular_rel: float
     sigma_noise_rel: float
+    u_aerosol: float = 0.0
+    sigma_aerosol_rel: float = 0.0
     gradient_per_km: float = np.nan          # d ln C_L / dz (1/km) from the sub-windows
     gradient_sigma_per_km: float = np.nan    # its 1-sigma standard error (noise only)
     residual_rel: float = np.nan             # noise-unexplained scatter about the line (1 sigma)
@@ -160,6 +185,7 @@ class UncertaintyBudget:
             lidar_constant_uncertainty_ensemble=self.u_ensemble,
             lidar_constant_uncertainty_vertical=self.u_vertical,
             lidar_constant_uncertainty_molecular=self.u_molecular,
+            lidar_constant_uncertainty_aerosol=self.u_aerosol,
             lidar_constant_uncertainty_noise=self.u_noise,
             lidar_constant_height_gradient=self.gradient_per_km,
         )
@@ -382,7 +408,7 @@ def uncertainty_budget(*, cl: float, u_ensemble: float, rcs_mean: NDArray[np.flo
                        fit_result, sigma_signal: Optional[NDArray[np.float64]],
                        cl_in_window: Callable[[float, float], Optional[float]],
                        options, latitude: float, station_altitude: float,
-                       date_str: str) -> UncertaintyBudget:
+                       date_str: str, wavelength_nm: float = 1064.0) -> UncertaintyBudget:
     """Compute the v2.3 uncertainty budget for one calibrated night (see module docstring).
 
     ``cl_in_window(start_m, end_m)`` must return the lidar constant the OPERATIONAL machinery gives
@@ -459,13 +485,19 @@ def uncertainty_budget(*, cl: float, u_ensemble: float, rcs_mean: NDArray[np.flo
                                               float(station_altitude) / 1000.0)
         sig_mol = float(np.hypot(mol_bias, _MOL_RESID_PCT / 100.0))
 
-    sig_total = float(np.sqrt(np.nansum(np.square([sig_ens, sig_vert, sig_mol, sig_noise]))))
+    # (e) residual, vertically uniform aerosol -------------------------------------------------
+    wl = float(wavelength_nm) if np.isfinite(wavelength_nm) and wavelength_nm > 0 else 1064.0
+    sig_aer = float(p["aerosol_floor_rel"]) * (wl / 1064.0) ** 3
+
+    sig_total = float(np.sqrt(np.nansum(np.square([sig_ens, sig_vert, sig_mol, sig_aer,
+                                                    sig_noise]))))
     u_total = 2.0 * sig_total * cl
     limit = float(p["max_rel_uncertainty"])
     budget = UncertaintyBudget(
         model="v2.3", lidar_constant=float(cl), u_total=float(u_total),
         u_ensemble=float(u_ensemble), u_vertical=2.0 * sig_vert * cl,
         u_molecular=2.0 * sig_mol * cl, u_noise=2.0 * sig_noise * cl,
+        u_aerosol=2.0 * sig_aer * cl, sigma_aerosol_rel=sig_aer,
         sigma_ensemble_rel=sig_ens, sigma_vertical_rel=float(sig_vert),
         sigma_molecular_rel=float(sig_mol), sigma_noise_rel=float(sig_noise),
         gradient_per_km=float(fit["g"]), gradient_sigma_per_km=float(fit["g_sigma"]),
@@ -478,9 +510,9 @@ def uncertainty_budget(*, cl: float, u_ensemble: float, rcs_mean: NDArray[np.flo
     )
     logger.info(
         "v2.3 uncertainty: total 2s %.1f%% = ens %.1f, vert %.1f (g %+.1f%%/km over %d sub-windows "
-        "%.0f-%.0f m), mol %.1f, noise %.1f [%% 2s]",
+        "%.0f-%.0f m), mol %.1f, aer %.1f, noise %.1f [%% 2s]",
         100 * budget.rel_total, 200 * sig_ens, 200 * sig_vert, 100 * fit["g"],
-        budget.n_subwindows, z_lo, z_hi, 200 * sig_mol, 200 * sig_noise)
+        budget.n_subwindows, z_lo, z_hi, 200 * sig_mol, 200 * sig_aer, 200 * sig_noise)
     return budget
 
 
@@ -526,7 +558,7 @@ def budget_for_night(*, cl, u_ensemble, rcs_mean, range_alc, mol_props, fit_resu
             cl_in_window=operational_cl_in_window(rcs_mean, range_alc, mol_props.beta_mol,
                                                   fit_result, options),
             options=options, latitude=info.latitude, station_altitude=info.altitude,
-            date_str=date_str)
+            date_str=date_str, wavelength_nm=float(info.instrument_type.wavelength_nm))
     except Exception:                       # noqa: BLE001 - never lose a calibrated night
         logger.warning("v2.3 uncertainty budget failed; reporting the ensemble term only",
                        exc_info=True)
@@ -535,6 +567,7 @@ def budget_for_night(*, cl, u_ensemble, rcs_mean, range_alc, mol_props, fit_resu
         return UncertaintyBudget(
             model="v2.3-fallback", lidar_constant=float(cl), u_total=float(u_ensemble),
             u_ensemble=float(u_ensemble), u_vertical=np.nan, u_molecular=np.nan, u_noise=np.nan,
+            u_aerosol=np.nan, sigma_aerosol_rel=np.nan,
             sigma_ensemble_rel=sig_ens, sigma_vertical_rel=np.nan, sigma_molecular_rel=np.nan,
             sigma_noise_rel=np.nan, exceeds_limit=bool(u_ensemble > limit * cl),
             max_rel_uncertainty=limit)
