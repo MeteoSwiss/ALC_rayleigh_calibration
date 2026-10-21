@@ -566,7 +566,16 @@ def calibrate_rayleigh(
         f"{solar_offset:+.2f} h (solar midnight ≈ "
         f"{(-solar_offset) % 24:05.2f} UTC)"
     )
+    data_all = data                       # unfiltered night, for the polar-summer fallback only
     data = filter_time_range(data, date_str, options)
+    low_sun = None                        # set only by the (default-off) polar-summer fallback
+    if getattr(options, "polar_night_fallback", False):
+        from .polar import apply_low_sun_fallback
+        data, low_sun = apply_low_sun_fallback(data_all, data, date_str, options)
+        if fit_inputs_out is not None and low_sun is not None:
+            fit_inputs_out["low_sun"] = low_sun
+        if low_sun is not None and low_sun.rejected:
+            return low_sun.rejection_result
     logger.info(f"After time filtering: {len(data.time)} profiles")
 
     if len(data.time) == 0:
@@ -1242,6 +1251,13 @@ def calibrate_rayleigh(
             qc_flag, qc_message = -11, (f"Rayleigh window contaminated "
                                         f"(classification {wfrac * 100:.0f}% ice/cloud)")
 
+    # Polar-summer low-sun night (option polar_night_fallback): solar-background QC on the far-range
+    # residual baseline. Never reached when the option is off (low_sun stays None).
+    if qc_flag is None and low_sun is not None:
+        from .polar import low_sun_residual_qc
+        qc_flag, qc_message = low_sun_residual_qc(
+            low_sun, signal, mol_props.p_mol, data.range_alc, fit_result, options)
+
     _outcome = {None: "OK", -3: "method disagreement", -6: "too noisy",
                 -9: "lower-signal layer found", -11: "window contaminated"}.get(qc_flag, "rejected")
 
@@ -1344,6 +1360,8 @@ def calibrate_rayleigh(
         calibration_top_height=fit_result.altitude_end,
         message=f"Successful (method err: {error_pct:.1f}%, sensitivity 2σ: {uncertainty/cl_median*100:.1f}%)",
     )
+    if low_sun is not None:               # polar-summer low-sun calibration: own flag + message
+        low_sun.mark_result(result)
 
     # Prepare housekeeping data
     housekeeping = {
