@@ -422,15 +422,45 @@ def version_label(g_m: pd.DataFrame) -> str:
     return " + ".join(names)
 
 
+#: How each kind of instrument change is drawn on the C_L series (monitoring/unit_changes.py).
+_CHANGE_STYLE = {"unit": ("#e66101", "dash", "optical unit change"),
+                 "event": ("#5e3c99", "dashdot", "instrument event"),
+                 "firmware": ("#8c8c8c", "dot", "firmware change")}
+
+
+def _add_unit_changes(fig: go.Figure, changes: list, ok: pd.DataFrame) -> None:
+    """A vertical line at every optical-unit / firmware change, plus a hoverable marker on top that
+    names it. A constant belongs to one optical unit: without these lines a swap reads as drift."""
+    if not changes:
+        return
+    y = pd.to_numeric(ok["cal_value"], errors="coerce") if len(ok) else pd.Series(dtype=float)
+    y = y[np.isfinite(y)]
+    ytop = float(y.max()) * 1.04 if len(y) else None
+    for kind, (col, dash, name) in _CHANGE_STYLE.items():
+        cs = [c for c in changes if c.get("kind") == kind]
+        if not cs:
+            continue
+        for c in cs:
+            fig.add_vline(x=c["date"], line=dict(color=col, width=1.2, dash=dash), opacity=0.85)
+        if ytop is not None:
+            fig.add_trace(go.Scatter(
+                x=[c["date"] for c in cs], y=[ytop] * len(cs), mode="markers", name=name,
+                marker=dict(symbol="triangle-down", size=9, color=col),
+                text=[c["label"] for c in cs],
+                hovertemplate="%{x|%Y-%m-%d}<br>%{text}<extra></extra>"))
+
+
 def series_timeseries(g_m: pd.DataFrame, kal_m: pd.DataFrame, method: str,
                       op_df: pd.DataFrame | None = None,
-                      oldray_df: pd.DataFrame | None = None) -> go.Figure:
+                      oldray_df: pd.DataFrame | None = None,
+                      changes: list | None = None) -> go.Figure:
     """Calibration value over time for ONE method: successes + uncertainty + Kalman best estimate,
     plus (optional) the daily OPERATIONAL calibration constant from the L2 files as a black line,
     and (optional, Rayleigh only) the OLD operational Rayleigh calibration as black 'x' markers.
 
     The Kalman line/band is the operational E-PROFILE random-walk best estimate, preferring
-    the precomputed series (kal_m) and falling back to an on-the-fly fit.
+    the precomputed series (kal_m) and falling back to an on-the-fly fit. ``changes``
+    (monitoring.unit_changes) marks optical-unit, firmware and operator-listed instrument changes.
     """
     vname = _value_name(method)
     color = config.METHOD_COLORS.get(method, "#1f77b4")
@@ -469,6 +499,7 @@ def series_timeseries(g_m: pd.DataFrame, kal_m: pd.DataFrame, method: str,
                                            else "Kalman best estimate"),
                                      line=dict(color="#d62728", width=2),
                                      hovertemplate="%{x|%Y-%m-%d}<br>Kalman=%{y:.4g}<extra></extra>"))
+    _add_unit_changes(fig, changes or [], ok)
     fig.update_layout(**_LAYOUT, yaxis_title=vname,
                       legend=dict(orientation="h", y=-0.22, x=0.5, xanchor="center", yanchor="top"),
                       title=f"{config.method_label(method)} — {vname} over time + Kalman")

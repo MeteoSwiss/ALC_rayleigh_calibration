@@ -29,7 +29,9 @@
 {% for b in blocks %}<span class="mtag mtag-{{ b.method }}">{{ b.label }}</span>{% endfor %}
   <span class="stmeta" title="{{ meta.institution or '' }}">{{ meta.name or "—" }} ·
     {{ meta.country or "—" }} · {{ meta.lat | fmt('{:.3f}') }}, {{ meta.lon | fmt('{:.3f}') }} ·
-    {{ meta.alt | fmt('{:.0f}') }} m</span>
+    {{ meta.alt | fmt('{:.0f}') }} m{% if identity and identity.unit_id %} ·
+    {% if identity.placeholder %}serial not reported ({{ identity.unit_id }}){% else %}optical unit {{ identity.unit_id }}{% endif %}{% endif %}{% if identity and identity.firmware %} ·
+    firmware {{ identity.firmware }}{% endif %}</span>
 </h1>
 
 {% if nc_files or ceda_url %}
@@ -99,6 +101,15 @@
   {{ b.figs.ts | safe }}
 </section>
 {% endfor %}
+{% if unit_changes %}
+<details class="card tablecard"><summary>Instrument changes ({{ unit_changes | length }})
+  <span class="muted">— optical unit, firmware and operator-listed events; dashed lines on the series above</span></summary>
+  <table class="tbl"><thead><tr><th>date</th><th>what</th><th>change</th></tr></thead><tbody>
+  {% for c in unit_changes %}<tr><td>{{ c.date.strftime('%Y-%m-%d') }}</td>
+    <td>{{ {'unit': 'optical unit', 'firmware': 'firmware', 'event': 'event'}.get(c.kind, c.kind) }}</td>
+    <td>{{ c.label }}</td></tr>{% endfor %}
+  </tbody></table></details>
+{% endif %}
 
 {# Pooled C-vs-cloud-base density. It is DATA, not a rendered figure: the panel draws it as the
    third card of the cloud diagnostics row, beside the coefficient histogram it is the 2-D version

@@ -1592,10 +1592,24 @@ C_L        = C_applied / C             (Wiegner, comparable with the Rayleigh co
 
 // ---------------------------------------------------------------- diagnostics
 function card(title, id, note) {
-  // `note`: one or two sentences saying how to READ the figure, shown under its title -- a figure
-  // whose points have no stated meaning (the old C_L spread card) is a figure nobody can use.
-  const n = note ? `<p style="margin:2px 0 6px;font-size:11.5px;line-height:1.35;color:#555">${note}</p>` : '';
-  return `<div class="card"><h2>${title}</h2>${n}<div id="${id}"></div></div>`;
+  // `note`: how to READ the figure. Hidden behind an (i) button next to the title: the explanation
+  // must exist (a figure whose points have no stated meaning is useless) but must not push the
+  // figure down on every visit -- the operator opens it once, the figure stays compact.
+  if (!note) return `<div class="card"><h2>${title}</h2><div id="${id}"></div></div>`;
+  const btn = `<button type="button" class="info-btn" aria-expanded="false" aria-controls="${id}_note"`
+    + ` title="How to read this figure" onclick="toggleNote(this)"`
+    + ` style="margin-left:6px;width:18px;height:18px;padding:0;border-radius:50%;border:1px solid #888;`
+    + `background:#fff;color:#444;font:italic bold 11px/16px Georgia,serif;cursor:pointer;`
+    + `vertical-align:middle">i</button>`;
+  const n = `<p id="${id}_note" hidden style="margin:2px 0 6px;font-size:11.5px;line-height:1.35;`
+    + `color:#555;background:#f6f7f9;border-left:3px solid #9aa4b2;padding:4px 8px">${note}</p>`;
+  return `<div class="card"><h2>${title}${btn}</h2>${n}<div id="${id}"></div></div>`;
+}
+function toggleNote(btn) {
+  const p = document.getElementById(btn.getAttribute('aria-controls'));
+  if (!p) return;
+  p.hidden = !p.hidden;
+  btn.setAttribute('aria-expanded', String(!p.hidden));
 }
 // ---- pooled C vs cloud base -------------------------------------------------------------------
 // The ONLY card on the page built from many nights, so the period selector must RE-POOL it rather

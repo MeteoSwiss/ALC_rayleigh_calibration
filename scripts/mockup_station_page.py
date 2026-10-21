@@ -167,6 +167,14 @@ def _cl_series(key: str, cal_dir: Path, ref_date: str | None = None):
     fig.add_vrect(x0=win_start, x1=last_dt, fillcolor="rgba(240,173,78,0.16)", line_width=0,
                   layer="below")
     fig.add_vline(x=last_dt, line=dict(color="#d9534f", width=1.2))
+    # Optical-unit / firmware / operator-listed changes: a constant belongs to ONE optical unit, so
+    # a swap must read as a swap, not as drift.
+    try:
+        from monitoring.charts import _add_unit_changes
+        from monitoring.unit_changes import unit_changes
+        _add_unit_changes(fig, unit_changes(cal_dir, key), ok.rename(columns={"value": "cal_value"}))
+    except Exception:                                                       # noqa: BLE001
+        pass
     fig.update_layout(margin=dict(l=64, r=12, t=16, b=40), height=330,
                       template="plotly_white", font=dict(size=11),
                       yaxis_title="C_L", legend=dict(orientation="h", y=1.13, font=dict(size=10)))

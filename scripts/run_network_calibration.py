@@ -550,7 +550,11 @@ def _preserve_existing_rows(csv_path, methods, start, end):
 # Canonical field -> candidate L1 variable names (first present wins); manufacturers differ -- Lufft
 # CHM15k uses status_laser / temperature_optical_module / temperature_detector, Vaisala CL31/51/61
 # use laser_energy / temperature_laser. Temperatures are stored in degC (the L1 files store K).
-HK_FIELDS = ["date", "laser", "window", "temp_optics", "temp_internal", "temp_detector"]
+HK_FIELDS = ["date", "laser", "window", "temp_optics", "temp_internal", "temp_detector",
+             # instrument identity, from the L1 global attributes: the dashboard marks a change of
+             # optical unit (CHM15k optical_module_id TUB..., CL61/Mini-MPL serial) or firmware on
+             # the C_L series (monitoring/unit_changes.py). Vaisala CL31/CL51 report "CL0".
+             "unit_id", "firmware"]
 #: Hourly sidecar (<key>_hk_hourly.csv): same fields keyed by hour. A SEPARATE file on purpose --
 #: the daily _hk.csv merge filters on the "date" string and its readers parse %Y%m%d, so mixing
 #: cadences in one file would corrupt both (the plan's original three reasons).
@@ -671,6 +675,20 @@ def _read_status_values(nc, itype):
     return values, cl61
 
 
+def _unit_identity(nc):
+    """(unit_id, firmware) from the L1 global attributes. CHM15k carries the optical module
+    (`optical_module_id` = TUB...) -- the unit a calibration constant belongs to; other types only an
+    `instrument_serial_number` (CL61 X..., Mini-MPL; Vaisala CL31/CL51 write the placeholder "CL0",
+    which the dashboard ignores). Empty strings when absent."""
+    def attr(name):
+        try:
+            return str(nc.getncattr(name)).strip() if name in nc.ncattrs() else ""
+        except Exception:  # noqa: BLE001
+            return ""
+    unit = attr("optical_module_id") or attr("instrument_serial_number")
+    return unit, attr("instrument_firmware_version")
+
+
 def _do_monitoring(s, start, end):
     """Per-day housekeeping means AND decoded instrument status for one stream, in a single cheap
     pass (opens each L1 file once, reads only 1-D HK/status/time vars — never the rcs matrix).
@@ -689,6 +707,7 @@ def _do_monitoring(s, start, end):
         try:
             nc = netCDF4.Dataset(str(fp))
             try:
+                row["unit_id"], row["firmware"] = _unit_identity(nc)
                 hk_arrays = {}
                 for field, cands in _HK_SOURCES.items():
                     val = float("nan")
@@ -744,7 +763,9 @@ def _do_monitoring(s, start, end):
                 nc.close()
         except Exception:  # noqa: BLE001 - one unreadable file must not kill the stream
             continue
-        if any(row[f] for f in HK_FIELDS if f != "date"):
+        if any(row.get(f) for f in HK_FIELDS if f not in ("date", "unit_id", "firmware")) or row.get("unit_id"):
+            for f in HK_FIELDS:
+                row.setdefault(f, "")
             hk_rows.append(row)
         if srow is not None:
             status_rows.append(srow)

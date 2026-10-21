@@ -1,0 +1,6 @@
+{
+  "_comment": "Operator-maintained instrument events that no data file reports (Vaisala CL31/CL51 L1 carry the placeholder serial CL0, so an optical-block replacement is invisible). Key = <wmo>_<ident>; date = UTC day of the change; label = what changed. Shown as markers on the station C_L time series.",
+  "0-20000-0-06610_B": [
+    {"date": "2026-07-07", "label": "CL31 optical block replaced (C_L step x2.8)"}
+  ]
+}

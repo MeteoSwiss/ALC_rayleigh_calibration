@@ -50,6 +50,7 @@ sys.path.insert(0, str(REPO))
 
 from monitoring import charts, config                                     # noqa: E402
 from monitoring.render import _load_hk, _load_status                      # noqa: E402
+from monitoring.unit_changes import changes_table_html, unit_changes     # noqa: E402
 from scripts.mockup_station_card import probe_cloud_cover, _month_with_data   # noqa: E402
 from scripts.mockup_station_page import _cl_series, _station_index, TILE_OK   # noqa: E402
 import monitoring.panel as PANEL                                # noqa: E402
@@ -106,6 +107,10 @@ def _meta_from_l1(l1_root, key: str) -> dict | None:
                     "institution": str(getattr(ds, "institution", "") or "").strip(),
                     "lat": g("station_latitude"), "lon": g("station_longitude"),
                     "alt": g("station_altitude"),
+                    # identity of the optical unit + firmware, from the latest L1 file
+                    "unit_id": str(getattr(ds, "optical_module_id", "") or
+                                   getattr(ds, "instrument_serial_number", "") or "").strip(),
+                    "firmware": str(getattr(ds, "instrument_firmware_version", "") or "").strip(),
                     "constants": {}, "status": None, "status_date": None,
                     "src": f"L1 {files[-1].name}"}
     except Exception as exc:                                                 # noqa: BLE001
@@ -349,6 +354,10 @@ def build_page(key: str, rec: dict, args, index: dict, stations: list) -> str:
     kal = _kal_frame(args.cal_dir, key)
     status_df = _load_status(Path(args.status_dir), key)
     hk_df = _load_hk(Path(args.status_dir), key)
+    try:                                   # optical-unit / firmware / operator-listed changes
+        changes = unit_changes(args.cal_dir, key)
+    except Exception:                                                       # noqa: BLE001
+        changes = []
 
     blocks = []
     # ---- C_L over time + headline tiles
@@ -359,7 +368,7 @@ def build_page(key: str, rec: dict, args, index: dict, stations: list) -> str:
         f'<div class="tn">{t["note"]}</div></div>' for t in tiles)
     blocks.append(f'<section class="sect" id="constant"><h2>Calibration coefficient C_L over time</h2>'
                   f'<p class="subtle">{cl_sub}</p><div class="card">{_fig(cl_fig, "fig-cl")}</div>'
-                  f'<div class="tiles">{tiles_html}</div></section>')
+                  f'<div class="tiles">{tiles_html}</div>{changes_table_html(changes)}</section>')
 
     # ---- availability card
     avail_html = '<p class="muted">no status file for this stream</p>'
@@ -399,7 +408,7 @@ def build_page(key: str, rec: dict, args, index: dict, stations: list) -> str:
         blocks.append(
             f'<section class="sect" id="m-{m}">'
             f'<h2><span class="mtag mtag-{m}">{config.method_label(m)}</span></h2>'
-            f'<div class="card">{_fig(charts.series_timeseries(g, km, m), f"fig-ts-{m}")}</div>'
+            f'<div class="card">{_fig(charts.series_timeseries(g, km, m, changes=changes), f"fig-ts-{m}")}</div>'
             f'<div class="grid2">'
             f'<div class="card">{_fig(charts.monthly_flag_bars(g, m), f"fig-mo-{m}")}</div>'
             f'<div class="card">{_fig(charts.aux_timeseries(g, m), f"fig-aux-{m}")}</div></div>'
@@ -465,6 +474,14 @@ def _header(rec: dict) -> str:
             f"unit {rec.get('ident', '—')}",
             f"{f(rec.get('lat'), '.3f')}, {f(rec.get('lon'), '.3f')}",
             f(rec.get("alt"), ".0f", " m")]
+    # Which physical unit and firmware the page is about: a C_L belongs to one optical unit.
+    uid = (rec.get("unit_id") or "").strip()
+    if uid and uid.upper() not in ("CL0", "0", "UNKNOWN"):
+        bits.append(f"optical unit {uid}")
+    elif uid:
+        bits.append(f"serial not reported ({uid})")
+    if rec.get("firmware"):
+        bits.append(f"firmware {rec['firmware']}")
     return (f'<h1>{rec.get("name") or rec.get("wmo")} '
             f'<span class="itype">{rec.get("itype") or ""}</span></h1>'
             f'<p class="metainline">{" · ".join(bits)}</p>')
