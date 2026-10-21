@@ -11,27 +11,43 @@ default. Code: `calibration/rayleigh/uncertainty.py`; validation: `validation/v2
   dependence of the constant on the window height, to the molecular model and to most of the noise.
 * **v2.3 budget** (option `uncertainty_model = "v2.3"`, the constant itself unchanged): the ensemble
   term plus a **vertical-consistency term** — C_L recomputed in 500 m sub-windows around the window,
-  |d ln C_L/dz| × 1 km plus the scatter the line does not explain — a molecular-model climatology,
-  a residual-aerosol allowance and the photon noise, in quadrature, reported at 2 σ.
-* **Validation** on 36 units (30 CHM15k, 3 CL61, 3 Mini-MPL; 7 736 recalibrated nights 2025-01 …
-  2026-07, 99.0 % bit-identical to the published constants): CHM15k time-series pulls 4.05 → **1.26**
-  (63 % → 17 % outside 2 σ), same-night twins 1.71 → **0.59** (32 % → **3.9 %**), CL61 3.10 → 1.02.
-  The two truths bracket the answer by construction: about a third of a CHM15k's scatter is a real
-  gain change common to co-located twins (not a calibration error) and another third is atmospheric
-  (an error that cancels in a twin ratio), so ~1.2 and ~0.65 are the expected values.
+  |d ln C_L/dz| × 1 km plus the scatter the line does not explain, **saturated at 15 %** — a
+  molecular-model climatology, a residual-aerosol allowance and the photon noise **measured as the
+  noise of the window mean**, in quadrature, reported at 2 σ. The three bold items come from an
+  independent review (§8), which also re-validated everything on 37 fresh units.
+* **Validation** (exact code values). Design units (36 units, 7 736 nights, 2025-01 … 2026-07, 99.0 %
+  bit-identical to the published constants): CHM15k time-series pull 4.05 → **1.25** (63 % → 17 %
+  outside 2 σ), same-night twins 1.69 → **0.60** (32 % → 3.5 %), CL61 3.13 → 1.08 (budget as first
+  shipped). **Fresh units** (27 CHM15k, 8 CL61, 2 Mini-MPL, eprof_v2.3): CHM15k 3.91 → 1.17 as first
+  shipped, **1.30 reviewed** (18 % outside 2 σ); CL61 2.85 → 1.08 / 1.20; twins 1.66 → 0.63 / **0.69**.
+  The two truths bracket the answer, but loosely: a perfectly calibrated budget would give 1.00–1.46 on
+  the time series (which contains real gain changes) and 0.40–0.77 on the twins (where the atmospheric
+  error cancels) — about ±30 % on the level.
+* **Conditional calibration** (review): as first shipped, the budget over-covered its steepest-gradient
+  decile 2.2 × (pull 0.46) and under-covered the quiet bulk; the error does not grow like |g| × D. With
+  the saturation the top decile is calibrated out of sample (pull 1.02) and the spread of the decile
+  pulls falls by 60 %. The quiet nights stay above 1 on the time-series truth only — on the twin truth
+  they are calibrated: that floor is real instrument gain change.
 * **Large where it must be:** Messina, Payerne CL61, Vásárosnamény, Payerne CHM15k, Gottfrieding and
-  Montsec rank 1–6 of 34 (observed ranks 1–7). The Payerne 2026-09-07 night (window 6.06–6.54 km ASL,
-  C_L twice the unit median) goes from 42 % to **162 %** (2 σ) and is rejected by the new QC.
-  Schleiz does not come out large (rank 15): its scatter is ×2 level steps, an instrument problem
-  no per-night uncertainty can see.
-* **QC:** `u > C` fired on 0.08 % of the nights; the relative limit u/C_L > 60 % (2 σ) rejects 7.7 %,
-  3.4 × enriched in nights more than 25 % off.
-* **Kalman** weighting by the new uncertainty: twin best estimates 5–8 % more consistent, the best
-  estimate 4 % smoother, one-step-ahead prediction unchanged. **Cost:** 2.3 ms per night (0.2 %).
-* **Side finding:** v2.2's propagated noise (`sigma_signal`) is 4.1–4.9 × too large (time binning
-  missing); v2.2 is left untouched, the budget corrects it, the tier-2 χ² gates should be revisited.
-* **Recommendation:** adopt the budget with `eprof_v2.3`, switch the Kalman weighting on with it, and
-  carry the calibration uncertainty into L2 instead of the fixed 25 % (§5).
+  Montsec rank 1–6 of 34 (observed ranks 1–7); the unit ranking improves (Spearman 0.56 → 0.72 design,
+  0.40 → 0.58 fresh) but not significantly (95 % CI of the gain includes 0). The Payerne 2026-09-07
+  night (window 6.06–6.54 km ASL, C_L twice the unit median) goes from 42 % to 162 % (2 σ; reviewed:
+  71 %) and is rejected by the QC; eprof_v2.3 rejects it in the window search anyway. Schleiz (level
+  steps ×2) and the Mini-MPL (gain drift within the night) are instrument problems no per-night
+  uncertainty covers.
+* **QC:** `u > C` fired on 0.08 % of the nights; the relative limit u/C_L > 60 % (2 σ) rejected 7.7 %
+  with the budget as first shipped, 3.4 × enriched in nights more than 25 % off but half of them good
+  nights; with the Kalman weighting on, rejecting them made the best estimates less consistent. With
+  the reviewed budget the limit fires on < 0.5 % of the nights (extreme noise only).
+* **Kalman** weighting by the uncertainty (eprof_v2.3): co-located best estimates 13.6 % (rms) and
+  13.1 % (95th percentile) more consistent than with equal weights (eprof_v2.2: 5–8 %, marginal).
+  **Cost:** 2.3 ms per night (0.2 %); the reviewed noise estimator adds ~0.4 ms.
+* **Side finding:** v2.2's propagated noise (`sigma_signal`) is √k too large on the CHM15k (time
+  binning missing; k = native profiles per 300-s bin); on the CL61 the native noise is not white and
+  √k over-corrects by 1.9 ×. v2.2 is left untouched; the reviewed budget measures the noise instead.
+* **Recommendation:** adopt the reviewed budget with `eprof_v2.3` and the Kalman weighting on, keep the
+  relative QC only as a safety net, and carry the Kalman standard deviation into L2 instead of the fixed
+  25 % (§5, §8.4).
 
 ## 1. The problem
 
@@ -110,7 +126,20 @@ the 1 % floor) does not explain — a layer or a kink inside the probed range �
 (§3.6: window-centre σ 0.86 km across nights, 0.78 km within a month, 1.2 km summer vs winter,
 2.2 km between the 10th and 90th percentile). If fewer than three sub-windows are usable the width is
 halved; with two the gradient is their difference; with none the whole ensemble spread is attributed
-to the ±200 m shifts (g ≈ 2σ_ens/0.3 per km), a conservative fallback.
+to the ±200 m shifts (g ≈ 2σ_ens/0.3 per km), a conservative fallback (on the validation nights the
+fallback never fired and the two-sub-window branch 1–5 times in 2 200–2 400 nights).
+
+**Saturation (review).** The term is then saturated, σ_vert → σ_vert / √(1 + (σ_vert / c)²) with
+c = 15 % (`vertical_cap_rel = 0.15`). The displacement picture behind D is not what the data show:
+the anomaly of a night is uncorrelated with g × (its window centre minus the unit's 31-day median
+window centre) (slope +0.01, Spearman −0.001, 1 979 CHM15k nights). |g| is a good indicator of a
+worse night, but the error does not grow like |g| × D: across octiles of |g| the observed time-series
+scatter rises only from 9 to 17 % (eprof_v2.2; 9 to 12 % with eprof_v2.3) while |g| × D rises from
+3 to 30 %. Since the time-series truth is an upper bound of the calibration error, the steepest decile
+was over-covered by at least 2.3 ×. The window search keeps the cleanest part of the column, so the
+window constant's error does not grow without bound with the gradient measured across the probed
+range; the cap (chosen on the design units, validated on fresh units, §8) restores calibration in the
+top decile and barely touches the typical night (a 7 % vertical term becomes 6.3 %, a 10 % one 8.3 %).
 
 What the term measures — and what it does not:
 
@@ -121,41 +150,69 @@ What the term measures — and what it does not:
 * **aerosol inside a sub-window** raises its C_k (the reference assumes it is molecular); aerosol
   between two sub-windows is corrected by the Klett step with the assumed lidar ratio;
 * **noise** alone makes g scatter by its standard error; `|g|` therefore carries the noise of the
-  gradient estimate on average (E[g²] = g_true² + σ_g²);
+  gradient estimate on average (E[g²] = g_true² + σ_g²) — measured with the odd and even profiles of
+  each night, that noise is 1.3–1.5 %/km on the CHM15k, 1 % of E[g²]: |g| is signal;
 * the term does **not** see a height-independent bias (a uniform free-tropospheric aerosol, a
   calibration-pulse or gain error) — those are invisible to any single-profile method.
 
 ### 2.4 (c) Molecular-model term σ_mol
 
 The ln-bias of C_L from using US-1976 instead of the real T/p was computed per night with CAMS
-(0.4°, L137) in each night's own window for 22 618 nights of 127 CHM15k units (report 19, q15d). It
-is well described by a climatology (fit residual 1.35 %):
+(0.4°, L137) in each night's own window for 22 618 nights of 127 CHM15k units at 37–55 °N (report 19,
+q15d). It is well described by a climatology (fit residual 1.35 %):
 
   b [%] = −0.421 + 1.516 cos ωd + 0.799 sin ωd + 0.080 (φ−47) − 0.017 (φ−47) cos ωd
           − 0.493 (z_c−4.5) − 0.210 (z_c−4.5) cos ωd + 0.008 h_stn
 
-(d = day of year, ω = 2π/365.25, φ = latitude in °, z_c = window centre in km AGL, h_stn = station
-altitude in km; southern stations use the mirrored season). σ_mol = √(b² + 1.35 %²): the expected
-bias of the night plus its synoptic scatter. Reading CAMS T/p per night would cost ~1 s (daily file)
-to ~3 s (8 GB monthly file) — as much as the whole calibration — while the climatology already
-reproduces the realised RMS (1.98 %). With `molecular_source = "cams"` the reference is already CAMS
-and only a 0.5 % floor remains.
+(d = day of year, ω = 2π/365.25, φ = latitude in °, z_c = window centre in **km above sea level**,
+h_stn = station altitude in km; southern stations use the mirrored season; the latitude is clipped
+to 35–62 °N). The fit is reproduced to the third decimal by `validation/v23_uncertainty/
+u23r_molclim.py`, which also shows that the coefficients were fitted with z_c ASL: until the review
+the module evaluated them with z_c above ground, which shifts b by +0.49 % per km of station altitude
+(≤ 1 % at the 2-km stations; option `molecular_height_reference`, now `"asl"`). σ_mol = √(b² + 1.35 %²):
+the expected bias of the night plus its synoptic scatter. Reading CAMS T/p per night would cost ~1 s
+(daily file) to ~3 s (8 GB monthly file) — as much as the whole calibration — while the climatology
+already reproduces the realised RMS (1.98 %). With `molecular_source = "cams"` the reference is
+already CAMS and only a 0.5 % floor remains.
+
+As an ABSOLUTE uncertainty the term is calibrated: |b| ≤ 2 σ_mol on 97 % of the nights of the fitted
+units and on 96–99.7 % of the nights of units outside the fit up to 62 °N (`u23r_molecular_oos.py`).
+North of the clip it under-covers: 79 % of the nights of five arctic units (Andøya, Jan Mayen,
+Bjørnøya, Hopen, Tórshavn) are within 2 σ, with a mean realised bias 1.0 % above the climatology
+(2.7 % at 76.5 °N). The time-series truth cannot test the slowly varying part of b (the 31-day median
+removes it): replacing σ_mol by its synoptic part alone (1.35 %) changes the CHM15k pull by 2 %.
 
 ### 2.5 (d) Photon-noise term σ_noise
 
-From the per-gate noise profile that eprof_v2.2 measures on the native profiles (temporal first
-differences / √2), referred to the expected molecular signal ĉ·p_mol (ĉ = median signal/p_mol in the
-window: the measured signal crosses zero at a per-gate SNR below ~1). The constant is a window MEAN
-of RCS/β_mol (the gate-to-gate noise cancels in the Klett normalisation), so
-σ_noise = √(Σ e_i²)/N over the N window gates, e_i = σ_i/(ĉ p_mol,i).
+The constant is a window MEAN of RCS/β_mol (the gate-to-gate noise cancels in the Klett
+normalisation), i.e. the time mean of the per-profile window means of signal/p_mol. Since the review
+(`noise_estimator = "window_mean"`, default) σ_noise is MEASURED as exactly that: the window mean of
+signal/p_mol is formed for every binned 300-s profile, its robust first difference between consecutive
+profiles / √2 is the noise of one profile, / √n that of the night mean (× 1.2533 for a median
+aggregation). The same estimator gives the noise of every sub-window constant of §2.3. Consecutive
+differences also carry the atmospheric change over 5 min: an upper bound, like the eprof_v2.3
+tier-2 noise (`molecular_methods._binned_mean_noise`). It needs ≥ 8 profiles (40 min); shorter nights
+keep the per-gate estimate below.
+
+The pre-review estimate (`noise_estimator = "per_gate"`) combines the per-gate noise that eprof_v2.2
+measures on the native profiles, referred to the expected molecular signal ĉ·p_mol, as INDEPENDENT
+gates: σ_noise = √(Σ e_i²)/N, e_i = σ_i/(ĉ p_mol,i). Split-night constants show that this is too small:
+the scatter of (C_odd − C_even)/2, from the odd and the even 300-s profiles of the same night (the
+atmosphere is common to both halves), is 1.6 × σ_noise on the CHM15k, 3.4–4.2 × on the CL61 and
+2.8–3.1 × on the Mini-MPL (design and fresh units). Noise common to the gates of a profile (a
+per-profile background-subtraction error, range-correlated detector noise) does not average over the
+window; the window-mean estimator keeps it and passes the same test: 0.96 (CHM15k), 0.88 (CL61), 0.99
+(Mini-MPL) on the fresh units.
 
 **A propagation error in v2.2.** `calibrate_rayleigh` divides the noise of ONE NATIVE profile (12–15 s
 on the CHM15k) by √(number of 300-s BINNED profiles), so its `sigma_signal` is too large by √k,
-k = native profiles per bin = 20–25 on the CHM15k. Measured against the scatter of consecutive binned
-profiles: ratio 4.1–4.9 on five CHM15k nights (√k = 4.5–5.0; `validation/v23_uncertainty/
-u23_noise_check.py`). The v2.3 budget divides by √k. The v2.2 gates are left untouched (bit-identical
-output), but note that their χ²_red ≤ 2.5 tolerance is therefore a true χ²_red of ~50, and that the
-per-gate SNR quoted in report 19 (q16a/q16c, e.g. "SNR crosses 1 at ~6 km") is ~4.5 × too pessimistic.
+k = native profiles per bin. On the CHM15k (k = 5–30 for 60–10 s sampling) the per-gate σ/√k matches
+the per-gate noise measured on the binned stack within 2–8 % (ratio 0.94–0.98, 4 300 nights): the √k
+correction is right there. On the CL61 the ratio is 0.25–0.53 (median 0.52): its native noise is not
+white and dividing by √k over-corrects by ~1.9 × — one more reason for the window-mean estimator,
+which needs no assumption on k. The v2.2 gates are left untouched (bit-identical output), but their χ²_red ≤ 2.5
+tolerance is a true χ²_red of ~50 on the CHM15k, and the per-gate SNR quoted in report 19 (q16a/q16c,
+e.g. "SNR crosses 1 at ~6 km") is ~4.5 × too pessimistic.
 
 ### 2.6 (e) Residual uniform aerosol σ_aer
 
@@ -173,15 +230,32 @@ value is tied to the Kalman weighting: `kalman_best_estimate` clips the night-to
 4 in σ, so a night beyond ~4 × the median uncertainty is no longer down-weighted — it is rejected
 instead of being kept at a capped weight (§3.7).
 
+**Review (2026-10): rejection does not pay.** On the design units the gate (pre-review budget)
+rejected 7.6 % of the eprof_v2.2 nights: 33 % of them were more than 25 % off (3.7 × the kept nights),
+but 40 % were good nights (< 10 % off), and as a QC score the budget separates bad from good nights
+with an AUC of only 0.76 (0.70 with eprof_v2.3). With eprof_v2.3 the gate rejected 5.1 % of the
+nights, half of them good, and 79 % of its tier-2 rejections were already removed by the
+vertical-consistency test. With the Kalman weighting on, rejecting these nights made the co-located
+best estimates LESS consistent than keeping them at their low weight (eprof_v2.3: twin rms −6 %
+instead of −17 % against equal weights; eprof_v2.2: +4 % instead of −7 %). With the saturated vertical
+term (§2.3) the 0.6 limit fires only on extreme noise or ensemble spread (< 0.5 % of the nights): the
+weighting, not the rejection, handles the uncertain nights (§8).
+
 ### 2.8 Kalman weighting
 
 `monitoring/kalman.kalman_best_estimate` already accepts `uncertainties=`: it keeps the empirical
 measurement-variance scale (day-to-day scatter) and takes only the night-to-night RATIO of the
-relative uncertainties (clipped to a factor 4 in σ). The network runner now passes them when
+relative uncertainties (clipped to [0.5, 4] in σ). The network runner now passes them when
 `kalman_uncertainty_weighting = 1` (options.json) or `ALC_KALMAN_UNCERTAINTY_WEIGHTING=1`; the
 default stays the operational equal weighting.
 
 ## 3. Validation on real data
+
+*This section is the validation of the budget as first delivered (eprof_v2.2 constants, per-gate
+noise, no saturation; the vertical term emulated offline from the recorded sub-windows). The
+independent review (§8) re-ran it with the exact code values, with eprof_v2.3, against
+leakage-controlled truths and on fresh units, and changed three things; its numbers supersede the
+ones below where they differ.*
 
 ### 3.1 Data and harness
 
@@ -442,30 +516,48 @@ effect is moderate because the filter keeps its empirical variance scale and cap
   steepen in summer; altitude-independence audit), a distortion on Payerne-type units.
 * **Height-independent errors are invisible** to it: a vertically uniform free-tropospheric aerosol,
   a gain or calibration-pulse error, the common-mode CHM15k gain cycle of report 19.
-* **The two truths bracket the answer.** About a third of a CHM15k's night-to-night variance is a
-  gain change common to co-located twins but not to the co-located CL61 (§3.3), i.e. a real change
-  of the instrument, not a calibration error; the time-series pull therefore over-states the error
-  and is expected slightly above 1. Conversely the twin ratio cancels the atmospheric part of the
-  error (another third), so the twin pull is expected below 1.
+* **The two truths bracket the answer — loosely.** Part of a CHM15k's night-to-night variance is a
+  gain change common to co-located twins but not to the co-located CL61 (§3.3), i.e. a real change of
+  the instrument, not a calibration error, so the time-series pull over-states the error; the twin
+  ratio cancels the atmospheric part of the error, so the twin pull under-states it. The direction is
+  sound, but the review (§8.2) propagated the measured variance shares with their confidence
+  intervals: a perfectly calibrated budget would give a time-series pull anywhere in 1.00–1.46 and a
+  twin pull in 0.40–0.77. The bracket pins the level of the budget to about ±30 %, not to the
+  "~1.2 and ~0.65" a strict reading of the thirds suggests.
 * **Tails.** Even with the budget, 17 % of the CHM15k nights fall outside 2 σ of the time series
   (Gaussian 4.6 %); nearly half of them are site-wide events seen by both twins. A per-night budget
   cannot cover those; the Kalman process noise and the step detection must.
 * **Instrument instability is not calibration uncertainty.** Units with level steps or episodic gain
   jumps (Schleiz) keep pulls well above 1; that belongs to the module-swap/step detection and the
   Kalman restart, not to the nightly uncertainty.
-* **D is one network constant** (1 km). A per-unit D (that unit's window-height scatter) or a term
-  growing with the distance of the night's window from the unit's usual height would sharpen the
-  budget; neither is implemented. The 4 km floor of the downward extension is a physical choice
-  (free troposphere), checked but not tuned (3–4 km give similar results).
-* **The molecular climatology** was fitted on CHM15k nights at 36–60 °N; elsewhere it is clipped to
-  that latitude range (southern stations use the mirrored season). Per-night CAMS is a drop-in
-  replacement if its read cost is accepted.
-* **The noise term assumes white noise** after the √k correction; the scatter of consecutive 300-s
-  profiles is 5–10 % larger than that (a small correlated component), absorbed by the 1 % weight floor.
-* **CL61 and Mini-MPL** are validated on three units each (two Mini-MPL with a usable truth, on their
-  own sampled series); the Mini-MPL scatter (6 %) is not explained by the budget (3 %).
-* **The validation sample** is 2025-01 … 2026-07 with one 7-night block every 2–3 weeks; the time-series
-  truth uses the published all-night series, so its 31-day median is not degraded by the sampling.
+* **D is one network constant** (1 km), but the displacement picture behind it is not supported: a
+  night's anomaly does not follow g × (its window displacement from the unit's usual height) (§2.3).
+  The vertical term works as an empirical indicator of a worse night; its scale (D, the saturation at
+  15 %) is set empirically, and the truths pin it to about ±30 % (§8.2). The 4 km floor of the
+  downward extension is a physical choice (free troposphere), checked but not tuned (3–4 km give
+  similar results).
+* **Conditional calibration.** Even reviewed, the quietest decile of the CHM15k nights is
+  under-covered on the time-series truth (pull ~1.5–2). On the twin truth the same nights are
+  calibrated (pull 1.0): the floor is a real gain change of the instrument (Kalman process noise), not
+  a calibration error.
+* **The molecular climatology** was fitted on CHM15k nights at 37–55 °N; the latitude is clipped to
+  35–62 °N (southern stations use the mirrored season). North of 62 °N it under-covers (79 % of the
+  nights within 2 σ, mean bias +1 %, §2.4). Per-night CAMS is a drop-in replacement if its read cost
+  is accepted.
+* **The noise term** is measured on 300-s profiles; it includes the atmospheric change over 5 min (an
+  upper bound) and not slower noise. Nights shorter than 8 binned profiles fall back to the per-gate
+  estimate, which is 1.6–4 × too small.
+* **Mini-MPL**: the constant of the Mini-MPL drifts within a night (first vs second half) by ~45 × its
+  photon noise, an instrument gain drift that no calibration uncertainty covers; with an every-night
+  truth the two fresh Mini-MPL units are under-covered (pull ~2.4). This belongs to the instrument
+  monitoring and the Kalman process noise. A causal unit-level repeatability term (the unit's own
+  recent scatter beyond its budget) would bring every time-series pull to ~0.9 but over-covers the
+  twins (0.59 → 0.41): it absorbs real gain changes and is therefore not added to the nightly budget.
+* **The validation truths leak and are noisy.** The u23 time-series truth excludes only the night
+  itself; neighbouring nights share weather and aerosol regimes and pull the running median towards
+  the night: excluding ±3 days raises the CHM15k pull by 15 % and the twin pull by 18 %. The running
+  median also has its own error (median 3.6 % for the CHM15k), which inflates the raw pull by ~10 %.
+  The two effects nearly cancel; §8 quotes both truths.
 
 ## 5. Proposal for L2
 
@@ -494,7 +586,8 @@ typical Schiphol night at 16 %). Proposal, in two steps:
 | what | where | value |
 |---|---|---|
 | the v2.3 budget (C_L unchanged, u = full budget, components in the NetCDF, relative QC) | `options.json` | `"uncertainty_model": "v2.3"` |
-| tune it (keys of `calibration.rayleigh.uncertainty.DEFAULT_PARAMS`) | `options.json` | `"uncertainty_params": {"window_displacement_m": 1000, "max_rel_uncertainty": 0.6, ...}` |
+| tune it (keys of `calibration.rayleigh.uncertainty.DEFAULT_PARAMS`) | `options.json` | `"uncertainty_params": {"window_displacement_m": 1000, "vertical_cap_rel": 0.15, "max_rel_uncertainty": 0.6, ...}` |
+| the pre-review v2.3 budget (per-gate noise, climatology at the window centre AGL, no saturation) | `options.json` | `"uncertainty_params": {"noise_estimator": "per_gate", "molecular_height_reference": "agl", "vertical_cap_rel": null}` |
 | same, for a network run without editing options.json | environment | `ALC_UNCERTAINTY_MODEL=v2.3` |
 | weight the Kalman best estimate by the nightly uncertainty | `options.json` / environment | `"kalman_uncertainty_weighting": 1` / `ALC_KALMAN_UNCERTAINTY_WEIGHTING=1` |
 
@@ -520,7 +613,147 @@ python validation/v23_uncertainty/u23_analysis.py profiles    # sub-window profi
 python validation/v23_uncertainty/u23_analysis.py kalman      # Kalman weighting
 python validation/v23_uncertainty/u23_analysis.py verify      # shipped defaults in the code vs offline
 python validation/v23_uncertainty/u23_analysis.py cost        # runtime
+
+# independent review (section 8): a second harness reads each night's L1 once and computes both window
+# methods, the exact shipped and revised budgets, split-night constants and the ensemble dimensions
+# (12 workers); outputs in C:/DATA/Projects/202610_v23/uncertainty_review/
+python validation/v23_uncertainty/u23r_harness.py run --set orig  --workers 12   # the 36 design units
+python validation/v23_uncertainty/u23r_harness.py run --set fresh --workers 12   # 37 fresh units
+python validation/v23_uncertainty/u23r_harness.py run --set origx --workers 12 --units <twins, Payerne A>
+python validation/v23_uncertainty/u23r_truth.py                       # reproduction, truth leakage
+python validation/v23_uncertainty/u23r_reliability.py orig eprof_v2.3  # conditional calibration
+python validation/v23_uncertainty/u23r_reliability2.py orig eprof_v2.3 # twins, |g| octiles, displacement
+python validation/v23_uncertainty/u23r_components.py fresh eprof_v2.2  # overlaps, split-night noise test
+python validation/v23_uncertainty/u23r_bracket.py                      # variance shares, perfect-budget box
+python validation/v23_uncertainty/u23r_saturation.py orig eprof_v2.3 shipped   # choice of the cap
+python validation/v23_uncertainty/u23r_oos.py fresh eprof_v2.3         # before / after out of sample
+python validation/v23_uncertainty/u23r_qc.py orig                      # QC cost, ROC, eprof_v2.3 interplay
+python validation/v23_uncertainty/u23r_kalman.py origx eprof_v2.3 200  # Kalman: permutation test, variants
+python validation/v23_uncertainty/u23r_ranking.py orig eprof_v2.2      # unit ranking with bootstrap CIs
+python validation/v23_uncertainty/u23r_unitterm.py orig eprof_v2.2     # causal unit-level term
+python validation/v23_uncertainty/u23r_molclim.py                      # climatology refit (ASL convention)
+python validation/v23_uncertainty/u23r_molecular_oos.py                # climatology out of sample
+python validation/v23_uncertainty/u23r_payerne.py                      # Payerne 2026-09-07, both methods
+python validation/v23_uncertainty/u23r_figures.py                      # review figures
 ```
+
+## 8. Independent review (2026-10)
+
+An adversarial review attacked every claim of this page with a second harness
+(`validation/v23_uncertainty/u23r_harness.py`: each night's L1 read once; both window methods,
+eprof_v2.2 and eprof_v2.3; the EXACT shipped budget instead of an offline emulation; split-night
+constants; the three ensemble dimensions separately), with leakage-controlled truths, and on
+**37 fresh units never used in the design** (27 CHM15k in 14 countries, 12–69 °N, two mountain
+sites; 8 CL61; 2 Mini-MPL with an every-night series). Full report, tables and figures:
+`C:/DATA/Projects/202610_v23/uncertainty_review/u23r_review.md`.
+
+### 8.1 What survived
+
+* **The pooled pulls**, with the exact code values: CHM15k time series 4.05 → 1.25 (17 % outside
+  2 σ), twins 1.69 → 0.60 (3.5 %), CL61 3.13 → 1.08 (design units, eprof_v2.2; the doc's 1.26 / 0.59 /
+  1.02 came from the offline emulation). Out of sample (fresh units, eprof_v2.3): CHM15k 3.91 → 1.17
+  (16 % outside 2 σ), CL61 2.85 → 1.08. Time hold-out: 1.27 in 2025, 1.33 in 2026 (eprof_v2.3). The
+  ranking of the design candidates of §3.4 is the same on the fresh units and in both years, and the
+  weight floor, the aerosol allowance and the molecular term move the pull by ≤ 0.15: no sign of
+  in-sample over-tuning of the pooled number.
+* **The √k correction** of the per-gate noise on the CHM15k (propagated / measured 0.965).
+* **Payerne 2026-09-07** with eprof_v2.2: 42 % → 162 % (2 σ), rejected — reproduced exactly. With
+  eprof_v2.3 the window search itself rejects that night (flag −2) — and also the ordinary 09-23 night
+  at the unit median.
+* **The molecular term** as an absolute uncertainty (|b| ≤ 2 σ_mol on 97 % of the fitted nights,
+  96–99.7 % out of sample up to 62 °N).
+* **No significant double counting.** The ensemble's shift and time dimensions overlap the vertical and
+  noise terms by 3 % of the variance at the median night (total σ 1.7 % too large); the noise inside
+  |g| is 1 % of E[g²] (odd/even halves); the climatological part of σ_mol moves the pull by 2 %.
+* **The Kalman weighting** — and it is worth more than claimed with eprof_v2.3 (§8.3).
+
+### 8.2 What did not survive (ranked by impact)
+
+1. **Conditional calibration.** In deciles of the reported σ the observed CHM15k scatter rose only from
+   7.6 to 12.8 % while the reported σ rose from 4.0 to 29.8 % (eprof_v2.3): pull 1.98 in the quietest
+   decile, 0.44 in the noisiest. The pooled 1.25 averaged an under-covered bulk with an over-covered top.
+   Per-unit pulls were over-dispersed (permutation p = 0.0015). The twin truth splits the causes: the
+   quiet nights are calibrated there (pull 1.0 in the bottom quintile: the time-series floor is a real
+   gain change), the top quintile is over-covered 3–4 ×. The top is the vertical term growing like
+   |g| × D (§2.3), which the time-series truth — an upper bound of the calibration error — refutes.
+   The same pattern holds out of sample (fresh units: 1.65 … 0.46).
+2. **The photon-noise term** was 1.6 × too small on the CHM15k, 3.4–4.2 × on the CL61, 2.8–3.1 × on the
+   Mini-MPL (split-night test): gates are not independent, and on the CL61 the √k white-noise
+   correction itself over-corrects by ~1.9 × (§2.5).
+3. **The relative QC** rejected good nights (40–50 % of its rejections less than 10 % off), was mostly
+   redundant with eprof_v2.3's vertical-consistency test, and made the weighted Kalman best estimates
+   less consistent (§2.7).
+4. **The validation truths.** Excluding only the night itself lets neighbouring nights of the same
+   weather regime into the running median: excluding ±3 days raises the CHM15k pull 1.25 → 1.43 and the
+   twin pull 0.60 → 0.71. The median's own error (3.6 %) inflates the raw pull by ~10 %. The bracket
+   argument holds in direction only: a perfect budget would give 1.00–1.46 / 0.40–0.77 (§4).
+5. **The molecular climatology** was evaluated at the window centre AGL while fitted ASL (+0.49 % per km
+   of station altitude); its fit script was not in the repository; it under-covers north of 62 °N.
+6. **The unit ranking gain** 0.58 → 0.67 is not significant: 0.56 → 0.72 with the exact code, difference
+   +0.16 (95 % CI −0.12…+0.31); fresh units 0.40 → 0.58 (−0.14…+0.40); the unit's median |g| alone
+   ranks the design units as well (0.75). The budget does beat a unit's own past scatter as a predictor
+   of next year's (0.70 vs 0.50 design, 0.65 vs 0.35 fresh).
+7. **The Mini-MPL** under-coverage is confirmed with an every-night truth (pull 2.3 on two fresh
+   units): its constant drifts within a night by ~45 × its photon noise — instrument drift, not a
+   calibration error the budget could model.
+
+### 8.3 What changed
+
+The reported constant is unchanged, `uncertainty_model = "ensemble"` stays bit-identical to v2.2, and
+the pre-review v2.3 budget remains reproducible through `uncertainty_params` (§6). Three defaults of the
+v2.3 model changed, none of them a new fitted parameter except the cap:
+
+| change | parameter (default) | why |
+|---|---|---|
+| photon noise measured as the noise of the window mean on the binned stack | `noise_estimator = "window_mean"` | the independent-gate estimate is 1.6–4 × too small (split-night test) |
+| vertical term saturates | `vertical_cap_rel = 0.15` | the error of the steepest nights is ≥ 2.3 × below |g| × D (time-series truth = upper bound) |
+| molecular climatology at the window centre ASL | `molecular_height_reference = "asl"` | the convention the coefficients were fitted with |
+
+Before / after on the SAME held-out nights (fresh units, eprof_v2.3, exact code values; "±3 d" = the
+leakage-controlled truth):
+
+| fresh units, eprof_v2.3 | nights | v2.2 ensemble | v2.3 as first shipped | v2.3 reviewed |
+|---|---|---|---|---|
+| CHM15k: pooled pull (> 2 σ) | 1 753 | 3.91 (59 %) | 1.17 (16 %) | 1.30 (18 %) |
+| CHM15k: pull in the bottom / top decile of the reported σ | | 6.52 / 1.63 | 1.65 / **0.46** | 1.59 / **1.02** |
+| CHM15k: spread of the decile pulls (sd of log) | | 0.44 | 0.38 | **0.15** |
+| CHM15k: median reported 1 σ | | 2.4 % | 7.5 % | 7.4 % |
+| CHM15k, ±3 d truth: pooled pull (> 2 σ) | 1 586 | 4.15 (62 %) | 1.29 (19 %) | 1.44 (21 %) |
+| CHM15k, ±3 d truth: top decile / spread | | 1.69 / 0.44 | 0.46 / 0.42 | 1.00 / 0.20 |
+| CL61: pooled pull (> 2 σ) | 299 | 2.85 (50 %) | 1.08 (12 %) | 1.20 (16 %) |
+| Mini-MPL (every-night own series) | 299 | 3.06 (52 %) | 2.30 (39 %) | 2.32 (39 %) |
+| nights over the 0.6 QC limit (CHM15k / CL61) | | — | 5.6 % / 7.4 % | 0 % / 0 % |
+| unit ranking (Spearman, 32 units) | | 0.40 | 0.58 | 0.59 |
+| split-night noise test, CHM15k / CL61 / Mini-MPL (1 = right) | | — | 1.58 / 3.38 / 2.84 | 0.96 / 0.88 / 0.99 |
+| *twins (design units, 520 pair-nights)* | | 1.66 (31 %) | 0.63 (3.8 %) | 0.69 (4.2 %) |
+
+![Conditional calibration: time-series truth per decile (left), twin truth per quintile (middle), the vertical term against |g| (right)](C:/DATA/Projects/202610_v23/uncertainty_review/u23r_fig_reliability.png)
+
+![Split-night test of the photon-noise term per instrument type](C:/DATA/Projects/202610_v23/uncertainty_review/u23r_fig_noise.png)
+
+The pooled time-series pull rises from 1.17 to 1.30: the shipped number was lowered by the
+over-covered top decile. Both, and the twin pull of 0.69, lie inside the range a perfectly calibrated
+budget would give (time series 1.00–1.46, twins 0.40–0.77, §4). What the revision buys is conditional
+calibration — the steepest decile goes from 2.2 × over-covered to calibrated and the spread of the
+decile pulls falls by 60 %, out of sample and with both truths — and a noise term that passes the
+split-night test for every instrument type. The bottom decile (pull ~1.6 on the time-series truth) is
+a real gain change: on the twin truth it is calibrated. With the Kalman weighting on (eprof_v2.3, twin
+units), the reviewed budget makes the co-located best estimates 13.6 % (rms) and 13.1 % (95th
+percentile) more consistent than equal weights; rejecting on u/C would cut that to ~6 %. Payerne
+2026-09-07 with eprof_v2.2 windows: 162 % → 71 % (still rejected, now carried by the noise of that
+receiver, 24 → 48 %).
+
+### 8.4 Recommendation
+
+Release the reviewed budget (`uncertainty_model = "v2.3"`, the new defaults) together with
+`eprof_v2.3` and the Kalman weighting (`kalman_uncertainty_weighting = 1`). Treat the weighting, not
+the u/C rejection, as the way uncertain nights are handled: keep `max_rel_uncertainty = 0.6` only as a
+safety net for extreme noise (with the saturated vertical term it fires on < 0.5 % of the nights) and
+do not lower it. For L2 (§5) carry the Kalman standard deviation, which adds the real gain changes the
+nightly budget deliberately leaves out (they are why the time-series pull stays above 1 and why the
+Mini-MPL and Schleiz are under-covered). Open items: the vertical term's scale rests on one network D
+and one cap, pinned only to about ±30 % by the available truths; north of 62 °N the molecular term
+should use per-night CAMS T/p; the southern-hemisphere mirroring is untested.
 
 ## References
 

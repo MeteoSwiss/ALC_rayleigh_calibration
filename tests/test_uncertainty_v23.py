@@ -306,6 +306,155 @@ def test_runner_kalman_weighting_option(monkeypatch):
     assert rnc._kalman_rows(rows) == weighted
 
 
+# --------------------------------------------------------------------------------------------
+# Independent review 2026-10 (doc/v2.3/uncertainty.md section 8)
+# --------------------------------------------------------------------------------------------
+# The pre-review v2.3 behaviour (git a835f6a defaults) stays reproducible through uncertainty_params;
+# its total on the two fixtures, recorded before the defaults changed.
+PRE_REVIEW = dict(molecular_height_reference="agl", noise_estimator="per_gate",
+                  vertical_cap_rel=None)
+PRE_REVIEW_U = {"0-20000-0-06610": 85888796166.90236, "0-20000-0-07014": 18409.16980662671}
+
+
+def test_review_defaults():
+    p = U.DEFAULT_PARAMS
+    assert p["noise_estimator"] == "window_mean"
+    assert p["molecular_height_reference"] == "asl"
+    assert p["vertical_cap_rel"] == pytest.approx(0.15)
+    assert p["max_rel_uncertainty"] == pytest.approx(0.6)
+    assert p["window_displacement_m"] == pytest.approx(1000.0)
+
+
+@pytest.mark.parametrize("wmo,date,itype,c_ref,u_ref", FIXTURES, ids=["CHM15k", "Mini-MPL"])
+def test_reviewed_budget_on_fixtures(wmo, date, itype, c_ref, u_ref):
+    """Reviewed defaults: same constant; the noise term is the window-mean estimate measured on the
+    stack the constant averages; the vertical term is saturated at 15 %."""
+    fi = {}
+    r = calibrate_rayleigh(date, _info(wmo, itype, date), _options("v2.3"), fit_inputs_out=fi)
+    b = fi["uncertainty_budget"]
+    assert r.lidar_constant == pytest.approx(c_ref, rel=1e-12)
+    assert b.sigma_vertical_rel < 0.15
+    stack, p_mol = fi["signal_stack"], fi["p_mol"]
+    rng = np.asarray(fi["range_alc"], float)
+    fr_lo, fr_hi = r.calibration_bottom_height, r.calibration_top_height
+    alt = _info(wmo, itype, date).altitude
+    rcs_mean = np.nanmean(np.asarray(stack, float), axis=0) * rng ** 2
+    w = (rng >= fr_lo - alt) & (rng <= fr_hi - alt) & np.isfinite(rcs_mean)
+    assert b.sigma_noise_rel == pytest.approx(U.window_mean_noise_rel(stack, p_mol, w), rel=1e-9)
+    pre = {}
+    calibrate_rayleigh(date, _info(wmo, itype, date), _options("v2.3", **PRE_REVIEW), fit_inputs_out=pre)
+    assert b.sigma_noise_rel >= pre["uncertainty_budget"].sigma_noise_rel
+
+
+@pytest.mark.parametrize("wmo,date,itype,c_ref,u_ref", FIXTURES, ids=["CHM15k", "Mini-MPL"])
+def test_pre_review_behaviour_reproducible(wmo, date, itype, c_ref, u_ref):
+    fi = {}
+    r = calibrate_rayleigh(date, _info(wmo, itype, date), _options("v2.3", **PRE_REVIEW),
+                           fit_inputs_out=fi)
+    assert r.lidar_constant == pytest.approx(c_ref, rel=1e-12)       # C_L never changes
+    assert fi["uncertainty_budget"].u_total == pytest.approx(PRE_REVIEW_U[wmo], rel=1e-9)
+
+
+def _stack(n=160, common=0.0, seed=4):
+    """Binned profile stack (signal = rcs/r^2) of a pure molecular CHM15k-like night: white gate
+    noise (5 % of the 5 km signal per profile) plus an optional per-profile offset common to all
+    gates (a background-subtraction error), given relative to the 5 km signal."""
+    rng = np.arange(15.0, 9000.0, 30.0)
+    atm = load_standard_atmosphere(None, rng + 500.0)
+    mp = calculate_molecular_properties(atm.temperature, atm.pressure, rng, 1064e-9)
+    sig = 1e12 * mp.beta_mol * mp.transmission / rng ** 2
+    i5 = int(np.argmin(np.abs(rng - 5000.0)))
+    g = np.random.default_rng(seed)
+    st = sig[None, :] + 0.05 * sig[i5] * g.normal(0, 1, (n, rng.size))
+    st = st + common * sig[i5] * g.normal(0, 1, (n, 1))
+    return rng, mp, sig, st, 0.05 * sig[i5]
+
+
+def test_window_mean_noise_white_noise_matches_per_gate():
+    rng, mp, sig, st, s_gate = _stack()
+    w = (rng >= 3000) & (rng <= 4000)
+    per_gate = U.window_noise_rel(np.full(rng.size, s_gate / np.sqrt(st.shape[0])) / sig, w)
+    meas = U.window_mean_noise_rel(st, mp.p_mol, w)
+    assert meas == pytest.approx(per_gate, rel=0.2)
+
+
+def test_window_mean_noise_keeps_common_mode_noise():
+    # a per-profile offset common to the gates does not average over the window: the per-gate sum
+    # misses it, the window-mean estimator does not
+    rng, mp, sig, st, s_gate = _stack(common=0.02)
+    w = (rng >= 3000) & (rng <= 4000)
+    per_gate = U.window_noise_rel(np.full(rng.size, s_gate / np.sqrt(st.shape[0])) / sig, w)
+    meas = U.window_mean_noise_rel(st, mp.p_mol, w)
+    i5 = int(np.argmin(np.abs(rng - 5000.0)))
+    expect = np.sqrt((s_gate / sig[w]).mean() ** 2 / w.sum() + (0.02 * sig[i5] / sig[w]).mean() ** 2) \
+        / np.sqrt(st.shape[0])
+    assert meas > 2 * per_gate
+    assert meas == pytest.approx(expect, rel=0.25)
+    assert np.isnan(U.window_mean_noise_rel(st[:5], mp.p_mol, w))       # too few profiles
+    assert np.isnan(U.window_mean_noise_rel(None, mp.p_mol, w))
+
+
+def test_noise_estimator_option_uses_the_stack():
+    rng, mp, sig, st, s_gate = _stack(common=0.02)
+    rcs = st.mean(axis=0) * rng ** 2
+    fit = RayleighFitResult(slope=1e12, intercept=0.0, r_squared=1.0, std_error=0.0, p_value=0.0,
+                            center_range_m=3500.0, half_length_m=500.0, range_start_m=3000.0,
+                            range_end_m=4000.0, altitude_start=3500.0, altitude_end=4500.0,
+                            relative_error=0.0)
+    out = {}
+    for est in ("per_gate", "window_mean"):
+        o = CalibrationOptions()
+        o.uncertainty_model = "v2.3"
+        o.uncertainty_params = dict(noise_estimator=est)
+        out[est] = U.uncertainty_budget(
+            cl=1e12, u_ensemble=0.02e12, rcs_mean=rcs, range_alc=rng, p_mol=mp.p_mol, fit_result=fit,
+            sigma_signal=np.full(rng.size, s_gate / np.sqrt(st.shape[0])),
+            cl_in_window=U.operational_cl_in_window(rcs, rng, mp.beta_mol, fit, o), options=o,
+            latitude=47.0, station_altitude=500.0, date_str="20250415", signal_stack=st)
+    w = (rng >= 3000) & (rng <= 4000)
+    assert out["window_mean"].sigma_noise_rel == pytest.approx(U.window_mean_noise_rel(st, mp.p_mol, w))
+    assert out["window_mean"].sigma_noise_rel > 2 * out["per_gate"].sigma_noise_rel
+    assert out["window_mean"].lidar_constant == out["per_gate"].lidar_constant
+
+
+def test_molecular_height_reference():
+    # the climatology was fitted with the window centre ASL (u23r_molclim.py reproduces _MOL_COEF)
+    rng, rcs, mp, fit, sigma, c = _synthetic()
+    res = {}
+    for ref in ("agl", "asl"):
+        o = CalibrationOptions()
+        o.uncertainty_model = "v2.3"
+        o.uncertainty_params = dict(molecular_height_reference=ref)
+        res[ref] = U.uncertainty_budget(
+            cl=c, u_ensemble=0.02 * c, rcs_mean=rcs, range_alc=rng, p_mol=mp.p_mol, fit_result=fit,
+            sigma_signal=sigma, cl_in_window=U.operational_cl_in_window(rcs, rng, mp.beta_mol, fit, o),
+            options=o, latitude=47.0, station_altitude=2000.0, date_str="20250415")
+    doy = 105
+    assert res["agl"].molecular_bias_rel == pytest.approx(U.molecular_bias_climatology(47.0, doy, 3.5, 2.0))
+    assert res["asl"].molecular_bias_rel == pytest.approx(U.molecular_bias_climatology(47.0, doy, 5.5, 2.0))
+
+
+def test_vertical_saturation():
+    rng, rcs, mp, fit, sigma, c = _synthetic(distortion=0.10, noise_rel_5km=0.05, seed=1)
+    out = {}
+    for cap in (None, 0.01):
+        o = CalibrationOptions()
+        o.uncertainty_model = "v2.3"
+        o.uncertainty_params = dict(vertical_cap_rel=cap)
+        out[cap] = U.uncertainty_budget(
+            cl=c, u_ensemble=0.02 * c, rcs_mean=rcs, range_alc=rng, p_mol=mp.p_mol, fit_result=fit,
+            sigma_signal=sigma, cl_in_window=U.operational_cl_in_window(rcs, rng, mp.beta_mol, fit, o),
+            options=o, latitude=47.0, station_altitude=500.0, date_str="20250415")
+    s = out[None].sigma_vertical_rel
+    assert out[0.01].sigma_vertical_rel == pytest.approx(s / np.sqrt(1 + (s / 0.01) ** 2))
+    assert out[0.01].sigma_vertical_rel < 0.01 < s
+    b = out[0.01]
+    total = 2 * c * np.sqrt(b.sigma_ensemble_rel ** 2 + b.sigma_vertical_rel ** 2 + b.sigma_molecular_rel ** 2
+                            + b.sigma_aerosol_rel ** 2 + b.sigma_noise_rel ** 2)
+    assert b.u_total == pytest.approx(total, rel=1e-12)
+    assert b.u_vertical == pytest.approx(2 * c * b.sigma_vertical_rel)
+
+
 def test_molecular_climatology_bounds():
     vals = [U.molecular_bias_climatology(lat, doy, zc)
             for lat in (10, 40, 47, 55, 75, -45) for doy in (15, 105, 196, 288)
