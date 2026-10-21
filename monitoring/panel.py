@@ -579,6 +579,20 @@ def _pack_rayleigh_ok(kw: dict) -> dict:
         out["diag"]["spread"] = {"vals": _jsonable(cm[np.isfinite(cm)].ravel()),
                                  "median": float(cl_med),
                                  "unc": float(kw.get("cl_uncertainty", 0.0) or 0.0)}
+        # The FULL ensemble the reported C_L (median) and its uncertainty (2 x robust sigma) are
+        # computed from: lidar ratio x window shift x time sample. cl_matrix above is only its median
+        # over the time samples, so plotting it alone hid the members that drive the uncertainty.
+        # [lr_sr, shift_m, time_sample, C_L]; time_sample 0 = all profiles, 1..N = random subsets.
+        cube = kw.get("cl_cube")
+        if cube is not None:
+            cube = np.asarray(cube, float)
+            lrs = np.asarray(kw.get("lr_values", []), float)
+            shs = np.asarray(kw.get("alt_shifts", []), float)
+            tss = np.asarray(kw.get("time_samples", np.arange(cube.shape[2])), int)
+            if cube.ndim == 3 and cube.shape[:2] == (lrs.size, shs.size) and cube.shape[2] == tss.size:
+                out["diag"]["spread"]["members"] = [
+                    [float(lrs[i]), float(shs[j]), int(tss[k]), float(cube[i, j, k])]
+                    for i, j, k in np.argwhere(np.isfinite(cube))]
     return out
 
 
@@ -702,8 +716,15 @@ def _flag_label(flag, method="rayleigh") -> str | None:
 def _run_one(rnc, stream: dict, d: datetime, method: str) -> dict:
     """One (day, method): calibrate in-process and pack whatever was drawn."""
     CAPTURED.clear()
+    # Recompute the night EXACTLY as the operational run did. The daily run screens the Rayleigh night
+    # with the target classification when ALC_CLASSIFY=1 (ops_daily.py --classify); calling the runner
+    # without that screen produced a different verdict for the same night -- Payerne 2026-09-07 showed
+    # flag -2 here while the published series held C_L = 1.02e12. The curtains are read from
+    # ALC_CLASSIFICATION_DIR (the operational tree), since this process writes into a work dir.
+    screen = os.environ.get("ALC_CLASSIFY", "0").strip() in ("1", "true", "True")
     try:
-        rows = rnc._do_cloud(stream, d, d) if method == "cloud" else rnc._do_rayleigh(stream, d, d)
+        rows = (rnc._do_cloud(stream, d, d) if method == "cloud"
+                else rnc._do_rayleigh(stream, d, d, None, screen))
     except Exception as exc:                                                    # noqa: BLE001
         return {"kind": "error", "message": f"{type(exc).__name__}: {exc}"}
     ds = d.strftime("%Y%m%d")
@@ -1570,8 +1591,11 @@ C_L        = C_applied / C             (Wiegner, comparable with the Rayleigh co
 }
 
 // ---------------------------------------------------------------- diagnostics
-function card(title, id) {
-  return `<div class="card"><h2>${title}</h2><div id="${id}"></div></div>`;
+function card(title, id, note) {
+  // `note`: one or two sentences saying how to READ the figure, shown under its title -- a figure
+  // whose points have no stated meaning (the old C_L spread card) is a figure nobody can use.
+  const n = note ? `<p style="margin:2px 0 6px;font-size:11.5px;line-height:1.35;color:#555">${note}</p>` : '';
+  return `<div class="card"><h2>${title}</h2>${n}<div id="${id}"></div></div>`;
 }
 // ---- pooled C vs cloud base -------------------------------------------------------------------
 // The ONLY card on the page built from many nights, so the period selector must RE-POOL it rather
@@ -1715,9 +1739,18 @@ function drawDiag(p) {
   if (!p) return;
   if (p.kind === 'rayleigh_ok') {
     const d = p.diag;
+    const nMem = (d.spread && d.spread.members) ? d.spread.members.length : 0;
+    const SENS_NOTE = 'C_L re-calibrated with each aerosol lidar ratio (rows) and with the molecular '
+      + 'window moved down or up (columns), in % of the reported C_L. Median over the time subsets.';
+    const SPREAD_NOTE = 'Each point is this night re-calibrated with one aerosol lidar ratio (colour) '
+      + 'and the molecular window moved down or up (x). '
+      + (nMem ? 'Filled: all profiles; open: random 70 % subsets of the night. '
+              : 'Points are medians over the random time subsets, which also enter ±u. ')
+      + 'Red line: the reported C_L, the median of all members. Band: the reported uncertainty '
+      + '±u = 2 × robust σ of the members. A sloping line means C_L depends on the window altitude.';
     host.innerHTML = card('Window: slope','g_slopes') + card('Window: |intercept|','g_intercepts')
-      + card('Window: R²','g_r_squared') + card('Sensitivity grid','d_sens')
-      + card('Lidar constant C_L spread','d_spread');
+      + card('Window: R²','g_r_squared') + card('Sensitivity grid','d_sens', SENS_NOTE)
+      + card('Lidar constant C_L: ensemble and uncertainty','d_spread', SPREAD_NOTE);
     const rkm = d.range_km ? f32(d.range_km) : null, hkm = d.half_km ? f32(d.half_km) : null;
     ['slopes','intercepts','r_squared'].forEach(key => {
       const G = (d.grids||{})[key]; if (!G) return;
@@ -1753,23 +1786,70 @@ function drawDiag(p) {
       Plotly.newPlot('d_sens', [{ type:'heatmap', z:zz,
         x:d.sens.shift.map(v => (v>0?'+':'')+v.toFixed(0)), y:d.sens.lr.map(v => v.toFixed(0)),
         colorscale:'RdBu', reversescale:true, zmin:-d.sens.vabs, zmax:d.sens.vabs,
-        colorbar:{title:{text:'Dev (%)'}, thickness:11},
-        hovertemplate:'LR %{y} sr<br>shift %{x} m<br>%{z:+.2f} %<extra></extra>' }],
-        Object.assign({}, LAY, { height:270, xaxis:{title:{text:'Alt shift (m)'}, type:'category'},
-          yaxis:{title:{text:'LR (sr)'}, type:'category'} }), CFG);
+        colorbar:{title:{text:'Δ (%)'}, thickness:11},
+        hovertemplate:'lidar ratio %{y} sr<br>window moved %{x} m<br>C_L %{z:+.2f} % vs reported'
+          + '<extra></extra>' }],
+        Object.assign({}, LAY, { height:270,
+          xaxis:{title:{text:'Molecular window shift (m)'}, type:'category'},
+          yaxis:{title:{text:'Aerosol lidar ratio (sr)'}, type:'category'} }), CFG);
     }
     if (d.spread) {
-      const s = d.spread, n = s.vals.length;
-      Plotly.newPlot('d_spread', [{ x:s.vals.map((_,i)=>1+(n>1?-0.08+0.16*i/(n-1):0)), y:s.vals,
-        mode:'markers', marker:{size:7, opacity:0.55, color:'#4c78a8'},
-        hovertemplate:'C_L %{y:.4g}<extra></extra>' }],
-        Object.assign({}, LAY, { height:270, showlegend:false,
-          shapes:[{ type:'rect', xref:'paper', x0:0, x1:1, y0:s.median-s.unc, y1:s.median+s.unc,
-                    fillcolor:'rgba(214,39,40,0.12)', line:{width:0}, layer:'below' },
-                  { type:'line', xref:'paper', x0:0, x1:1, y0:s.median, y1:s.median,
-                    line:{color:'#d62728', width:1.4} }],
-          xaxis:{visible:false, range:[0.7,1.3]},
-          yaxis:{title:{text:'C_L'}, exponentformat:'e'} }), CFG);
+      // The ensemble behind the reported value. Before, the card scattered the 25 values against a
+      // meaningless index, so nobody could tell what a point was. Now x = window shift and colour =
+      // lidar ratio; the time subsets (which also enter the uncertainty) are open circles.
+      const s = d.spread, med = s.median, unc = s.unc || 0;
+      let mem = s.members, collapsed = false;
+      if (!mem && d.sens) {
+        // Payload written before the members were stored: rebuild the lidar-ratio x shift grid from
+        // the sensitivity grid (the median over the time subsets, in % of the reported value).
+        const a = dec(d.sens.b64,'f32'), [n1,n2] = d.sens.shape;
+        mem = [];
+        for (let i = 0; i < n1; i++) for (let j = 0; j < n2; j++) {
+          const v = a[i*n2+j];
+          if (isFinite(v)) mem.push([d.sens.lr[i], d.sens.shift[j], -1, med * (1 + v / 100)]);
+        }
+        collapsed = true;
+      }
+      mem = mem || [];
+      const lrs = [...new Set(mem.map(m => m[0]))].sort((a, b) => a - b);
+      const PAL = ['#440154', '#3b528b', '#21918c', '#5ec962', '#b5a30f'];
+      const col = lr => PAL[Math.max(0, Math.min(lrs.indexOf(lr), PAL.length - 1))];
+      const off = lr => (lrs.indexOf(lr) - (lrs.length - 1) / 2) * 14;   // m: separate LRs in a column
+      const xs = mem.map(m => m[1]);
+      const xlo = Math.min(-200, ...xs) - 60, xhi = Math.max(200, ...xs) + 60;
+      const HT = 'lidar ratio %{customdata[0]} sr · window moved %{customdata[1]:+.0f} m'
+        + '<br>%{customdata[2]}<br>C_L %{y:.4g} (%{customdata[3]:+.1f} %)<extra></extra>';
+      const tr = [];
+      if (unc > 0) tr.push({ x:[xlo, xhi, xhi, xlo], y:[med - unc, med - unc, med + unc, med + unc],
+        fill:'toself', mode:'lines', line:{width:0}, fillcolor:'rgba(214,39,40,0.12)', hoverinfo:'skip',
+        name:'±u = ±' + (100 * unc / med).toFixed(1) + ' % (2σ)' });
+      tr.push({ x:[xlo, xhi], y:[med, med], mode:'lines', line:{color:'#d62728', width:1.6},
+        hoverinfo:'skip', name:'reported C_L (median of ' + mem.length + ')' });
+      lrs.forEach(lr => {
+        const main = mem.filter(m => m[0] === lr && m[2] <= 0).sort((a, b) => a[1] - b[1]);
+        const sub = mem.filter(m => m[0] === lr && m[2] > 0);
+        tr.push({ x:main.map(m => m[1] + off(lr)), y:main.map(m => m[3]), mode:'lines+markers',
+          name:'LR ' + lr.toFixed(0) + ' sr', line:{color:col(lr), width:1.2},
+          marker:{size:8, color:col(lr)}, hovertemplate:HT,
+          customdata:main.map(m => [m[0], m[1], collapsed ? 'median of the time subsets' : 'all profiles',
+                                    100 * (m[3] - med) / med]) });
+        if (sub.length) tr.push({ x:sub.map(m => m[1] + off(lr) + (m[2] % 2 ? 4 : -4)),
+          y:sub.map(m => m[3]), mode:'markers', showlegend:false, hovertemplate:HT,
+          marker:{size:5, color:'rgba(0,0,0,0)', line:{color:col(lr), width:1.2}},
+          customdata:sub.map(m => [m[0], m[1], 'random 70 % time subset #' + m[2],
+                                   100 * (m[3] - med) / med]) });
+      });
+      if (mem.some(m => m[2] > 0)) tr.push({ x:[null], y:[null], mode:'markers',
+        name:'○ 70 % time subsets',
+        marker:{size:6, color:'rgba(0,0,0,0)', line:{color:'#555', width:1.2}} });
+      const ys = mem.map(m => m[3]).concat(unc > 0 ? [med - unc, med + unc] : [med]);
+      const ylo = Math.min(...ys), yhi = Math.max(...ys);
+      const pad = 0.06 * ((yhi - ylo) || Math.abs(med) * 0.01);
+      Plotly.newPlot('d_spread', tr, Object.assign({}, LAY, { height:380, showlegend:true,
+          margin:{l:62, r:10, t:10, b:96}, legend:{orientation:'h', y:-0.3, font:{size:10}, itemwidth:30},
+          xaxis:{title:{text:'Molecular window shift (m)'}, tickvals:[-200, -100, 0, 100, 200],
+                 range:[xlo, xhi], zeroline:false},
+          yaxis:{title:{text:'C_L'}, exponentformat:'e', range:[ylo - pad, yhi + pad]} }), CFG);
     }
   } else if (p.kind === 'cloud') {
     const d = p.diag;
@@ -1834,10 +1914,21 @@ function drawMsg(p) {
     det.push('flag <b>' + p.flag + '</b>' + (flagLabelOf(p) ? ' — ' + flagLabelOf(p) : ''));
   if (p.message) det.push('message: “' + p.message + '”');
   if (p.constant) det.push('C_L = ' + (+p.constant).toPrecision(5) +
-    (p.uncertainty ? ' ± ' + (+p.uncertainty).toPrecision(3) : ''));
+    (+p.uncertainty ? ' ± ' + (+p.uncertainty).toPrecision(3) + ' (2σ, '
+      + (100 * p.uncertainty / p.constant).toFixed(1) + ' %)' : ''));
   if (p.profile && p.profile.mean_of) det.push(p.profile.mean_of);
+  // The panel RECOMPUTES the night to draw it; the C_L series plots the PUBLISHED row. When the two
+  // disagree the operator must see it here, not discover two verdicts for one night.
+  let warn = '';
+  if (p.published && p.published.mismatch) {
+    const pc = p.published.constant;
+    warn = '<div class="det" style="color:#9a5b00">⚠ The published series holds a different result '
+      + 'for this night: ' + (pc ? 'C_L = ' + (+pc).toPrecision(5) : 'not calibrated')
+      + ' (flag ' + p.published.flag + '). This panel was recomputed and does not reproduce it.</div>';
+  }
   host.className = 'dp-verdict ' + (ok ? 'ok' : 'bad');
-  host.innerHTML = bits.join('') + (det.length ? '<div class="det">' + det.join(' · ') + '</div>' : '');
+  host.innerHTML = bits.join('') + (det.length ? '<div class="det">' + det.join(' · ') + '</div>' : '')
+    + warn;
 }
 function drawFlags() {
   const host = document.getElementById('flags');

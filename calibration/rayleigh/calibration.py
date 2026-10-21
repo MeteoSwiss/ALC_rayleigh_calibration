@@ -1308,6 +1308,9 @@ def calibrate_rayleigh(
                     cl_matrix=cl_matrix,
                     cl_median=cl_median,
                     cl_uncertainty=uncertainty,
+                    # the full ensemble behind cl_median / uncertainty (plot input only)
+                    cl_cube=cl_cube,
+                    time_samples=ts_used,
                     hours_since_start=disp_hours,
                     time_datetime=disp_dt,
                     rcs=disp_rcs,

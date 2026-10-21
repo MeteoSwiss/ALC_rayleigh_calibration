@@ -29,7 +29,10 @@ This is the full version of what `mockup_station_page.py` prototyped. Difference
 from __future__ import annotations
 
 import argparse
+import csv
+import functools
 import json
+import math
 import os
 import sqlite3
 import sys
@@ -139,6 +142,48 @@ def _kal_frame(cal_dir: Path, key: str) -> pd.DataFrame:
 
 
 # ================================================================================== daily payloads
+@functools.lru_cache(maxsize=64)
+def _published_rows(cal_dir: str, key: str) -> dict:
+    """{(date, method): (flag, cal_value, uncertainty)} from the operational ``<key>_cal.csv``."""
+    p = Path(cal_dir) / key / f"{key}_cal.csv"
+    rows = {}
+    if not p.exists():
+        return rows
+
+    def num(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+    with open(p, newline="", encoding="utf-8") as fh:
+        for r in csv.DictReader(fh):
+            rows[(str(r.get("date", "")), str(r.get("method") or "rayleigh"))] = (
+                num(r.get("flag")), num(r.get("cal_value")), num(r.get("uncertainty")))
+    return rows
+
+
+def _attach_published(p: dict, key: str, ds: str, method: str) -> None:
+    """Mark a payload whose recomputed verdict differs from the PUBLISHED row of the same night.
+
+    The panel recomputes a night to draw it, while the C_L series plots the published row; the two
+    must agree. When they do not (a different screen, a code change since the published run, data that
+    arrived later), the page now says so instead of silently showing two verdicts for one night.
+    """
+    ref = os.environ.get("ALC_PANEL_REFERENCE_DIR")
+    if not ref:
+        return
+    row = _published_rows(ref, key).get((ds, method))
+    if row is None:
+        return
+    flag, val, unc = row
+    pub = val if (val is not None and math.isfinite(val) and val > 0) else None
+    mine = p.get("constant")
+    differs = (pub is None) != (mine is None) or (
+        pub is not None and mine is not None and abs(float(mine) - pub) > 0.005 * pub)
+    if differs:
+        p["published"] = {"flag": flag, "constant": pub, "uncertainty": unc, "mismatch": True}
+
+
 def _payload_task(job: tuple) -> tuple:
     """One (day, method) in a worker process: calibrate, write the JSON, report.
 
@@ -164,6 +209,7 @@ def _payload_task(job: tuple) -> tuple:
         p = (payload["days"].get(ds) or {}).get(method)
         if p is None or p.get("kind") == "error":
             return ds, method, False, (p or {}).get("message", "no diagnostic")
+        _attach_published(p, key, ds, method)
         Path(ddir, f"{ds}_{method}.json").write_text(json.dumps(p, separators=(",", ":")),
                                                      encoding="utf-8")
         return ds, method, True, p.get("kind", "")
@@ -745,6 +791,11 @@ def main() -> None:
         os.environ["ALC_CAMS_DIR"] = args.cams
     os.environ["ALC_FULLCAL_DIR"] = str(args.work.resolve())
     os.environ["PLOTS"] = "1"
+    # Each night is recomputed into the work dir, but SCREENED with the operational classification
+    # curtains (run_network_calibration.CLS_ROOT) and CHECKED against its published row
+    # (_attach_published) -- the panel must show the same verdict the C_L series plots.
+    os.environ.setdefault("ALC_CLASSIFICATION_DIR", str(Path(args.cal_dir).resolve()))
+    os.environ["ALC_PANEL_REFERENCE_DIR"] = str(Path(args.cal_dir).resolve())
     args.work.mkdir(parents=True, exist_ok=True)
     args.out.mkdir(parents=True, exist_ok=True)
 

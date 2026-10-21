@@ -112,6 +112,12 @@ except json.JSONDecodeError:
 L1_ROOT = Path(os.environ.get("ALC_L1_ROOT", "D:/E-PROFILE_L1_2026"))
 CENSUS = Path(os.environ.get("ALC_CENSUS", str(REPO / "validation" / "scope_l1_2026_census.json")))
 OUT = Path(os.environ.get("ALC_FULLCAL_DIR", "C:/DATA/Projects/202606_E-PROFILE_calibration/fullcal_l1_2026"))
+# Where the Rayleigh classification screen READS the night's target-classification curtains. Default:
+# OUT, where the daily run writes them. The dashboard's panel builder recomputes nights into a private
+# work dir, so it points this at the OPERATIONAL tree: without it the panel calibrated the night
+# WITHOUT the screen and could contradict the published series (Payerne 2026-09-07: series C_L
+# 1.02e12 with the screen, panel flag -2 without it).
+CLS_ROOT = Path(os.environ.get("ALC_CLASSIFICATION_DIR") or OUT)
 CAMS = Path(os.environ.get("ALC_CAMS_DIR", "D:/CAMS"))
 # OmB CAMS resolution: the primary monthly archive (0.4 deg, ALC_CAMS_DIR) with a per-month fallback
 # to a coarser 1 deg archive (ALC_CAMS_DIR_FALLBACK) for months the 0.4 deg download has not covered.
@@ -348,7 +354,7 @@ def _do_rayleigh(s, start, end, shared=None, screen=False):
             cls = None
             if screen:
                 cls = read_classification_curtain(
-                    classification_files_for_night(OUT, key, s["wmo"], ds))
+                    classification_files_for_night(CLS_ROOT, key, s["wmo"], ds))
             r = calibrate_rayleigh(
                 ds, info, o, preloaded_data=(idd.native if idd is not None else None),
                 classification=cls)
