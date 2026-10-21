@@ -1166,7 +1166,7 @@ def calibrate_rayleigh(
             cl=cl_median, u_ensemble=uncertainty, rcs_mean=rcs_mean, range_alc=data.range_alc,
             mol_props=mol_props, fit_result=fit_result, sigma_signal=sigma_signal,
             options=options, info=info, date_str=date_str, sigma_native=sigma_native,
-            hours=np.asarray(data.hours_since_start)[keep_idx])
+            hours=np.asarray(data.hours_since_start)[keep_idx], signal_stack=signal_stack)
         if fit_inputs_out is not None:
             fit_inputs_out["uncertainty_budget"] = budget
 

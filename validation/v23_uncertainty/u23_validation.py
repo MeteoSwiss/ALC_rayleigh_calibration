@@ -57,8 +57,12 @@ EPOCH = datetime(1970, 1, 1)
 SUCCESS = (1.0, 0.5)
 
 # Recording configuration: wider than the shipped defaults so the choices can be tuned offline.
+# The last three keys pin the budget as first delivered (per-gate noise, climatology at the window
+# centre AGL, no saturation): the independent review (2026-10) changed those defaults, and every
+# recorded sub-window noise of this validation and of the review was computed this way.
 RECORD_PARAMS = dict(extend_below_m=1500.0, min_altitude_m=1000.0, extend_above_m=1e9,
-                     snr_min=1.0, max_rel_uncertainty=1e9)
+                     snr_min=1.0, max_rel_uncertainty=1e9, noise_estimator="per_gate",
+                     molecular_height_reference="agl", vertical_cap_rel=None)
 
 # Units. CHM15k (30): the 20 q16a units (Schiphol A-D, Budapest A/B, Magurele A/B twins,
 # Lindenberg, Granada, Evora, Potenza, Sofia, Aosta, Hohenpeissenberg, Palaiseau, Kleine Scheidegg,

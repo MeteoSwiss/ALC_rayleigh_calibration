@@ -32,17 +32,26 @@ ensemble median) and adds four terms in quadrature to the ensemble term:
   gradient g = d ln C_L / dz; the term is ``|g| x window_displacement_m``, i.e. how much the
   constant changes if the window moves by a representative inter-night displacement (1 km). The
   residual scatter of the sub-window constants about that line that the noise does not explain (a
-  layer, a kink) is added in quadrature.
+  layer, a kink) is added in quadrature. The term then saturates at ``vertical_cap_rel`` (15 %,
+  1 sigma): the independent review (2026-10) found the observed error of the steepest nights 2.3 x
+  below |g| x D -- the window search keeps the cleanest part of the column.
 * ``sigma_molecular`` -- US-1976 vs the real atmosphere. Default: a climatology of the CAMS-vs-
-  US-1976 ln-bias fitted on 22 618 CHM15k nights of 127 units (report 19, q15d), as a function of
-  latitude, day of year, window height and station altitude, plus its synoptic residual.
-  With ``molecular_source = "cams"`` the reference is already CAMS and only a floor remains.
+  US-1976 ln-bias fitted on 22 618 CHM15k nights of 127 units at 37-55 N (report 19, q15d), as a
+  function of latitude, day of year, window height ABOVE SEA LEVEL (the fit's convention) and
+  station altitude, plus its synoptic residual. With ``molecular_source = "cams"`` the reference is
+  already CAMS and only a floor remains.
 * ``sigma_aerosol`` -- a fixed allowance for a vertically uniform aerosol in the window, which no
   single-profile test can see (2 % at 1064 nm, report 19 / q15d; scaled as (lambda/1064)^3).
-* ``sigma_noise`` -- the photon noise of the night-mean signal in the window, from the measured
-  per-gate noise profile of eprof_v2.2 (temporal first differences on the native profiles),
-  corrected for its time-binning error (``time_binning_factor``) and referred to the expected
-  molecular signal.
+* ``sigma_noise`` -- the photon noise of the night-mean constant in the window. Default
+  (``noise_estimator = "window_mean"``): the noise of the per-profile window mean of signal/p_mol,
+  measured by first differences on the binned profile stack (window_mean_noise_rel), which keeps the
+  noise common to the gates of a profile. Pre-review ("per_gate"): the per-gate noise of eprof_v2.2
+  (temporal first differences on the native profiles), corrected for its time-binning error
+  (``time_binning_factor``) and combined as independent gates -- 1.6 x too small on the CHM15k and
+  ~4 x on the CL61 against split-night constants.
+
+The pre-review v2.3 behaviour is reproduced by ``uncertainty_params = {"noise_estimator":
+"per_gate", "molecular_height_reference": "agl", "vertical_cap_rel": None}``.
 
 The QC gate ``u > C`` (flag -6, practically never fires) is replaced in v2.3 mode by a RELATIVE
 limit ``u / C > max_rel_uncertainty`` (2-sigma, default from the validation, see doc/v2.3).
@@ -55,6 +64,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import warnings
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Callable, Optional
@@ -68,7 +78,10 @@ UNCERTAINTY_MODELS = ("ensemble", "v2.3")
 
 # Tunables of the v2.3 budget; overridable key-by-key through options.uncertainty_params.
 # The values are the ones validated in doc/v2.3/uncertainty.md (30 CHM15k, 3 CL61, 3 Mini-MPL units,
-# 2025-01..2026-07; time-series and same-night twin pulls).
+# 2025-01..2026-07; time-series and same-night twin pulls), as revised by the independent review
+# (2026-10; 37 fresh units, section 8): noise_estimator, molecular_height_reference, vertical_cap_rel.
+# The pre-review budget: {"noise_estimator": "per_gate", "molecular_height_reference": "agl",
+# "vertical_cap_rel": None}.
 DEFAULT_PARAMS = dict(
     # --- vertical consistency -------------------------------------------------------------
     subwindow_m=500.0,             # width of one sub-window (contiguous, aligned on the window bottom)
@@ -87,6 +100,13 @@ DEFAULT_PARAMS = dict(
     noise_floor_rel=0.01,          # 1-sigma floor added to every sub-window's noise (weights)
     window_displacement_m=1000.0,  # representative inter-night window displacement D (1 sigma)
     include_residual=True,         # add the noise-unexplained scatter about the line
+    # Saturation of the vertical term (1 sigma, relative): s -> s / sqrt(1 + (s / cap)^2); None = off
+    # (pre-review). The window search keeps the cleanest part of the column, so the window constant's
+    # error does not grow without bound with the gradient measured ACROSS the probed range: the
+    # steepest decile scattered 2.3 x less than |g| x D on the time-series truth (an upper bound).
+    # 0.15 was chosen on the 36 design units and validated on 37 fresh units (top-decile pull 0.46 ->
+    # 1.02, decile spread -64 %; review 2026-10, doc/v2.3/uncertainty.md section 8).
+    vertical_cap_rel=0.15,
     # --- molecular model ----------------------------------------------------------------------
     molecular="climatology",       # "climatology" | "none"
     molecular_floor_rel=0.005,     # CAMS T/p error floor when molecular_source == "cams"
@@ -95,14 +115,24 @@ DEFAULT_PARAMS = dict(
     # q15d (CAMS in-window aerosol, scaled by its observed transfer to C_L: 2.2 % night-to-night),
     # scaled to other wavelengths as (lambda / 1064 nm)^3 (beta_mol ~ lambda^-4, beta_aer ~ lambda^-1).
     aerosol_floor_rel=0.02,
+    # Height of the window centre the climatology is evaluated at: "asl" is the convention the
+    # coefficients were fitted with (validation/v23_uncertainty/u23r_molclim.py reproduces them);
+    # "agl" is the pre-review behaviour (kept to reproduce it).
+    molecular_height_reference="asl",
     # --- photon noise ---------------------------------------------------------------------------
     noise_time_aggregation_penalty=1.0,   # extra factor on the propagated noise (1 = white noise)
+    # "per_gate": per-gate noise (sigma_signal / sqrt(k)) combined as independent gates (pre-review;
+    # 1.6 x too small on the CHM15k, 3.4 x on the CL61 against split-night constants);
+    # "window_mean": the noise of the per-profile window mean measured on the binned stack
+    # (window_mean_noise_rel), which keeps range-correlated noise; per-gate where not measurable.
+    noise_estimator="window_mean",
     # --- QC -----------------------------------------------------------------------------------
     # Flag -6 when u / C_L (2 sigma) exceeds this. 0.6 = a 1-sigma uncertainty of 30 %, ~4 x the
     # median night (7.7 %): beyond it kalman_best_estimate stops down-weighting (its weight ratio is
-    # clipped to x4 in sigma), so such nights are rejected instead of being kept at a capped weight.
-    # On the validation set it rejects 7.7 % of the nights (Payerne 20 %), 3.4 x more often off by
-    # more than 25 % than the kept ones (doc/v2.3/uncertainty.md section 3.7).
+    # clipped to x4 in sigma). With the pre-review budget it rejected 7.7 % of the nights, 3.4 x
+    # enriched in nights off by > 25 %, but 40-50 % of them good nights, and with the Kalman weighting
+    # on the rejection made co-located best estimates LESS consistent (review 2026-10). With the
+    # saturated vertical term it fires on < 0.5 % of the nights (extreme noise / ensemble spread).
     max_rel_uncertainty=0.6,
 )
 
@@ -282,6 +312,44 @@ def window_noise_rel(e: Optional[NDArray[np.float64]], mask: NDArray[np.bool_]) 
     return float(np.sqrt(np.sum(ee ** 2)) / ee.size)
 
 
+def window_mean_noise_rel(signal_stack: Optional[NDArray[np.float64]],
+                          p_mol: NDArray[np.float64], mask: NDArray[np.bool_],
+                          median_aggregation: bool = False, min_rows: int = 8) -> float:
+    """Relative 1-sigma noise of the constant of one (sub-)window, measured on the binned stack.
+
+    C_L is, to first order, the window mean of rcs / beta_mol of the night-mean profile, i.e. the
+    time mean of the per-profile window means of signal / p_mol. Forming that window mean FIRST keeps
+    every noise component that is common to the gates of a profile (a per-profile background
+    subtraction error, range-correlated detector noise, fast atmospheric fluctuation), which the
+    per-gate estimate (window_noise_rel: independent gates, sqrt(N) reduction) averages away. The
+    robust first difference of consecutive profiles / sqrt(2) is the noise of one binned profile,
+    / sqrt(n) that of the night mean (x 1.2533 for a median aggregation). Consecutive differences
+    also carry the atmospheric change over one bin (5 min): an upper bound, as for
+    molecular_methods._binned_mean_noise. NaN when fewer than ``min_rows`` profiles are usable.
+    (Review 2026-10, doc/v2.3/uncertainty.md section 8: the per-gate estimate is 1.6 x too small on
+    the CHM15k and 2-6 x on the CL61 against split-night constants.)
+    """
+    if signal_stack is None:
+        return np.nan
+    st = np.asarray(signal_stack, float)
+    pm = np.asarray(p_mol, float)
+    m = np.asarray(mask, bool) & np.isfinite(pm) & (pm > 0)
+    if st.ndim != 2 or st.shape[1] != pm.size or st.shape[0] < min_rows or m.sum() < 3:
+        return np.nan
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = np.nanmean(st[:, m] / pm[m][None, :], axis=1)
+    r = r[np.isfinite(r)]
+    if r.size < min_rows:
+        return np.nan
+    d = np.diff(r)
+    s1 = 1.4826 * float(np.median(np.abs(d - np.median(d)))) / np.sqrt(2.0)
+    level = float(np.mean(r))
+    if not np.isfinite(level) or level <= 0:
+        return np.nan
+    return s1 / np.sqrt(r.size) * (1.2533 if median_aggregation else 1.0) / level
+
+
 def _fallback_gate_noise(signal, p_mol, range_alc, start_m, end_m):
     """Gate noise when no measured noise profile exists (e.g. too few profiles): a constant
     ABSOLUTE noise (background-limited lidar) estimated from the robust in-window scatter of the
@@ -310,12 +378,15 @@ def subwindow_constants(cl_in_window: Callable[[float, float], Optional[float]],
                         gate_noise: Optional[NDArray[np.float64]],
                         valid: NDArray[np.bool_],
                         window_start_m: float, window_end_m: float,
-                        params: dict):
+                        params: dict,
+                        sub_noise: Optional[Callable[[NDArray[np.bool_]], float]] = None):
     """C_L in contiguous sub-windows tiling the usable molecular range.
 
     The sub-windows are aligned on the operational window bottom (so they tile the window itself)
     and extend ``extend_below_m`` under it (not below ``min_altitude_m``) and above the window top
-    while the mean per-gate SNR of the sub-window stays >= ``snr_min``.
+    while the mean per-gate SNR of the sub-window stays >= ``snr_min``. ``sub_noise(mask)``, when
+    given, returns the relative noise of a sub-window's constant (the per-gate estimate is used where
+    it returns NaN); the SNR stop always uses the per-gate noise.
 
     Returns (centres_m, cl, sigma_rel, z_lo, z_hi) as numpy arrays / floats.
     """
@@ -352,7 +423,10 @@ def subwindow_constants(cl_in_window: Callable[[float, float], Optional[float]],
             if c is not None and np.isfinite(c) and c > 0:
                 centres.append(0.5 * (a + b))
                 cls.append(float(c))
-                sig.append(window_noise_rel(gate_noise, m) if gate_noise is not None else np.nan)
+                s_k = sub_noise(m) if sub_noise is not None else np.nan
+                if not np.isfinite(s_k):
+                    s_k = window_noise_rel(gate_noise, m) if gate_noise is not None else np.nan
+                sig.append(s_k)
         elif above_top:
             break                                       # ran out of data above the window
         if above_top and gate_noise is None and b >= zt + width - 1e-6:
@@ -408,11 +482,15 @@ def uncertainty_budget(*, cl: float, u_ensemble: float, rcs_mean: NDArray[np.flo
                        fit_result, sigma_signal: Optional[NDArray[np.float64]],
                        cl_in_window: Callable[[float, float], Optional[float]],
                        options, latitude: float, station_altitude: float,
-                       date_str: str, wavelength_nm: float = 1064.0) -> UncertaintyBudget:
+                       date_str: str, wavelength_nm: float = 1064.0,
+                       signal_stack: Optional[NDArray[np.float64]] = None,
+                       median_aggregation: bool = False) -> UncertaintyBudget:
     """Compute the v2.3 uncertainty budget for one calibrated night (see module docstring).
 
     ``cl_in_window(start_m, end_m)`` must return the lidar constant the OPERATIONAL machinery gives
     when the molecular window is [start_m, end_m] (nominal lidar ratio, all profiles), or None.
+    ``signal_stack`` (binned, screened profiles / r^2, the stack rcs_mean is the time mean of) is
+    read only with ``noise_estimator = "window_mean"``.
     Never raises: a failing component degrades to a conservative fallback and is logged.
     """
     p = resolve_params(options)
@@ -435,6 +513,17 @@ def uncertainty_budget(*, cl: float, u_ensemble: float, rcs_mean: NDArray[np.flo
     if gate_noise is not None:
         gate_noise = gate_noise * float(p["noise_time_aggregation_penalty"])
     sig_noise = window_noise_rel(gate_noise, in_window)
+    sub_noise = None
+    if str(p.get("noise_estimator", "per_gate")).lower() == "window_mean" and signal_stack is not None:
+        # The noise of the per-profile WINDOW MEAN, measured on the stack: keeps the noise common to
+        # the gates of a profile that the independent-gate sum averages away (review 2026-10).
+        penalty = float(p["noise_time_aggregation_penalty"])
+
+        def sub_noise(mask):
+            return window_mean_noise_rel(signal_stack, pm, mask, median_aggregation) * penalty
+        s_wm = sub_noise(in_window)
+        if np.isfinite(s_wm):
+            sig_noise = s_wm
     if not np.isfinite(sig_noise):
         sig_noise = 0.0
 
@@ -446,7 +535,8 @@ def uncertainty_budget(*, cl: float, u_ensemble: float, rcs_mean: NDArray[np.flo
     for width in (float(p["subwindow_m"]), 0.5 * float(p["subwindow_m"])):
         try:
             centres, sub_cl, sub_sig, z_lo, z_hi = subwindow_constants(
-                cl_in_window, rng, gate_noise, valid, zb, zt, dict(p, subwindow_m=width))
+                cl_in_window, rng, gate_noise, valid, zb, zt, dict(p, subwindow_m=width),
+                sub_noise=sub_noise)
         except Exception:                   # noqa: BLE001 - a diagnostic must never lose a night
             logger.debug("sub-window constants failed", exc_info=True)
             centres, sub_cl, sub_sig, z_lo, z_hi = (np.array([]),) * 3 + (np.nan, np.nan)
@@ -468,6 +558,9 @@ def uncertainty_budget(*, cl: float, u_ensemble: float, rcs_mean: NDArray[np.flo
         # +-200 m window shifts (robust sigma ~0.3 x g for a gradient g, see the module docstring),
         # i.e. g ~ 2 sigma_ens / 0.3 per km, and scale it to the displacement D.
         sig_vert = 2.0 * sig_ens / 0.3 * D_km if np.isfinite(sig_ens) else 0.0
+    cap = p.get("vertical_cap_rel")
+    if cap is not None and np.isfinite(float(cap)) and float(cap) > 0:
+        sig_vert = float(sig_vert / np.sqrt(1.0 + (sig_vert / float(cap)) ** 2))
 
     # (c) molecular model -------------------------------------------------------------------------
     mol_bias = np.nan
@@ -481,7 +574,12 @@ def uncertainty_budget(*, cl: float, u_ensemble: float, rcs_mean: NDArray[np.flo
             doy = datetime.strptime(str(date_str)[:8], "%Y%m%d").timetuple().tm_yday
         except ValueError:
             doy = 182
-        mol_bias = molecular_bias_climatology(latitude, doy, zc / 1000.0,
+        # The coefficients were fitted with the window centre ABOVE SEA LEVEL (q15d windows, m ASL);
+        # "agl" reproduces the pre-review evaluation (window centre above ground).
+        zc_km = zc / 1000.0
+        if str(p.get("molecular_height_reference", "agl")).lower() == "asl":
+            zc_km += float(station_altitude) / 1000.0
+        mol_bias = molecular_bias_climatology(latitude, doy, zc_km,
                                               float(station_altitude) / 1000.0)
         sig_mol = float(np.hypot(mol_bias, _MOL_RESID_PCT / 100.0))
 
@@ -543,11 +641,12 @@ def operational_cl_in_window(rcs_mean, range_alc, beta_mol, fit_result, options)
 
 def budget_for_night(*, cl, u_ensemble, rcs_mean, range_alc, mol_props, fit_result,
                      sigma_signal, options, info, date_str, sigma_native=None,
-                     hours=None) -> UncertaintyBudget:
+                     hours=None, signal_stack=None) -> UncertaintyBudget:
     """Entry point used by calibrate_rayleigh (the whole v2.3 hook is this one call).
 
     ``sigma_native`` / ``hours`` (native noise dict, fit-grid profile times in hours) correct the
-    time-binning error of ``sigma_signal`` (see time_binning_factor)."""
+    time-binning error of ``sigma_signal`` (see time_binning_factor). ``signal_stack`` is the
+    binned, screened profile stack rcs_mean averages (for noise_estimator = "window_mean")."""
     try:
         if sigma_signal is not None:
             sigma_signal = np.asarray(sigma_signal, float) / np.sqrt(
@@ -558,7 +657,9 @@ def budget_for_night(*, cl, u_ensemble, rcs_mean, range_alc, mol_props, fit_resu
             cl_in_window=operational_cl_in_window(rcs_mean, range_alc, mol_props.beta_mol,
                                                   fit_result, options),
             options=options, latitude=info.latitude, station_altitude=info.altitude,
-            date_str=date_str, wavelength_nm=float(info.instrument_type.wavelength_nm))
+            date_str=date_str, wavelength_nm=float(info.instrument_type.wavelength_nm),
+            signal_stack=signal_stack,
+            median_aggregation=getattr(options, "time_aggregation", "mean") == "median")
     except Exception:                       # noqa: BLE001 - never lose a calibrated night
         logger.warning("v2.3 uncertainty budget failed; reporting the ensemble term only",
                        exc_info=True)
