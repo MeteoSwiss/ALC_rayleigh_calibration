@@ -634,7 +634,7 @@ def METHODS(d, st, rep, ct, cmp, br):
       "Cloudnet-classification screen, which this harness — like the q16a/u23 harnesses — does not. "
       "On the identical nights the published uncertainty equals the rerun's ensemble term.\n")
     w("### 2.3 Cloud references — what the published cloud uncertainty is\n")
-    w("The liquid-cloud (O'Connor) calibration was rerun for every UTC day with the operational code "
+    w("The liquid-cloud calibration was rerun for every UTC day with the operational code "
       "path (`scripts/run_network_calibration._do_cloud`: the shared read sliced to day D, WV "
       "correction with the unit's line, PVC η tables, aerosol transmission correction). It "
       "reproduces the published cloud constants (`calibration_version` 1000) on every common day:\n")
@@ -646,7 +646,7 @@ def METHODS(d, st, rep, ct, cmp, br):
                      f"{f1(r.within_1e6, nd=1)} % | {f1(r.u_pub_vs_rerun, nd=3)} |")
     w("\n".join(lines) + "\n")
     w("**What the published cloud uncertainty is.** `lidar_constant_uncertainty` of a cloud day = "
-      "C_L × std(C_i)/median(C_i), the C_i being the per-profile O'Connor coefficients of the "
+      "C_L × std(C_i)/median(C_i), the C_i being the per-profile liquid-cloud coefficients of the "
       "day's accepted liquid-cloud profiles (`calibration/cloud/calibration.py`: `cal_std = "
       "np.std(valid_C, ddof=1)`; `run_network_calibration._do_cloud`: `cl_unc = cl × std/coef`). "
       "It is therefore (i) a **1-σ** number, whereas the Rayleigh product is 2 σ; (ii) the "
