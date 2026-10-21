@@ -94,3 +94,19 @@ tests/sample_plots/
 # OS
 .DS_Store
 Thumbs.db
+
+# Dashboard / daily-panel builder work trees (per-worker recalibration outputs, regenerable; GBs)
+_daily_panel_work/
+_dashboard_work/
+_station_page_work/
+
+# Raw numpy dumps and crash dumps are never source
+*.npy
+*.stackdump
+
+# Deck QA renders and generated deck figures (rebuilt by the make_*.py scripts)
+presentation/**/*_render/
+presentation/chm15k_temperature/fig/
+
+# Ad-hoc single-site inter-comparison page (39 MB, not produced by build_v3.py)
+inter-comparison_dashboard/index_payerne.html

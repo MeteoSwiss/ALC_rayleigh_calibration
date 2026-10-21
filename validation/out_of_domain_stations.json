@@ -1,0 +1,45 @@
+{
+  "comment": "E-PROFILE 910 nm stations OUTSIDE the regional CAMS download domain (Europe/N-Atlantic, lat 27-74 lon -27-45). Each gets a small per-station CAMS box with the LEAN variable set (t/q/z/lnsp only, no aerosol backscatter): enough for the water-vapor correction + molecular profile, but NOT OmB. scripts/download_cams_oob.py reads this file and writes <cams_dir>/<wmo>/CAMS_Beta_YYYYMM.nc; the calibration routes a station to that folder via station_id (calibration/io/cams.py). 1064 nm (CHM15k) and 532 nm (Mini-MPL) instruments need no CAMS (US Std 1976 molecular profile, no WV) and are not listed here. box = ADS area [North, West, South, East].",
+  "stations": [
+    {
+      "wmo": "0-20008-0-EDT",
+      "site": "EDMONTON",
+      "country": "Canada",
+      "lat": 53.55,
+      "lon": -114.10,
+      "box": [55.6, -116.1, 51.5, -112.1],
+      "start": "202503",
+      "end": "202605",
+      "instruments": [
+        {"ident": "A", "type": "CL51"},
+        {"ident": "B", "type": "CL61"}
+      ]
+    },
+    {
+      "wmo": "0-20008-0-LAU",
+      "site": "LAUDER",
+      "country": "New Zealand",
+      "lat": -45.04,
+      "lon": 169.68,
+      "box": [-43.0, 167.6, -47.1, 171.7],
+      "start": "202509",
+      "end": "202605",
+      "instruments": [
+        {"ident": "A", "type": "CL61"}
+      ]
+    },
+    {
+      "wmo": "0-554-10-UAAONIWACL31",
+      "site": "AUCKLAND",
+      "country": "New Zealand",
+      "lat": -36.85,
+      "lon": 174.77,
+      "box": [-34.9, 172.8, -38.9, 176.8],
+      "start": "202501",
+      "end": "202605",
+      "instruments": [
+        {"ident": "A", "type": "CL31"}
+      ]
+    }
+  ]
+}
