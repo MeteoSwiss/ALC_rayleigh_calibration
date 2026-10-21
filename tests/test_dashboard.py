@@ -174,7 +174,7 @@ def test_station_page_has_download_and_ceda_links(dash):
     key = f"{_STATIONS[0]['wmo']}_{_STATIONS[0]['ident']}"
     page = (dash["out"] / "stations" / f"{key}.html").read_text(encoding="utf-8")
     assert "Calibration NetCDF" in page
-    assert "data.ceda.ac.uk" in page and "CEDA L2 data" in page
+    assert "data.ceda.ac.uk" in page and "CEDA L2 daily files" in page
     assert (dash["out"] / "nc" / key / f"ALC_calibration_{_STATIONS[0]['wmo']}_{_STATIONS[0]['ident']}2026.nc").exists()
 
 
