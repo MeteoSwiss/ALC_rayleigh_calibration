@@ -153,6 +153,13 @@ second-order. This matches the literature exactly (Le et al. 2026; Hopkin et al.
 
 ### 2.3 The decisive evidence — CHM15k (1064 nm) is unstable *without* any water vapour
 
+> **Update 2026-10-20 — see [report 19](19_chm15k_calibration_stability.md).** The correlations below are
+> raw: `analyze_chm15k_stability.m` does not remove the season, and `temp_int` is ~70 % annual cycle.
+> With the season removed (31-day anomalies, 11-year archive and network 2025–26) the dependence remains:
+> +1.4 / +2.1 %/K, i.e. ~⅓ smaller than the raw slope. It is confirmed within single nights and by
+> co-located same-wavelength pairs. It also produces a daytime excess of the effective constant that the
+> night-only calibration cannot see.
+
 The CHM15k operates at **1064 nm, outside the water-vapour absorption band** — so any instability in
 its calibration **cannot** be water vapour. Using the 11-year daily archive (13 stations, 2013–2024;
 `A:\CHM15k\…`, the dataset behind `estimate_calib_from_housekeeping`):

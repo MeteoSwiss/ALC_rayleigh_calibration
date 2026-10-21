@@ -62,3 +62,30 @@ embedded inline in each report. `figs_extracted/` holds PNGs that were previousl
 in the source notes. A small number of figures produced on the R&D branch (`figs_paper_validation/`)
 and MATLAB-side (`figs_ceilo_ambient/`) were never committed to this repo; where a report needed one,
 its caption is retained with a note and a pointer to the script that regenerates it.
+
+## CHM15k calibration stability (2026-10)
+
+[19 — CHM15k calibration stability: temperature dependence and diurnal behaviour](19_chm15k_calibration_stability.md)
+(plan: [19_…_plan](19_chm15k_calibration_stability_plan.md)). The CHM15k Rayleigh constant rises with the
+internal temperature by +1.3…+2.1 %/K. Four estimators agree: synoptic anomalies on 158 unit-eras,
+intra-night with elapsed time held fixed on 150 units, the 11-year archive, and same-wavelength pairs.
+The effect is unit-specific (0…+3.5 %/K) and grows with optical-module generation (TUB≤15 ≈ +1, TUB20–24
+≈ +2.5 %/K). The night-only calibration therefore misses a daytime excess of +4.8 % (median; +7.5 % in
+summer, >10 % for a third of units), predicted by the night-time coefficient (pairs r = 0.98). The
+mechanism is a multiplicative gain outside the regulated optical module: laser energy or the laser-line
+vs filter match. Detector, internal reference, additive baseline and overlap are excluded. The daytime
+p_cal drop (−15 %) is real and compensated by the firmware. Recommendation: a per-unit
+C_L(t) = C_ref·exp(κ(T_int − T_ref)). Follow-up §7:
+* Payerne explained (noisy receiver plus opposite-sign LOM regulation loss);
+* the laser-line vs filter mismatch is favoured (curvature; PRF flat);
+* aerosol ruled out with AERONET (27 units);
+* the exp model beats the v4 housekeeping ML (13.0 vs 14.2 %);
+* the T-correction removes the day−night bias vs CL61/EARLINET at 6 of 7 comparisons.
+
+## Paper review (2026-10)
+
+`paper_v08_review/` — adversarial review of the manuscript "E-PROFILE ALC Paper_v0.8.docx" against the code,
+the saved validation outputs and the literature (2026-10-10): [README](paper_v08_review/README.md) gives the
+verdict and the ranked must-fix / should-fix lists; the numbered files hold the statement-by-statement tables
+(manuscript, Rayleigh code vs 5.1.1, cloud code vs 5.1.2, validation scripts vs Section 6, Kalman / overlap /
+dark / availability appendices, literature).

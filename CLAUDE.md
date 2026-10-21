@@ -187,6 +187,54 @@ never calibrated WV-free.
   the paired window — the transition is visible in the L2 row tooltip); CL31 = UNCALIBRATED
   (flat default 1e8 — the gap the cloud calibration fills).
 
+## CHM15k temperature coefficient & diurnal bias (2026-10-20, report 19)
+
+- Notation: **κ** = temperature coefficient d ln C_L/dT_int (%/K). Never call it β (β = backscatter).
+- The CHM15k Rayleigh constant rises with **`temp_int`** by **+1.3…+2.1 %/K**. Estimators: synoptic
+  anomalies (season removed), intra-night with elapsed time held fixed, the 11-yr archive, and
+  same-wavelength pairs. It is unit-specific (0…+3.5) and grows with module generation (TUB≤15 ≈ +1,
+  TUB20–24 ≈ +2.5 %/K). Never regress C on raw `temp_int`: it is ~70 % season. Use anomalies.
+- Calibration is night-only, so **daytime L2 is biased high** by κ×(noon T_int rise): median +4.8 %,
+  +7.5 % in summer, >10 % for ⅓ of units. The night κ predicts the day (Schiphol/Budapest/Măgurele pairs
+  r = 0.98).
+- **Mechanism** = multiplicative optical-throughput change tied to the HOUSING temperature (no lag, τ ≈ 0).
+  Leading hypothesis: laser line vs the **1 nm** receiver filter (Lufft datasheet; the 0.1 nm on the Köln wiki is
+  unsupported). Co-equal rival: far-field alignment drift (FOV 0.45 mrad ≈ divergence). The manual puts the filter
+  INSIDE the heater-only laser-optical module (LOM = transmit+receive unit), so the filter theory needs a heat
+  leak; only Lufft can decide (11 questions, report 19 §7.8). Working assumption (operator, 2026-10-20):
+  **W = 1 nm** → the fit needs a filter drift **α ≈ 20 pm/K** (IQR 15–24) = exactly Jenoptik's published
+  JENOFILT coefficient (ΔCWL = (T−22)×0.02 nm; Jenoptik built the CHM15k before Lufft) → a conventional
+  (cemented/evaporated) filter; hard-coated ones (2–5 pm/K) would give only 0.2–0.5 %/K. Laser energy unlikely (PRF −0.06 %/K). Excluded:
+  detector (Peltier), `p_calc` reference, additive dark, overlap, aerosol (AERONET: slope +2.36 → +2.01).
+  `status_laser` is stuck at 100 %. `temp_lom` matters only when the heater-only LOM overheats on hot
+  afternoons (unit-specific sign).
+- κ normalisation before the Kalman shrinks the seasonal amplitude: network median ±16 → ±10 %, 35 % removed
+  (Budapest B ±20 → ±7 %; Kleine Scheidegg weak, ±18 → ±14 %: old module, small swing). κ by module generation:
+  ≤2015 +0.95, 2016–19 +1.65, ≥2020 +2.0 %/K. Breaks: 2015 (dark background ÷4), ~2020 (detector set-point
+  24.85 → 29.85 °C, LOM 33.85 → 34.35–34.85 °C). Pulse count cannot proxy pulse energy (±0.5 %, −0.07 %/K).
+- **Annual cycle attribution (q15, §7.13):** κ×T_int explains only 25–45 % of the ±16 % annual cycle. The rest
+  (~±9 %) is a height-independent GAIN, common to co-located CHM15k (pairs cancel it), absent in the CL61, peaking
+  near the SOLSTICE (DOY ~150–177, vs T_int peak ~206). q16 (§7.14): it is a REAL CHM15k-specific gain (±17 %),
+  every year since 2014 in the independent MATLAB/NCEP archive, same in every fixed window 3–8 km, not twilight,
+  not insolation/humidity/LR/noise/code/raw2l1 (bit-identical beta_raw)/firmware; absent in the CL61. Apply κ only to
+  SUB-DAILY T deviations; keep an annual term. Candidates: sun on the biaxial head (alignment) or firmware → Lufft Q12.
+  Code bug: v2.2 fallback tier nights +9 % (33 % of June nights).
+  Excluded (each ≤ ~1.5 %): aerosol in/below window, molecular model (−1.6 %, anti-phase), H2O at 1064 (0.1 %),
+  laser/PRF, p_calc (division works), window transmission, noise/dark/afterpulse/overlap, window selection.
+  `laser_life_time` wraps at 65 536 h (16-bit). Daytime residual solar baseline +6 %-pt at 4 km (L2 aloft only).
+- The simple exp model beats the v4 housekeeping ML (bagged tree): 13.0 vs 14.2 % operationally, 20.2 vs
+  22.3 % HK-only. The T-correction cuts the day−night bias vs CL61/EARLINET from 7–23 to ≤ 4.5 pts at 6 of
+  7 comparisons.
+- **Payerne CHM15k (TUB140016) is an outlier.** Its receiver is noisy (night bg 5–25× the network), so its
+  night κ is unreliable, and its LOM loses regulation on 37 % of daytime hours with sign −2 %/K. Never
+  apply its night κ. Screen archive outliers PER MODULE (serlom), never per station.
+- `calibration_pulse` drops −15 % (−24 % summer) by day with solar background. That is a real detector
+  loss; the firmware divides it out (`beta_raw = ((P/lp)−b)/(cs·o(r)·p_calc)·r²`). Not an artefact.
+- CHM15k L1 carries `optical_module_id` (TUB…) per file: use it to split eras. Schiphol A–D, Budapest A/B
+  and Măgurele A/B share one station position in L1 and L2.
+- Cache: `C:/DATA/Projects/202610_CHM15k_stability/hk/` (10-min HK + binned clear rcs, all 154 CHM15k +
+  4 CL61). Code: `validation/chm15k_stability/`.
+
 ## Working preferences (user hervo63)
 
 - **Ask before relocating/moving data**; when proposing to write somewhere, state *what* / *how much*
