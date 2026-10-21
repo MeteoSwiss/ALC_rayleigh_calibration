@@ -296,6 +296,9 @@ def fig_kalman(plt):
     fig, ax = plt.subplots(1, 2, figsize=(16, 5))
     for j, method in enumerate(("eprof_v2.2", "eprof_v2.3")):
         f = OUT / f"u23r_kalman_qc_orig_{method}.csv"
+        fx = OUT / f"u23r_kalman_qc_origx_{method}.csv"     # twin units with the reviewed budget
+        if fx.exists():
+            f = fx
         if not f.exists():
             continue
         q = pd.read_csv(f)
@@ -307,7 +310,7 @@ def fig_kalman(plt):
         ax[j].set_xticks(x)
         ax[j].set_xticklabels([v.replace(", ", ",\n").replace(" + ", "\n+ ") for v in q.variant], fontsize=7)
         ax[j].set_ylabel("median change vs equal weights, all nights [%] (negative = better)")
-        ax[j].set_title(f"Kalman best estimate, design units, {method}", fontsize=10)
+        ax[j].set_title(f"Kalman best estimate, {'twin units (origx)' if f == fx else 'design units'}, {method}", fontsize=10)
         ax[j].legend(fontsize=7)
         ax[j].grid(alpha=0.3, axis="y")
     fig.tight_layout()
