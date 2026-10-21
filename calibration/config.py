@@ -315,6 +315,21 @@ class CalibrationOptions:
     # method comparison (see atmosphere.klett_inversion / calibrate_rayleigh).
     sign_error_v10: bool = False
 
+    # Uncertainty model of the nightly Rayleigh constant (calibration/rayleigh/uncertainty.py).
+    #   'ensemble' (default) -- v2.2: 2 x robust sigma of the 125-member LR x shift x time ensemble;
+    #                           output bit-identical to v2.2.
+    #   'v2.3'               -- adds, in quadrature, a vertical-consistency term (C_L in sub-windows
+    #                           over the usable molecular range: |d ln C/dz| x a representative window
+    #                           displacement), a molecular-model term (US-1976 vs real T/p) and the
+    #                           photon noise; replaces the 'u > C' QC (-6) by a relative limit and
+    #                           writes the components to the calibration NetCDF. C_L is unchanged.
+    uncertainty_model: str = "ensemble"
+    # Overrides of calibration.rayleigh.uncertainty.DEFAULT_PARAMS (v2.3 model only). Empty = defaults.
+    uncertainty_params: dict = field(default_factory=dict)
+    # Network runner only: weight each night of the Kalman best estimate by its reported relative
+    # uncertainty (monitoring.kalman.kalman_best_estimate(uncertainties=...)). Off = operational.
+    kalman_uncertainty_weighting: bool = False
+
     @classmethod
     def from_json(cls, filepath: Path) -> CalibrationOptions:
         """Load options from a JSON file."""
@@ -376,6 +391,9 @@ class CalibrationOptions:
             abs_cs_lookup_table=Path(data.get("abs_cs_lookup_table", "")),
             auto_download_cams=bool(data.get("auto_download_cams", 0)),
             cams_download_scope=str(data.get("cams_download_scope", "day")),
+            uncertainty_model=str(data.get("uncertainty_model", "ensemble")),
+            uncertainty_params=dict(data.get("uncertainty_params", {}) or {}),
+            kalman_uncertainty_weighting=bool(data.get("kalman_uncertainty_weighting", 0)),
         )
 
 
@@ -390,6 +408,9 @@ class CalibrationResult:
     calibration_bottom_height: Optional[float] = None
     calibration_top_height: Optional[float] = None
     message: str = ""
+    # v2.3 uncertainty budget components (calibration.rayleigh.uncertainty.UncertaintyBudget), only
+    # set when options.uncertainty_model == 'v2.3'. None = v2.2 output (nothing extra is written).
+    uncertainty_components: Optional[dict] = None
 
     @property
     def is_successful(self) -> bool:

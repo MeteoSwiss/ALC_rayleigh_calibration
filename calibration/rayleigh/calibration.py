@@ -1120,6 +1120,22 @@ def calibrate_rayleigh(
         f"2σ_robust={uncertainty:.4e} ({uncertainty/cl_median*100:.1f}%)"
     )
 
+    # v2.3 uncertainty budget (option). The default "ensemble" skips it: v2.2 output bit-identical.
+    budget = None
+    _unc_model = getattr(options, "uncertainty_model", "ensemble")
+    if _unc_model not in ("ensemble", "v2.3"):
+        warnings.warn(f"Unknown uncertainty_model {_unc_model!r}; using 'ensemble' (valid: "
+                      "'ensemble', 'v2.3').", UserWarning)
+    elif _unc_model == "v2.3":
+        from .uncertainty import budget_for_night
+        budget = budget_for_night(
+            cl=cl_median, u_ensemble=uncertainty, rcs_mean=rcs_mean, range_alc=data.range_alc,
+            mol_props=mol_props, fit_result=fit_result, sigma_signal=sigma_signal,
+            options=options, info=info, date_str=date_str, sigma_native=sigma_native,
+            hours=np.asarray(data.hours_since_start)[keep_idx])
+        if fit_inputs_out is not None:
+            fit_inputs_out["uncertainty_budget"] = budget
+
     # Also compute the nominal (LR=LRaer, shift=0) result for validation
     nominal = [
         pr for pr in perturbation_results
@@ -1206,9 +1222,16 @@ def calibrate_rayleigh(
     if error_pct > options.threshold_quality:
         logger.warning(f"Method disagreement: {error_pct:.1f}% > {options.threshold_quality}%")
         qc_flag, qc_message = -3, f"Method disagreement: {error_pct:.1f}%"
-    elif uncertainty > cl_median:
+    elif budget is None and uncertainty > cl_median:
         logger.warning(f"Uncertainty exceeds CL value: {uncertainty:.2e} > {cl_median:.2e}")
         qc_flag, qc_message = -6, f"Uncertainty exceeds value: {uncertainty:.2e} > {cl_median:.2e}"
+    elif budget is not None and budget.exceeds_limit:
+        # v2.3: RELATIVE limit on the full budget instead of the 'u > C' gate above
+        logger.warning(f"Relative uncertainty {100 * budget.rel_total:.0f}% > "
+                       f"{100 * budget.max_rel_uncertainty:.0f}% (2 sigma)")
+        qc_flag, qc_message = -6, (f"Relative uncertainty exceeds limit: "
+                                   f"{100 * budget.rel_total:.0f}% > "
+                                   f"{100 * budget.max_rel_uncertainty:.0f}% (2 sigma)")
     elif getattr(options, "aerosol_qc_enabled", True) and fit_result.search_diagnostics is not None:
         # "Another layer with lower signal" gate. Each candidate window's fit slope is a C_L proxy;
         # in clean air they are nearly equal across the 2-6 km search range (molecular two-way
@@ -1360,6 +1383,11 @@ def calibrate_rayleigh(
         calibration_top_height=fit_result.altitude_end,
         message=f"Successful (method err: {error_pct:.1f}%, sensitivity 2σ: {uncertainty/cl_median*100:.1f}%)",
     )
+    if budget is not None:
+        # v2.3: same constant, full budget as the reported uncertainty, components for the NetCDF
+        result.uncertainty = budget.u_total
+        result.uncertainty_components = budget.components()
+        result.message += f", v2.3 total 2σ: {100 * budget.rel_total:.1f}%"
     if low_sun is not None:               # polar-summer low-sun calibration: own flag + message
         low_sun.mark_result(result)
 
