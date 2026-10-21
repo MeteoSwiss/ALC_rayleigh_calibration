@@ -174,7 +174,7 @@ def _tiles_from(ok_all, label_suffix, ratio, as_of):
         {"label": f"MEDIAN C_L {label_suffix}", "value": f"{med:.4g}",
          "note": f"{len(ok_all)} calibrated nights", "color": TILE_OK},
         {"label": "SPREAD (P10-P90)", "value": "—" if spread is None else f"{spread:.0f}%",
-         "note": f"{p10:.4g} … {p90:.4g}", "color": _grade(spread, 10, 20)},
+         "note": f"{p10:.4g} … {p90:.4g}", "color": _grade(spread, 25, 50)},
         *([{"label": "CLOUD / RAYLEIGH RATIO", "value": f"{ratio:.3g}x",
             "note": ("the two retrievals agree" if abs(ratio - 1) < 0.05 else
                      "a systematic offset likely reflects electronic distortion of the signal, "

@@ -17,6 +17,7 @@
 </head>
 <body>
   <header class="topbar">
+    {% block topbar %}
     <a class="logo" href="{{ base }}index.html" title="EUMETNET E-PROFILE">
       {% if logo %}
         <img src="{{ base }}assets/{{ logo }}" alt="EUMETNET" height="24">
@@ -38,6 +39,7 @@
     <span class="spacer"></span>
     <a class="navlink" href="{{ base }}flags.html">Flag reference</a>
     {% block headerextra %}{% endblock %}
+    {% endblock %}
   </header>
   <main class="container">
     {% block content %}{% endblock %}
@@ -57,6 +59,9 @@
   <script src="{{ base }}assets/stationindex.js?v={{ asset_v }}"></script>
   <script src="{{ base }}assets/search.js?v={{ asset_v }}"></script>
   <script src="{{ base }}assets/stationnav.js?v={{ asset_v }}"></script>
+  <!-- Topbar dropdown panels + period pills: after stationnav (restored scope selects), before
+       rangesync (the pills read the remembered period from sessionStorage themselves). -->
+  <script src="{{ base }}assets/navmenus.js?v={{ asset_v }}"></script>
   <!-- Period selector: loads last so paginate (_repaginate) + diag (calendar hook) are ready. -->
   <script src="{{ base }}assets/rangesync.js?v={{ asset_v }}"></script>
 </body>

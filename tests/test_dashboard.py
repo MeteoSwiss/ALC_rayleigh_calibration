@@ -67,11 +67,15 @@ def dash(tmp_path):
             cl = theo * (0.9 + 0.02 * i)            # near the theoretical value
             cal_rows.append(f"{dt},{method},1,{cl:.6e},{cl*0.05:.3e},60,2000,6000,OK")
         (d / f"{key}_cal.csv").write_text("\n".join(cal_rows) + "\n")
-        # per-night diagnostic PNGs so the station-page calendar (b.diags) renders
-        pdir = d / "plots" / s["wmo"] / "2026"
-        pdir.mkdir(parents=True, exist_ok=True)
+        # per-day classification curtains (nc + sibling png) so the classification card and its
+        # calendar render -- the per-calibration diagnostic-PNG viewer was retired on 2026-08-18
+        # in favour of the interactive daily panel, so classification is the only imaged per-day
+        # gallery left.
+        cdir = d / "classification" / s["wmo"] / "2026"
+        cdir.mkdir(parents=True, exist_ok=True)
         for dt in _DATES:
-            (pdir / f"{dt}_{s['wmo']}_{method}_diag_compact.png").write_bytes(_png_bytes())
+            (cdir / f"{key}_{dt}_classification.nc").write_bytes(b"")
+            (cdir / f"{key}_{dt}_classification.png").write_bytes(_png_bytes())
         # OmB + sensitivity summaries (one row each) + dummy figures
         (d / f"{key}_omb.csv").write_text(
             "date_start,date_end,wavelength,median_bias_ours,median_bias_op,"
@@ -161,8 +165,7 @@ def test_station_page_has_availability_bar_and_status(dash):
     page = (dash["out"] / "stations" / f"{_STATIONS[0]['wmo']}_{_STATIONS[0]['ident']}.html").read_text(encoding="utf-8")
     assert "fig-avail" in page                 # the availability bar figure
     assert "availcard" in page                 # its card (class="card availcard")
-    assert 'id="status-index"' in page         # per-day status lookup for the viewer
-    assert "diag-status" in page               # the reporting-status field under the image
+    assert 'id="status-index"' in page         # per-day status lookup (panel + availability bar)
     assert "'Transmitter failure (A)' 3 h" in page or "Window contamination" in page  # decoded summary
 
 
@@ -469,19 +472,23 @@ def test_success_rate_counts_all_nonsuccess():
 
 
 def test_rayleigh_timeseries_legend_below_and_renamed():
-    """Rayleigh C_L time series: legend below the plot + v1.0/v2.0 line names (regression)."""
+    """Rayleigh C_L time series: legend below the plot; the C_L series is tagged with the algorithm
+    vintage read from the DATA's `version` column (075ef65: the page cannot misreport the release),
+    and an archive without the column gets no version claim at all."""
     dt = pd.to_datetime(["2026-01-01", "2026-01-05", "2026-01-09"])
-    g = pd.DataFrame({"datetime": dt, "success": [1, 1, 1],
+    g = pd.DataFrame({"datetime": dt, "success": [1, 1, 1], "version": [200] * 3,
                       "cal_value": [3e11, 3.1e11, 2.9e11], "uncertainty": [1e10] * 3})
     op = pd.DataFrame({"datetime": dt, "op_coeff": [3e11] * 3})
     ora = pd.DataFrame({"datetime": dt, "value": [2.8e11] * 3})
     fig = charts.series_timeseries(g, pd.DataFrame(), "rayleigh", op_df=op, oldray_df=ora)
     assert fig.layout.legend.y is not None and fig.layout.legend.y < 0, "legend not moved below plot"
     names = [t.name for t in fig.data if t.name]
-    assert {"Applied in L2", "v1.0", "v2.0"} <= set(names), names
-    # cloud must NOT be mislabeled with the rayleigh version tags
-    namesc = [t.name for t in charts.series_timeseries(g, pd.DataFrame(), "cloud", op_df=op).data if t.name]
-    assert "v2.0" not in namesc and "v1.0" not in namesc, namesc
+    assert "Applied in L2" in names and "v1.0" in names, names
+    assert any("v2.0" in n for n in names), f"C_L series lost its data-driven vintage tag: {names}"
+    # no version column -> no version claim (and cloud never carries the rayleigh tags)
+    g_nover = g.drop(columns=["version"])
+    namesc = [t.name for t in charts.series_timeseries(g_nover, pd.DataFrame(), "cloud", op_df=op).data if t.name]
+    assert not any("v2.0" in n or "v1.0" in n for n in namesc), namesc
 
 
 # ----------------------------------------------------------------------------

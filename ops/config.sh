@@ -4,7 +4,7 @@
 
 # --- repo + python environment ------------------------------------------------------------------
 export ALC_REPO="${ALC_REPO:-/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.0_code}"        # this repo's location on the server
-export ALC_VENV="${ALC_VENV:-$ALC_REPO/.venv}"                       # venv with deps (cfgrib, eccodes, plotly, netCDF4, pandas, cdsapi)
+export ALC_VENV="${ALC_VENV:-$ALC_REPO/.venv313}"                       # venv with deps (cfgrib, eccodes, plotly, netCDF4, pandas, cdsapi)
 export PATH="/data/zue/E_PROFILE/ALC/Calibration/tools/bin:$PATH"   # AWS CLI v2 (installed off the slow NFS home) for ops/publish.sh
 
 # --- data inputs --------------------------------------------------------------------------------
@@ -29,10 +29,10 @@ export ALC_FULLCAL_DIR="/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.0
 # Rollback = re-comment these lines (or restore ops/config.sh.pre_v22_<date>), then rebuild the
 # dashboard WITHOUT --changed-only and publish.
 #
-# export ALC_FULLCAL_DIR="/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.2"
-# export ALC_MOLECULAR_METHOD="eprof_v2.2"
-# export ALC_WV_SPECTRUM='{"CL61": [910.55, 0.188]}'
-# export ALC_OPCOEFF_CSV="/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.2/operational_coefficients.csv"
+export ALC_FULLCAL_DIR="/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.2"
+export ALC_MOLECULAR_METHOD="eprof_v2.2"
+export ALC_WV_SPECTRUM='{"CL61": [910.55, 0.188]}'
+export ALC_OPCOEFF_CSV="/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.2/operational_coefficients.csv"
 #
 # Deliberately NOT set: ALC_DARK_PROFILE. The measured hood dark exists only at Payerne, and the
 # operator's decision (2026-08-17) is to keep the network homogeneous; Payerne CHM15k therefore
@@ -42,7 +42,7 @@ export ALC_FULLCAL_DIR="/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.0
 # --- dashboard (static site, served by your web server at a SEPARATE path) ----------------------
 export ALC_DASHBOARD_DIR="/data/zue/E_PROFILE/ALC/Calibration/dashboard"
 export ALC_L2_DIR="/data/zue/E_PROFILE/ALC/L2_FILES"                                                # optional: L2 archive for station name/country (blank = skip)
-export ALC_OPCOEFF_CSV="/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.0/operational_coefficients.csv"                                           # optional: operational-constant CSV for the comparison maps (blank = skip)
+export ALC_OPCOEFF_CSV="${ALC_OPCOEFF_CSV:-/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.0/operational_coefficients.csv}"                       # optional: operational-constant CSV for the comparison maps (blank = skip). Guarded: the v2.2 cutover block above must win.
 export ALC_OLDRAY_DIR="/data/pay/REM/ACQ/E_PROFILE_ALC/Calibration/rayleigh"   # old operational Rayleigh (v1) overlay
 export ALC_CEDA_LINKS="$ALC_REPO/validation/ceda_links.json"     # {key: CEDA-L2 URL} for the per-page CEDA link (committed; blank = skip). Refresh occasionally: python scripts/build_ceda_links.py --out "$ALC_CEDA_LINKS"
 
@@ -59,8 +59,8 @@ export ALC_S3_REMOTE="${ALC_S3_REMOTE:-}"                          # rclone remo
 export ALC_AWS_PROFILE="${ALC_AWS_PROFILE:-ewc}"                      # aws profile (ALC_S3_TOOL=aws), e.g. ewc
 export ALC_S3_ENDPOINT="${ALC_S3_ENDPOINT:-https://object-store.os-api.cci2.ecmwf.int}"                      # aws endpoint (ALC_S3_TOOL=aws), e.g. https://object-store.os-api.cci2.ecmwf.int
 export ALC_VM_RSYNC_TARGET="${ALC_VM_RSYNC_TARGET:-hem@136.156.139.31:/var/www/alc}"             # ssh host:path of the web docroot, e.g. hem@136.156.139.31:/var/www/alc
-export ALC_VM_SSH='ssh -i ~/.ssh/EWC -o ProxyCommand="connect -S proxy.meteoswiss.ch:1080 %h %p"'                             # ssh command for the rsync; add -i KEY + ProxyCommand behind a proxy
-# Behind a proxy (e.g. MeteoSwiss server 434) -- aws/rclone honour http_proxy/https_proxy; the VM rsync
+export ALC_VM_SSH="${ALC_VM_SSH:-ssh -i ~/.ssh/EWC -o ProxyCommand=\"nc -x proxy.meteoswiss.ch:1080 -X 5 %h %p\"}"                             # ssh command for the rsync; SOCKS5 via nc (the 'connect' helper does not exist on zueub439)
+# Behind a proxy (operational host is zueub439; zueub434 was the pre-2026-07-14 host) -- aws/rclone honour http_proxy/https_proxy; the VM rsync
 # uses ALC_VM_SSH. Example:
 #   export https_proxy="http://proxy.meteoswiss.ch:<port>"; export http_proxy="$https_proxy"
 #   export no_proxy="localhost,127.0.0.1"
@@ -72,8 +72,10 @@ export ALC_DAY_LAG="${ALC_DAY_LAG:-1}"                              # process da
 export ALC_BACKFILL_DAYS="${ALC_BACKFILL_DAYS:-5}"                  # also (re)try the last N still-missing days -> self-healing after an outage
 export ALC_WORKERS="${ALC_WORKERS:-6}"                             # parallel streams (slow no-sudo server -> keep modest)
 export STREAM_TIMEOUT="${STREAM_TIMEOUT:-1800}"                     # per-stream subprocess timeout (seconds)
-export PLOTS="${PLOTS:-1}"                                          # 1 = render diagnostic PNGs (needed for the per-calibration viewer)
-export ALC_CLASSIFY="${ALC_CLASSIFY:-0}"                           # 1 = also run Cloudnet target classification (needs ceiloclass in $ALC_VENV; set 1 after install)
+# PLOTS was retired 2026-08-18: the per-calibration diagnostic PNGs are no longer produced (the
+# interactive daily panel renders those nights from JSON payloads); the classification curtain
+# PNG is now always emitted by the classify step.
+export ALC_CLASSIFY="${ALC_CLASSIFY:-1}"                           # 1 = also run Cloudnet target classification (needs ceiloclass in $ALC_VENV; set 1 after install)
 
 # --- network (no-sudo server behind a proxy): uncomment + set if CAMS download needs it ----------
 export https_proxy="http://proxy.meteoswiss.ch:8080"; export http_proxy="$https_proxy"; export no_proxy="localhost,127.0.0.1"
@@ -104,4 +106,4 @@ export CAMS_TMPDIR="$ALC_TMPDIR"
 # Daily-calibration panel payloads (interactive station pages). OFF until the panel is rolled out:
 # when =1, ops_daily regenerates data/<key>/<date>_<method>.json for panel-enabled stations after
 # each calibrated day, and publish.sh ships data/ on the S3 bucket leg.
-# export ALC_PANEL_PAYLOADS=1
+export ALC_PANEL_PAYLOADS=1

@@ -32,10 +32,9 @@
 
   function label(rec, arrow) {
     if (!rec) return "";
-    var cl = window.ALCStations.clLabel(rec, window.ALCStations.bestMethod(rec));
-    return arrow + " " + window.ALCStations.statusDot(rec) +
-      '<span class="nname">' + (rec.n || rec.k) + "</span>" +
-      (cl ? '<span class="ncl">' + cl + "</span>" : "");
+    // Name only: no status LED and no %-of-nominal here (both live in the search panel) — the
+    // stepper is pure navigation and the two compact buttons have no room for anything else.
+    return arrow + ' <span class="nname">' + (rec.n || rec.k) + "</span>";
   }
 
   function apply() {
@@ -51,17 +50,25 @@
     });
     var subset = filtered;
     var i = subset.findIndex(function (r) { return r.k === here; });
-    var scoped = true;
-    if (i < 0) {
+    var prev = null, next = null, mode = "in";
+    if (i >= 0) {
+      prev = i > 0 ? subset[i - 1] : null;
+      next = i < subset.length - 1 ? subset[i + 1] : null;
+    } else if (filtered.length) {
       // The station being viewed is outside its own filter (e.g. the operator filtered to Germany
-      // while looking at a Swiss station), or the filter matches nothing at all. Dead arrows would
-      // be worse than useless, so fall back to the unfiltered neighbours and say so.
+      // while looking at a Swiss station): step INTO the scope -- the down arrow opens its first
+      // station instead of uselessly walking the whole network.
+      mode = "enter";
+      next = filtered[0];
+    } else {
+      // The filter matches nothing at all: dead arrows would be worse than useless, so fall back
+      // to the unfiltered neighbours and say so.
+      mode = "none";
       subset = records;
       i = subset.findIndex(function (r) { return r.k === here; });
-      scoped = false;
+      prev = i > 0 ? subset[i - 1] : null;
+      next = i >= 0 && i < subset.length - 1 ? subset[i + 1] : null;
     }
-    var prev = i > 0 ? subset[i - 1] : null;
-    var next = i >= 0 && i < subset.length - 1 ? subset[i + 1] : null;
 
     nav.setAttribute("data-prev", prev ? base + "stations/" + prev.k + ".html" : "");
     nav.setAttribute("data-next", next ? base + "stations/" + next.k + ".html" : "");
@@ -80,15 +87,16 @@
       a.title = rec.k + (rec.c ? " · " + rec.c : "") + (rec.t ? " · " + rec.t : "");
     });
     if (hint) {
-      if (!(c || t)) {
-        hint.hidden = true;
-      } else {
-        hint.hidden = false;
-        hint.textContent = !filtered.length
-          ? "no station matches this filter — arrows walk the full network"
-          : (!scoped ? "this station is outside the filter — arrows walk the full network"
-                     : filtered.length + " stations in filter");
-      }
+      // Always visible (it lives in the ⚙ panel next to the scope selects): the operator should
+      // see what the ↑ ↓ stepper walks even when no filter is set.
+      hint.hidden = false;
+      hint.textContent = mode === "none"
+        ? "No station matches this scope — the stepper walks the full network."
+        : (mode === "enter"
+            ? "Outside this scope — ↓ opens " + (next.n || next.k) + " (first of " +
+              filtered.length + ")."
+            : "Scope drives the ↑ ↓ station stepper — " + filtered.length +
+              " station" + (filtered.length === 1 ? "" : "s") + ", this is #" + (i + 1) + ".");
     }
   }
 

@@ -137,7 +137,9 @@ def update_opcoeff(ds: str) -> None:
            "--start", ds, "--end", ds]
     log(f"  opcoeff {ds}: extract_l2_opcoeff --start {ds} --end {ds}")
     try:
-        subprocess.run(cmd, cwd=str(REPO), timeout=1800)
+        rc = subprocess.run(cmd, cwd=str(REPO), timeout=1800).returncode
+        if rc != 0:
+            log(f"  opcoeff {ds}: FAILED — extract_l2_opcoeff exited {rc}; CSV NOT updated")
     except Exception as exc:  # noqa: BLE001
         log(f"  opcoeff {ds}: failed: {type(exc).__name__}: {exc}")
 
@@ -163,6 +165,12 @@ def update_panel_payloads(days) -> None:
            "--l1-root", os.environ.get("ALC_L1_ROOT", ""),
            "--out", str(DASHBOARD_DIR), "--payloads", "--no-pages", "--force",
            "--workers", os.environ.get("ALC_PANEL_WORKERS", "8")]
+    # Metadata fallback for streams with no L1 left on disk (silent station, pruned archive):
+    # without --db the builder sys.exits on the FIRST such stream and the whole night's payload
+    # batch is lost (seen 2026-08-18 with 0-20000-0-07530_A).
+    db = Path(DASHBOARD_DIR) / "calib_index.sqlite"
+    if db.exists():
+        cmd += ["--db", str(db)]
     for k in keys:
         cmd += ["--key", k]
     log(f"  panel payloads: {len(keys)} stations, {min(days)}..{max(days)}")

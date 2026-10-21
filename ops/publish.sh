@@ -77,6 +77,11 @@ if [ -n "${ALC_S3_BUCKET:-}" ] && { [ -n "${ALC_S3_REMOTE:-}" ] || [ "$S3_TOOL" 
   # carry them. The page fetches same-origin first and falls back to the bucket URL.
   for d in diag ombsens flagex nc data; do
     [ -d "$SITE/$d" ] || continue
+    # Drop stage links whose source was pruned by a previous run (the bytes are already in the
+    # bucket). aws exits 2 on them, which would also skip the prune below -- so a link the build's
+    # reaper cannot see (its row is gone from the CSVs it reads) would wedge publishing for good.
+    dead=$(find "$SITE/$d" -xtype l -print -delete 2>/dev/null | wc -l)
+    [ "${dead:-0}" -gt 0 ] && echo "publish: $d/: dropped $dead dead stage link(s) (source pruned, bytes in the bucket)"
     echo "publish: $S3_TOOL sync $d/ -> $ALC_S3_BUCKET/$d"
     err=$(s3_sync "$SITE/$d" "$d" 2>&1 1>/dev/null); lrc=$?
     if [ "$lrc" -ne 0 ]; then

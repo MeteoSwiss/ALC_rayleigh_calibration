@@ -50,6 +50,9 @@ Homepage = "https://e-profile.eu"
 # ---------------------------------------------------------------------------
 # Build backend (uv-compatible). Install with:  uv pip install -e .   (matplotlib is a core dep now)
 # ---------------------------------------------------------------------------
+[tool.hatch.metadata]
+allow-direct-references = true   # the classify extra pins ceiloclass/ceilopyter via git
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

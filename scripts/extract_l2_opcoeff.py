@@ -58,7 +58,10 @@ def main():
     ap.add_argument("--end", default="20260531")
     ap.add_argument("--all-keys", action="store_true",
                     help="extract every station found, not just the census set")
-    ap.add_argument("--workers", type=int, default=12)
+    ap.add_argument("--workers", type=int, default=1,
+                    help="parallel file readers. KEEP AT 1: the netCDF4/HDF5 in the "
+                         "3.13 venv is NOT thread-safe and >1 segfaults on concurrent "
+                         "reads. Raise only with a thread-safe HDF5 build.")
     args = ap.parse_args()
 
     census = json.loads(R.CENSUS.read_text(encoding="utf-8"))
