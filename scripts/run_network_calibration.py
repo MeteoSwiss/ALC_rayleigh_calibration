@@ -81,6 +81,7 @@ from calibration import (  # noqa: E402
 )
 from calibration.config import InstrumentType  # noqa: E402
 from calibration.cloud import CloudCalConfig  # noqa: E402
+import calibration.cloud._filters as CF  # noqa: E402  (active eta-table generation -> cloud version)
 from calibration.cloud.calibration import (  # noqa: E402
     liquid_cloud_calibration_from_data, set_defaults, build_cloud_input_from_day)
 from calibration.io.classification import (  # noqa: E402
@@ -90,7 +91,8 @@ from calibration.io.instrument_day import load_instrument_day  # noqa: E402
 from calibration.flags import cloud_flag, flag_label, dominant_cloud_reject_flag  # noqa: E402
 from calibration.plotting import plot_cloud_diagnostics_compact  # noqa: E402
 from calibration.io.output import (  # noqa: E402
-    VERSION_CODES, version_code, write_calibration_result, strip_calibration_method)  # noqa: E402
+    VERSION_CODES, version_code, version_code_for, write_calibration_result,
+    strip_calibration_method)  # noqa: E402
 from monitoring.kalman import kalman_best_estimate  # noqa: E402  (self-contained leaf)
 from monitoring import periods as periods_mod  # noqa: E402  (period set: auto years + active/frozen)
 
@@ -338,6 +340,16 @@ def _do_rayleigh(s, start, end, shared=None, screen=False):
         o.molecular_params = dict(o.molecular_params or {}, **MOLECULAR_PARAMS)
     if UNCERTAINTY_MODEL:
         o.uncertainty_model = UNCERTAINTY_MODEL
+    # Per-station override of the molecular-window parameters (options.json station_molecular_params,
+    # keyed by '<wmo>_<ident>'): Payerne CHM15k A (TUB140016, abnormal receiver) stays on tier 1 only
+    # ({"use_noise": false}; doc/v2.3/vertical_consistency.md section 6).
+    sp = (getattr(o, "station_molecular_params", None) or {}).get(key)
+    if sp:
+        o.molecular_params = dict(o.molecular_params or {}, **sp)
+    # Polar-summer low-sun fallback (doc/v2.3/polar_summer.md): ALC_POLAR_NIGHT_FALLBACK=1/0 overrides
+    # options.json polar_night_fallback for a network run without editing the operational file.
+    if os.environ.get("ALC_POLAR_NIGHT_FALLBACK", "") in ("0", "1"):
+        o.polar_night_fallback = os.environ["ALC_POLAR_NIGHT_FALLBACK"] == "1"
     # Measured dark-baseline profile (rayleigh_availability/dark_profiles.py). Empty = off.
     if os.environ.get("ALC_DARK_PROFILE"):
         o.dark_profile_file = os.environ["ALC_DARK_PROFILE"]
@@ -369,7 +381,7 @@ def _do_rayleigh(s, start, end, shared=None, screen=False):
                              uncertainty=r.uncertainty, n_profiles="",
                              bottom_height=r.calibration_bottom_height,
                              top_height=r.calibration_top_height,
-                             version=version_code(getattr(o, "molecular_method", "")),
+                             version=version_code_for(getattr(o, "molecular_method", ""), r.flag),
                              message=r.message))
         except Exception as exc:  # noqa: BLE001 - one bad night must not kill the stream
             rows.append(dict(date=ds, method="rayleigh", flag=-99, cal_value=-1, uncertainty=0,
@@ -474,7 +486,7 @@ def _do_cloud(s, start, end, shared=None):
                     time_end=_epoch_days(d) + 1.0,
                     wavelength_nm=info.instrument_type.wavelength_nm,
                     housekeeping=_HK_NAN, method=1,
-                    version=VERSION_CODES["cloud_oconnor"],
+                    version=VERSION_CODES[CF.cloud_version_name()],
                 )
             # PLOTS-gated diagnostic figure. Unset operationally (PNGs retired for the panel), but
             # the path must remain: the panel's payload capture patches this module-level binding

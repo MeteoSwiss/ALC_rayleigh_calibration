@@ -30,12 +30,17 @@ RD = 287.058          # specific gas constant, dry air [J/(kg K)]
 G0 = 9.80665          # standard gravity [m/s^2]
 EPS = 0.621981        # Mw/Md (ratio of molar masses water/dry air)
 
-# Per-instrument laser spectrum (Payerne Qmini campaign 2026-06-02).
-# central wavelength [nm], spectral FWHM [nm]. Used for the Gaussian weighting.
+# Per-instrument laser spectrum: central wavelength [nm], spectral FWHM [nm], used for the
+# Gaussian weighting. CL31/CL51/CHM15k from the Payerne Qmini campaign (2026-06-02).
+# CL61 = manufacturer line 910.55 nm, sigma 0.08 nm -> FWHM 0.188 nm (Vaisala via Le & O'Connor,
+# DA10 guide M212895EN-E), operational since the v2.2 cutover (2026-08-18). The Qmini value
+# (910.74 nm, FWHM 1.0) is NOT usable here: the spectrometer (~0.3 nm pixels, ~1.5 nm apparent
+# width) cannot resolve a 0.19 nm line, and that model over-corrects the CL61 WV ~9x. To reproduce
+# the retired model, set ALC_WV_SPECTRUM='{"CL61": [910.74, 1.0]}' explicitly.
 LASER_SPECTRUM = {
     "CL31":   (909.7, 6.0),
     "CL51":   (910.0, 3.4),
-    "CL61":   (910.74, 1.0),
+    "CL61":   (910.55, 0.188),
     "CHM15k": (1064.47, 0.5),
     "CHM8k":  (1064.0, 0.5),
 }
@@ -49,7 +54,7 @@ def in_water_vapor_band(wavelength_nm: float) -> bool:
 def _env_spectrum_override() -> dict:
     """Surcharge R&D du spectre laser par la variable d'environnement ``ALC_WV_SPECTRUM``.
 
-    Format JSON : ``{"CL61": [910.55, 1.0]}``. Motivation : la position de raie du CL61 est en
+    Format JSON : ``{"CL61": [910.74, 1.0]}`` (ex. : rejouer l'ancien modele Qmini). Motivation : la position de raie du CL61 est en
     arbitrage (spec constructeur 910,55 nm vs mesure Qmini 910,74 ± 0,10) et l'absorption
     effective differe d'un facteur ~3 entre les deux ; il faut pouvoir produire des calibrations
     comparables sous les deux hypotheses SANS toucher a la table operationnelle. Variable

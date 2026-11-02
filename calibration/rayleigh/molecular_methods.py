@@ -162,6 +162,11 @@ NOISE_INSTRUMENTS = ("CHM15k", "CL61")
 #: Types whose tier 2 runs the vertical-consistency test under eprof_v2.3 (26 CHM15k units). Not CL61:
 #: its R(z) falls 3-4.5 %/km on clean nights, which the test reads as aerosol (tier-2 constants -14 %).
 VC_INSTRUMENTS = ("CHM15k",)
+#: Highest window top (m AGL) a tier-2 (fallback) window may reach under eprof_v2.3, per type. CL61:
+#: its constants are dark-free in the network and the electronic undershoot is worth -15..-30 % of the
+#: molecular signal at 5-7 km (hood leverage, doc/reports/eta_payerne_gap_2026-11-02.md), so rescued
+#: windows above 5 km are biased low; tier 1 is untouched. Types not listed: no cap.
+TIER2_MAX_END_M = {"CL61": 5000.0}
 
 
 @dataclass
@@ -699,7 +704,7 @@ def _select_optimal(g: WindowGrid, min_window_start_m=2000.0, min_r2=0.5,
                     w_resid=0.20, w_snr=0.10, w_npts=0.10, w_tvar=0.35, w_rel=0.20,
                     objective="score", use_noise=False, max_chi2red=2.5, fallback_objective="score",
                     max_ratio_std_excess=0.30, max_temporal_cv_excess=0.5,
-                    w_chi2=0.0, use_vc=False, **vc) -> MethodWindow:
+                    w_chi2=0.0, use_vc=False, tier2_max_end_m=np.inf, **vc) -> MethodWindow:
     """Best-of: physical gates + TEMPORAL-variability aerosol rejection + composite score.
 
     Molecular scattering is steady in time; aerosol advects and fluctuates. Windows whose
@@ -758,7 +763,10 @@ def _select_optimal(g: WindowGrid, min_window_start_m=2000.0, min_r2=0.5,
                    & (np.isfinite(g.chi2red) & (g.chi2red <= max_chi2red))
                    & (~np.isfinite(g.ratio_std_excess)
                       | (g.ratio_std_excess <= max_ratio_std_excess))
-                   & (np.isfinite(sr) & (sr <= max_scattering_ratio)))
+                   & (np.isfinite(sr) & (sr <= max_scattering_ratio))
+                   # tier-2 window-top cap (TIER2_MAX_END_M, eprof_v2.3): a rescued window may not
+                   # reach above this height; inf = no cap
+                   & ((g.center_m[:, None] + g.half_m[None, :]) <= tier2_max_end_m))
         elig = _tvar(relaxed, excess=True)
         fallback = True
     if use_bg and g.signal is not None and g.p_mol is not None and g.range_alc is not None:

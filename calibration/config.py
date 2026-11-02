@@ -218,6 +218,9 @@ class CalibrationOptions:
     # are read only by the in-line eprof_v1.2 path -- so this dict is the ONLY way to tune their
     # gates from configuration. Empty = each method's registered DEFAULT_PARAMS.
     molecular_params: dict = field(default_factory=dict)
+    # Per-station override of molecular_params, keyed by '<wmo>_<ident>' (merged on top by the network
+    # runner): e.g. Payerne CHM15k A (abnormal receiver) on tier 1 only, {"use_noise": false}.
+    station_molecular_params: dict = field(default_factory=dict)
     # Flag -9 ("another layer with lower signal"): reject when the chosen window's slope exceeds
     # the 10th percentile of clean-window slopes by more than this factor. Was previously read via
     # getattr with a hard-coded 2.0 and existed in neither the dataclass nor options.json.
@@ -362,6 +365,7 @@ class CalibrationOptions:
             screen_profile_outliers=bool(data.get("screen_profile_outliers", 1)),
             profile_outlier_nmad=float(data.get("profile_outlier_nmad", 4.0)),
             molecular_params=dict(data.get("molecular_params", {}) or {}),
+            station_molecular_params=dict(data.get("station_molecular_params", {}) or {}),
             aerosol_qc_enabled=bool(data.get("aerosol_qc_enabled", 1)),
             aerosol_scattering_threshold=float(data.get("aerosol_scattering_threshold", 2.0)),
             use_classification_mask=bool(data.get("use_classification_mask", 1)),

@@ -49,8 +49,8 @@ from .rayleigh_fit import (
     validate_calibration,
     RayleighFitResult,
 )
-from .molecular_methods import NOISE_INSTRUMENTS, VC_INSTRUMENTS, resolve_method
-from ..io.output import write_calibration_result, version_code
+from .molecular_methods import NOISE_INSTRUMENTS, VC_INSTRUMENTS, TIER2_MAX_END_M, resolve_method
+from ..io.output import write_calibration_result, version_code_for
 from ..io.cams import ensure_cams_file
 from ..plotting import (
     plot_rcs_timeseries,
@@ -230,6 +230,8 @@ def _window_search_setup(options, instrument_type, sigma_signal, native_per_bin)
         params.setdefault("measured_noise", False)
     if itype not in VC_INSTRUMENTS:
         params.setdefault("use_vc", False)
+    if itype in TIER2_MAX_END_M:                  # CL61: no rescued window above 5 km (dark leverage)
+        params.setdefault("tier2_max_end_m", TIER2_MAX_END_M[itype])
     if params.get("measured_noise", True) and sigma_signal is not None:
         sigma_signal = np.asarray(sigma_signal, float) / np.sqrt(native_per_bin)
     return params or None, sigma_signal
@@ -1452,7 +1454,7 @@ def calibrate_rayleigh(
         housekeeping=housekeeping,
         # tag the row with the molecular method that actually produced it, so a series spanning an
         # algorithm upgrade stays interpretable
-        version=version_code(getattr(options, "molecular_method", "eprof_v2")),
+        version=version_code_for(getattr(options, "molecular_method", "eprof_v2"), result.flag),
     )
 
     logger.info(f"Results written to {output_path}")

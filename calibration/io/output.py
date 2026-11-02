@@ -143,7 +143,10 @@ def _create_calibration_file(
     nc_version.comment = ("code = major*100 + minor*10 + patch of the calibration method, e.g. "
                           "100 = E-PROF v1.0, 120 = v1.2, 200 = v2 (C8), 220 = v2.2 "
                           "(noise-aware molecular-window gates), 230 = v2.3 (v2.2 with a measured "
-                          "noise and a vertical-consistency test in its fallback tier)")
+                          "noise and a vertical-consistency test in its fallback tier), 221 / 231 = "
+                          "the same on a polar-summer low-sun night (flag 0.25); 1000 = liquid-cloud "
+                          "O'Connor retrieval with the 2026-07 eta tables, 1100 = with the eta tables "
+                          "v2 (a_G 3.3 um, alpha 30 /km, 2026-11)")
 
     # Housekeeping variables
     nc_lifetime = ncid.createVariable('laser_life_time', 'f8', ('time',), zlib=True, fill_value=-999.9)
@@ -255,9 +258,22 @@ def _write_v23_uncertainty_row(ncid: Dataset, idx: int, components: Optional[dic
 VERSION_CODES = {
     "eprof_v1.0": 100, "eprof_v1.1": 110, "eprof_v1.2": 120, "eprof_v0.25": 25,
     "eprof_v2": 200, "eprof_v2p": 205, "eprof_v2.2": 220, "eprof_v2.3": 230,
+    # polar-summer low-sun nights (option polar_night_fallback, flag 0.25): the method's code + 1, so
+    # the NetCDF tells them apart (doc/v2.3/polar_summer.md section 5)
+    "eprof_v2.2_lowsun": 221, "eprof_v2.3_lowsun": 231,
     "earlinet": 300, "bellini": 310, "main": 90, "improved": 95,
-    "cloud_oconnor": 1000,          # the liquid-cloud (O'Connor) retrieval
+    "cloud_oconnor": 1000,          # the liquid-cloud (O'Connor) retrieval, 2026-07 eta tables
+    "cloud_oconnor_v2": 1100,       # same retrieval, eta tables v2 (a_G 3.3 um, alpha 30 /km, 2026-11)
 }
+
+
+def version_code_for(method_name: str, flag=None) -> int:
+    """Version code of a Rayleigh row: the method's code, or the ``<method>_lowsun`` code (+1) for a
+    polar-summer low-sun night (flag 0.25) when that entry exists."""
+    base = version_code(method_name)
+    if flag is not None and float(flag) == 0.25:
+        return VERSION_CODES.get(f"{method_name}_lowsun", base)
+    return base
 
 
 def version_code(method_name: str) -> int:
