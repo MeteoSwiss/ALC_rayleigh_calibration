@@ -7,6 +7,16 @@ Date : 2026-08-15 · branche `rayleigh-availability` · corpus 2025-01 → 2026-
 
 ## Résumé exécutif
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+Cloud rows for the CL61 change. At 910.55/0.188 the CL61 cloud residual is **+0.79 ± 1.68 %/km**
+(stream fixed effects, 781 days; it was +7.7 … +8.3 %/km). The 910 nm WV term is **+1.8 %/km** (it was
++7.4 … +10.3 %/km). **Verdict changed:** the cloud constant is altitude-independent for the CL31 and the
+CL61; only the CL51 retains a positive residual. The "η and WV are degenerate" conclusion no longer applies:
+the WV term was overestimated about 6×.
+
 | Question | Verdict | Chiffre principal |
 |---|---|---|
 | **Rayleigh — C_L dépend-il de l'altitude de la fenêtre ?** | **PARTIELLEMENT — non en pratique, oui en principe** | Sur les fenêtres réellement *éligibles* aux gates : dispersion 3,0 % (nuits claires, n=160) / 4,9 % (nuits « recovered », n=104), pente Theil-Sen −0,3 %/km (n=222). Sur toute la plage de recherche 2,75–6,75 km : 36 % / 121 % pic-à-pic. La bande 2,75–3,75 km est franchement biaisée : **−7,5 %/km** (claires, n≈530) et **−27,8 %/km** (chargées, n≈210). |
@@ -116,6 +126,11 @@ Archive réseau `fullcal_l1_2026` (écrite 2026-06-24/26, donc **tables η legac
 
 ### 2.2 Le remplacement PVC de juillet 2026 : corrige le CL31, sous-corrige le CL51 et le CL61
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** The CL61 PVC residual +8.32 ± 1.54 %/km (32 % of the bias removed) is the retired-model value. At the correct line the CL61 residual is +0.79 ± 1.68 %/km (`DATA/cbh_native_l55`), so PVC plus the correct WV line removes essentially all of it.
+
 L'effet **mécanique** de la bascule est parfaitement caractérisé et non contesté. Expérience appariée exacte, profils appariés par indice de sorte que la sélection soit gelée (seules les tables `_ETA_*` changent), 20 flux, 1124 stream-days :
 
 | Type | prédiction analytique | mesure appariée exacte | n profils |
@@ -137,6 +152,11 @@ Restreint à CBH 0,55–1,85 km (aucune troncature possible) : CL31 +0,58 ± 1,3
 > **L'affirmation « le PVC guérit CL31 *et* CL51 » est réfutée.** Elle reposait sur un estimateur groupé sans effets fixes de station. Le PVC guérit le CL31 (résidu compatible avec zéro), retire environ la moitié du biais CL51, et un tiers seulement pour le CL61.
 
 ### 2.3 Le résidu CL61 : réel, mais plus petit et surtout **non linéaire**
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** The +7.69 ± 0.96 %/km within-night CL61 residual and its concentration below 0.8 km were measured on retired-model profiles (not rerun per profile). The stream-level rerun gives +0.79 ± 1.68 %/km overall and +1.22 ± 2.63 %/km above 0.8 km. The low-CBH band stays noisy (+34 ± 27 %/km, n = 98) and is not significant.
 
 ![Constante nuage par profil, écart à la médiane du jour, en fonction de l'écart de CBH à la médiane du jour — CL31, CL51, CL61.](figs_altitude_audit/cloud_within_day.png)
 
@@ -163,6 +183,21 @@ L'**amplitude mesurée** de l'écart intra-nuit sur toute la gamme est de **+1,7
 **Contrôle CL51 sur le plus grand échantillon disponible** (6 flux, 2623 stream-days, 709 447 profils, 2460 nuits) : **−2,14 ± 0,33 %/km** opérationnel, −2,56 ± 0,31 avec contrôles, médiane robuste par nuit −0,61 ± 0,38 (positive sur 49 % de 2238 nuits), 5/6 flux négatifs. Ce résultat **contredit en signe** le +4,11 ± 0,89 obtenu sur 6 autres flux CL51 (199–203 jours). Le résidu CL51 est donc **non tranché** : entre −2,6 et +4,1 %/km selon l'échantillon, avec la meilleure estimation proche de zéro sur le plus grand n.
 
 ### 2.4 Pourquoi le CL61 résiste : η et vapeur d'eau sont dégénérés
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+Budget term by term, CL61:
+
+| term | 910.74 nm (retired model) | **910.55 nm (correct)** |
+|---|---|---|
+| 910 nm WV correction | +7.42 %/km (frozen mask, 6 sites) / +10.3 %/km (781 network scenes) | **+1.8 %/km** (781 network scenes) |
+| operational residual | +7.69 ± 0.96 %/km | **+0.79 ± 1.68 %/km** (stream FE); ≈ +2.1 %/km by scaling the frozen-mask budget |
+
+**Verdict changed:** η and WV are not degenerate at the correct line. The WV term is small and the PVC η
+table flattens the CL61 like the CL31. The "k = 0 on WV flattens the residual" observation is explained:
+the correct WV term is about 0.17 of the retired one.
 
 ![Budget du gradient d ln C_L/dCBH sur masque gelé (6 sites CL61, 167 nuits, 24 757 profils) ; effet d'un facteur d'échelle k sur le terme vapeur d'eau ; saturation de la pente η(PVC) sur (a_G, α).](figs_altitude_audit/cloud_cbh_refutation.png)
 
@@ -210,6 +245,11 @@ Le CL61 est par ailleurs le seul type livré à la calibration sous forme de **�
 
 ### 3.2 Nuage
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** Cloud mechanism table: the CL61 'WV partial/dominant' row is withdrawn. With 910.55/0.188 the WV term is +1.8 %/km and the residual +0.8 %/km.
+
 | Mécanisme | Verdict | Chiffre justificatif (n) |
 |---|---|---|
 | **η(portée) de diffusion multiple — tables legacy** | **DOMINANT (cause du biais historique)** | Pente des tables legacy −4,19 (CL31) / −3,83 (CL51, CL61) %/km, contre un besoin de −10 à −16. Biais mesuré dans l'archive : +6,3 à +12,8 %/km, +14 à +20 % de dérive de C_L sur la gamme de CBH. |
@@ -224,6 +264,11 @@ Le CL61 est par ailleurs le seul type livré à la calibration sous forme de **�
 ---
 
 ## 4. Quel ancrage est le plus fiable, et sous quelles conditions
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** The ratio R = C_ray/C_cloud on the dual-method CL61 streams moves from a median of 1.019 to 0.937 at the correct line (both constants re-expressed, `rescale_cl61_rayleigh_l55.py`). The cloud anchor for the CL61 is no longer CBH-biased.
 
 ![(a) constante nuage vs base de nuage, écart intra-nuit, legacy vs PVC ; (b) accord absolu des deux méthodes par flux ; (c) le rapport R dérive-t-il avec la hauteur de fenêtre Rayleigh ; (d) quelle correction porte le gradient.](figs_altitude_audit/cross_method_anchor.png)
 
@@ -245,6 +290,11 @@ Le CL61 est par ailleurs le seul type livré à la calibration sous forme de **�
 
 ## 5. Actions concrètes, par rapport impact / effort
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** Actions A2 (cloud-calibrate a CHM15k to separate η from WV) and A6 (make η and WV auditable together) were motivated by the retired-model degeneracy. A2 is moot and must not be done (the CHM15k saturates). A6 stays useful as a diagnostic only.
+
 ![Gradient within-night partagé entre unités co-localisées ; variance atmosphérique vs instrumentale ; décalage par unité vs prédiction de l'ordonnée b (**cette troisième colonne a été réfutée, voir §3.1**) ; Rayleigh vs nuage sur le même matériel à Aosta.](figs_altitude_audit/instrument_vs_atmosphere.png)
 
 | # | Action | Impact / effort | Où | Nature |
@@ -263,6 +313,11 @@ Le CL61 est par ailleurs le seul type livré à la calibration sous forme de **�
 ---
 
 ## 6. Ce qui n'est PAS établi, et ce qui trancherait
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** Open question 1 ('η or water vapour?') is answered: it was water vapour, through the retired spectral model.
 
 1. **η ou vapeur d'eau ?** Le résidu CBH du CL61 (+7,7 ± 1,0 %/km) est la somme d'un terme WV de +7,4 et d'un terme η de −8,4, tous deux monotones en portée donc **dégénérés sur l'axe CBH**. Seul k = 0 sur WV aplatit ; k = 0,5 laisse +4,6 %/km. Un test de modulation par l'humidité penche faiblement pour un déficit constant de type η (fraction f = +0,254 ± 0,182, t = 1,39 ; résidu été +4,19 %/km sur n=43 contre hiver +6,70 sur n=54, alors que la contribution WV est similaire, +7,71 vs +6,86) — **non décisif**. → **Ce qui trancherait : action A2** (calibration nuage sur CHM15k, 1064 nm, η présent / WV absent).
 2. **Le signe intra-journée du CL61.** Deux re-runs indépendantes donnent +7,7 ± 1,0 et +8,2 ± 1,7 %/km en convention C_L, mais l'une des deux rapporte un signe opposé en attribuant les valeurs de l'autre à la convention C (O'Connor). → **Ce qui trancherait :** re-tourner **une** nuit partagée en imprimant explicitement `res.all_coefficients`, `res.cbh`, `calibration_constant_applied` et C_L, et geler la convention dans le code. (Piège d'API confirmé : `res.cbh` a la longueur n_valid, `res.all_coefficients` la longueur n_total — 152 vs 2880 sur Lindenberg 2026-03-15 ; il faut apparier `res.cbh` avec `all_coefficients[isfinite]`.)

@@ -307,6 +307,16 @@ celle-là. Il faut aussi corriger les métriques de forme initiales : leur déci
 
 ### 2.4 Alors, qu'est-ce qui sépare vraiment CL31 et CL61 ?
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+Point 2 (spectral WV term not shared by the CL31 and CL61) used the CL61 at 910.74/1.0: the injected slope was
++7.13 %/km (CL61) vs +6.34 %/km (CL31). At the correct line, the network WV term for the CL61 is +1.8 %/km
+(781 scenes, `DATA/cbh_native_l55`), so the CL61−CL31 spectral difference is about −4.5 %/km, not +0.79.
+The within-night CL61/CL31 differential attributed to η/multiple scattering in point 3 therefore needs
+re-attribution: part of it was the retired WV model. The sonde-based lever was not recomputed per sonde.
+
 1. **La sensibilité à la DENSITÉ du nuage (FOV / diffusion multiple)** : exposants
    d ln C_L / d ln(intensité) = **+0,375 ± 0,042 (CL31) contre +0,165 ± 0,022 (CL61)**, facteur 2,3 ;
    FOV 0,83 vs 0,56 mrad ; pentes des tables η PVC -10,42 vs -8,64 %/km (contexte, tables du code).
@@ -480,6 +490,15 @@ après le 2026-05-31 ; 12 nuits sur 150 sans AOD, 4 sans rétrodiffusion.
 
 ## 4. WV ou η ? Le verdict des radiosondages
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+The sonde-vs-CAMS swap (−1.46 %/km across-night) and the WV lever (11.15 %/km in the 450–900 m band) are
+retired-model values. Both scale with the CL61 absorption, which is 6–7× smaller at 910.55/0.188 (report 03
+§3 update). **Verdict changed:** the question "WV or η?" for the +8.3 %/km residual is answered by the
+spectral model: at the correct line the residual itself is +0.79 ± 1.68 %/km.
+
 ### 4.1 Réponse : la vapeur d'eau n'est PAS disculpée — mais elle n'explique que ~18 %
 
 La question posée était : la pente **+8,3 %/km** du résidu CL61 (contexte, effets fixes station)
@@ -607,6 +626,11 @@ dégrade lentement (+0,53 % pour |dt| < 1,5 h ; +1,53 % pour 4,5-6 h), et le sou
 
 ### 5.2 Résidu nuage en CBH (CL61, +8,3 %/km réseau — contexte)
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** Row 'cloud CBH residual, CL61, +8.3 %/km': at 910.55/0.188 it is +0.79 ± 1.68 %/km. The mechanism is the retired WV model.
+
 | mécanisme | amplitude mesurée | part expliquée | statut |
 |---|---|---|---|
 | **Saturation / écrêtage CL61** | pente enveloppe p99,9 **+0,06** (attendu +2,0 si écrêtage ; CHM15k témoin +1,58) ; invariant O'Connor d log I/d log Pic **+0,089 ± 0,002** ; exposant intensité **+0,165 ± 0,022** (signe opposé) ; levier CBH -0,28 à -1,32 %/km ; fermeture C_L = 1,144 (> 1) | **0 %** et **de signe opposé** | **ÉCARTÉ** |
@@ -629,6 +653,11 @@ dégrade lentement (+0,53 % pour |dt| < 1,5 h ; +1,53 % pour 4,5-6 h), et le sou
 ---
 
 ## 6. Actions, classées par rapport impact / effort
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** Actions aimed at the CL61 +8.3 %/km cloud residual are closed (it vanishes at the correct WV line). Dark/Rayleigh actions are unchanged.
 
 ### A. Impact fort, effort faible à moyen
 

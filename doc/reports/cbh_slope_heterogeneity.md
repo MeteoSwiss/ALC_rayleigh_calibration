@@ -26,6 +26,10 @@ deux chiffres ont été *corrigés à la baisse* sans changer les conclusions (v
 | 3 | **Non.** Le lien brut \|pente\|↔dispersion du CL31 (ρ = +0,22) est un artefact mécanique ; sur l'axe équitable (t-value) il n'y a **aucun** lien, et rien sur CL51/CL61. |
 | 4 | **Ne pas corriger dC/dCBH au niveau réseau ; ne pas retoucher η.** ⚠ La piste « CL61 = baseline additive » est RÉFUTÉE pour la pente nuage par la fermeture quantitative (−0,01 %/km induit vs +9 observé — voir la correction au §5.4) ; le mécanisme reste ouvert, piste principale : spectrale (λ₀ WV). |
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+**Update 2026-11-02, 910.55 nm (correct) vs 910.74 nm (retired model).** The CL61 answers above use the retired model. At the correct line the CL61 FE slope is **+0.79 ± 1.68 %/km**, against +9.05 ± 1.46 with the retired model (§1.3 update). **Verdict changed for Q4:** the spectral mechanism is confirmed. It was the WV model, and the CL61 needs no CBH correction. The CL31/CL51 answers are unchanged.
+
 ---
 
 ## 1. Méta-analyse par type : moyennes communes et hétérogénéité vraie
@@ -72,6 +76,32 @@ pas une compensation. La ré-inclusion du flux exclu 0-20008-0-EDT_A (k = 49) ne
 
 ### 1.3 CL61 : homogène autour d'un +8,3 %/km commun — un effet de type [vérifié, avec garde-fou]
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+The CL61 cloud constants of `calout_v22_04` were computed with the retired 910.74/1.0 model. They were
+re-expressed at 910.55/0.188 scene by scene (`rayleigh_availability/cbh_native/rescale_cl61_l55.py`):
+ln C_L(correct) = ln C_L(retired) − [ln T²_l55(CBH) − ln T²_l74(CBH)], using the pipeline's own transmission
+function, LUT and CAMS 0.4°. This was checked against the full 910.55 reruns (`diag_v22_l55s008`): the
+re-expressed constants match within a median of 1.1 % (Payerne C, 70 days) and 1.3 % (Lindenberg C, 289
+days). The retired constants are 18 % and 14 % too high there. The regression was then rerun with
+`analyze_cbh_l55.py`; outputs are in `DATA/cbh_native_l55/`.
+
+| CL61 estimator | 910.74 nm (retired model) | **910.55 nm (correct)** |
+|---|---|---|
+| fixed effects per stream (781 days, 12 streams) | +9.05 ± 1.46 %/km | **+0.79 ± 1.68 %/km** |
+| fixed effects stream × month | +7.21 ± 1.76 | **+0.74 ± 2.20** |
+| first differences (pairs ≤ 3 d) | +6.93 ± 2.78 | **+0.52 ± 3.09** |
+| CBH ≥ 0.8 km | +8.96 ± 2.34 | **+1.22 ± 2.63** |
+| streams > +2σ (of 9 with n ≥ 30) | 9/9 positive | **5/9 positive, 0 > +2σ** |
+| WV-term contribution to d ln C_L/dCBH | +10.3 %/km | **+1.8 %/km** |
+| CL61 cloud level C_L(correct)/C_L(retired) | 1 | **0.863** (P05–P95 0.786–0.957) |
+
+**Verdict changed:** there is no CL61 "type effect". At the correct line the 9 CL61 slopes are compatible
+with zero (median +0.9 %/km, IQR −1.9…+3.0). The homogeneity around +8.3 %/km was the common, spectrally
+induced bias of the retired WV model, identical on every unit.
+
 Q = 8,2 (p = 0,42), I² = 2 %, τ_DL = 0,46 %/km, 9/9 pentes positives (6/9 individuellement
 significatives). La re-dérivation Theil–Sen indépendante sur les **11** flux CL61 à ≥ 8 scènes
 donne FE = +9,94 ± 0,93 %/km, 11/11 positifs ; le FE robuste aux clusters sur les 781 scènes
@@ -90,6 +120,11 @@ pas « prouvées identiques ».
 
 ### 1.4 Corrections issues de la vérification (aucune réfutation)
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** The corrections listed here apply to the retired-model CL61 values. At 910.55/0.188 the CL61 FE slope is +0.79 ± 1.68 %/km (§1.3 update).
+
 - **SE par flux ~28 % trop petites** : les résidus des OLS par unité sont autocorrélés
   (lag-1 médian 0,45) ; un bootstrap par blocs mensuels gonfle les SE de ×1,30. Chiffres
   honnêtes CL31 : τ = 2,55 %/km, Q = 656, I² = 69 % — τ légèrement surestimé (2,86–3,15 →
@@ -104,6 +139,13 @@ pas « prouvées identiques ».
 ---
 
 ## 2. Q1 — Quel facteur explique les différences intra-type ?
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+Q1 for the CL61 is now moot: its slopes are flat at the correct line. The analysis of the CL31/CL51 factors
+in this section is unchanged, because their WV spectra are unchanged.
 
 ### 2.1 Ce que L1 permet (et ne permet pas) de tester
 
@@ -467,6 +509,11 @@ unités**, non une propriété de chaque instrument. Corollaire opérationnel : 
 
 ## 4. Q3 — Les unités à dC/dCBH ≈ 0 sont-elles mieux calibrées ?
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** The CL61 rows of Q3 used the retired-model constants. At the correct line the CL61 has no detectable slope (§1.3 update), so the CL61 part of the question has no object. CL31/CL51 are unchanged.
+
 Métrique de qualité : dispersion jour-à-jour dé-tendancée du C nuage (MAD des résidus autour de la
 médiane glissante 60 j), plus le taux de succès de calibration. 266 flux appariés.
 
@@ -555,6 +602,15 @@ baseline croissante avec la portée du CL61 explique 66 % de son gradient intra-
 identique sur toutes les unités, que η ne peut pas produire (§2.3).
 
 ### 5.4 Verdict Q4 et RECOMMANDATION
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+**Verdict changed: the CL61 +9 %/km mechanism is identified.** It is the spectral (λ₀/FWHM) WV error that
+the 2026-08-16 resolution block (§2.3bis) anticipated. Rerun at 910.55/0.188: the CL61 slope falls to
++0.79 ± 1.68 %/km. The recommendation "consider the CL61 cloud C as carrying a ±5 % CBH-dependent scene
+bias" is withdrawn. The CL31/CL51 recommendations are unchanged.
 
 - **Faut-il corriger dC/dCBH dans E-PROFILE ?** Pas par une régression réseau. Pour CL31/CL51,
   la pente est une propriété *d'unité* (Q2) : une correction commune dégraderait l'aile opposée du

@@ -186,6 +186,22 @@ aerosol-loading sensitivity of the molecular fit.
 
 ### 2.4 Water vapour — a large 910 nm-only term (corrected)
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+
+| WV-off → WV-on change | 910.74 nm (retired model) | **910.55 nm (correct)** |
+|---|---|---|
+| Rayleigh lidar constant | +20.8 % (network median, range +15…+33 %) | **+3.9 % Payerne (43 nights), +2.8 % Lindenberg (190 nights)** |
+| Cloud C_L (coefficient C = 1/C_L) | coefficient −12.8 % | **C_L +2.8 % Payerne (69 nights), +2.0 % Lindenberg (304 nights)**, i.e. coefficient −2.7 / −2.0 % |
+
+Source: `validation/paper/wv_magnitude_cl61.py` (full reruns `DATA/diag_v22_l55s008` vs `DATA/diag_v22_nowv`,
+v2.2, today's code; log `DATA/wv_magnitude_cl61_l55.log`). The June 2026 network toggle (`run_cl61_variants.py`
++ MATLAB cloud) was not repeated: its L2/MATLAB chain hard-codes 910.74 and is superseded by these runs.
+**Verdict changed:** the WV correction stays mandatory at 910 nm, but for the CL61 it is a 3–4 % term, not a
+13–21 % term. The CL31/CL51 magnitudes are unchanged.
+
 From the CL61 controlled re-run (`cl61_verify_*`), toggling the WV correction changes the calibration
 of the **910 nm** instruments substantially, and the **1064 nm CHM15k not at all**:
 

@@ -100,6 +100,17 @@ et la validation capot (θ ≈ 1 sur A et C) arbitre en dernier ressort, péché
 
 ## 3. Validation contre les capots de Payerne
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+The clear-sky dark estimator (`rayleigh_availability/dark_from_clearsky.py`, 2026-08-16) builds the 910 nm
+molecular model with `laser_spectrum_for`, which then returned 910.74/1.0. The CL61 θ values (Payerne C +0.96,
+template ~orthogonal) used a T²_wv profile whose gradient is ≈ 6× too steep at 2–6 km. θ is a template
+amplitude, and the WV term is smooth and monotone, so the change is expected to be small (a few percent of θ).
+Not rerun. Command: `ALC_WV_SPECTRUM='{"CL61": [910.55, 0.188]}' python rayleigh_availability/dark_from_clearsky.py ...`
+with a new output folder (see the audit file).
+
 | flux | vérité capot | θ̂ brut | θ_corr | verdict |
 |---|---|---|---|---|
 | Payerne A (CHM15k, ère post-swap) | 1 par définition | +1,05 ± 0,39 | +1,49 | détection ~3σ, amplitude à +50 % |
@@ -129,6 +140,11 @@ doit être lissé (≥ 2,5 km) sinon il absorbe du désaccord atmosphérique ; (
 extractions par nuit (`dark_clearsky/cache/`) rend chaque variante re-testable en secondes.
 
 ## 4. Scan réseau — le détecteur sépare-t-il les « dark fort » des contrôles ?
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** The CL61 network scan rows (θ̂ ∈ [−1.2, +0.6]) used the retired molecular WV model (see the §3 update). Expected impact is small; not rerun.
 
 Scan complet : 19 CHM15k (5 candidats FE « dark fort », 2 cas limites, 12 contrôles dont le
 quadruple d'Amsterdam) + 11 CL61 (Payerne CL31 : 0 nuit claire dans le run réseau, validation

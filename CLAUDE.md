@@ -127,6 +127,11 @@ never calibrated WV-free.
   covered-telescope b(z) profile (rcs_0 units, `rayleigh_availability/dark_profiles.py`) before the
   Rayleigh fit. At Payerne: +24 % on the CHM15k constant, +24 nights/yr, gradient −10.5 → −2.5 %/km.
   Do **NOT** confuse with `subtract_background` (fitted intercept = atmosphere in disguise, keep 0).
+  **Use the v3 profile** (`dark_profiles_payerne_v3.npz`, 10 sessions May–Sep 2026, data-detected windows,
+  P-smoothed; reruns `diag_v22_dark_v3`). The 6-session v1 profile that the inter-comparison dashboard still
+  carries produced a spurious +8 % CL61-Rayleigh-vs-CHM15k gap (June +19 %) in 2026; with v3 on both
+  instruments the two Rayleigh calibrations agree to +1 ± 3 % Jun–Oct 2026
+  (`doc/reports/eta_payerne_gap_2026-11-02.md`).
 - Campaign reports index: `doc/reports/README.md` §2026-08.
 
 ## CL61 water-vapour spectrum & the v3 dashboard (2026-08-16)
@@ -153,6 +158,12 @@ never calibrated WV-free.
   ⚠ **The local `NC_DIR` copy (`C:/Users/hervo/Downloads`) predates the switch** (nights to
   2026-08-06, no `calibration_version`), so the dashboard's `v2.0`/`cloudWV` variants still show
   the retired configuration until those files are refreshed from the bucket.
+- **Code default = operational (2026-11-02):** `water_vapor.LASER_SPECTRUM["CL61"]` is now
+  (910.55, 0.188) — before, ONLY the `ALC_WV_SPECTRUM` export in `ops/config.sh` / the CSCS sbatch
+  made it operational, and any run without that env var silently used the Qmini 910.74/1.0. The
+  Qmini line (≈0.3 nm pixels, ≈1.5 nm apparent width) cannot resolve a 0.19 nm laser: never use it
+  for the WV correction. To replay the retired model, set `ALC_WV_SPECTRUM='{"CL61": [910.74, 1.0]}'`
+  explicitly (`run_hopkin_variants.ps1` "nominal" now does).
 - Two other CL61 wavelengths coexist ON PURPOSE: 910.0→molecular Rayleigh reference (0.33 %
   effect), 910.55→η tables.
 - **Dashboard v3** = `inter-comparison_dashboard/index.html` (one page, 3 sites, per-instrument
@@ -182,10 +193,10 @@ never calibrated WV-free.
   `check_v3.py` against the reference kernel (gate 1e-5; observed 2.1e-06 = a/b storage precision).
 - Cloud calibration is dark-immune (+0.08 % CL31, ~0.001 % CL61, measured) and its fixed
   100–2400 m window makes a static dark CBH-flat by construction — never rerun cloud for dark.
-- L2 as distributed: CHM15k **and CL61** = operational Rayleigh v1.0 (the CL61's v1.0
-  calibration went live recently: constant 1.0 default on 48 d then 2.1257 from mid-2026-06 on
-  the paired window — the transition is visible in the L2 row tooltip); CL31 = UNCALIBRATED
-  (flat default 1e8 — the gap the cloud calibration fills).
+- L2 as distributed: CHM15k **and CL61** = operational Rayleigh v1.0 (CL61 applied constant: the
+  default 1.0 until 2026-07-28, 2.1257 from 07-29 to 10-13, 0.7932 from 10-14; the CHM15k's
+  changes on the same dates — the page dates these from the L2 files in the L2 row tooltip);
+  CL31 = UNCALIBRATED (flat default 1e8 — the gap the cloud calibration fills).
 
 ## CHM15k temperature coefficient & diurnal bias (2026-10-20, report 19)
 
@@ -243,3 +254,8 @@ never calibrated WV-free.
 - Wants honest trade-off analysis ending in a **clear recommendation**, not a menu of options.
 - Comfortable in French (often writes FR, mixes EN).
 - **The user pushes git themselves** — prepare commits, do not `git push`.
+
+## Cloud eta tables, generation v2 (2026-11-02)
+
+- `calibration/cloud/_filters.py` `_ETA_CL31/_CL51/_CL61` are now PVC tables at **a_G 3.3 um, alpha 20 /km, S 18.8 sr** (13 nodes to 3.75 km; constants `ETA_V2_AG_UM`, `ETA_V2_ALPHA_KM`); the 2026-07 tables (a_G 5.5 um, alpha 10) stay as `_ETA_PVC55_*` (`ALC_ETA_TABLES=pvc55`), the Hopkin ladder as `hopkin_legacy`. Cloud rows carry `calibration_version` **1100** (1000 = 2026-07 tables). C_L moves by -1..-2.6 pct (CBH 0.5-2 km). Why 20: the extinction of the calibration clouds is 5 /km at the onset, 13 at the signal peak, 25-35 /km 100 m higher (forward inversion, tail decay, Cloudnet) - a homogeneous-table compromise, see `doc/reports/eta_switch_decision_2026-11-02.md` section 9. Never tune alpha / a_G to a check.
+- Release v2.3 switches (`ops/cscs/alc_v23_release*.sbatch`): `ALC_MOLECULAR_METHOD=eprof_v2.3`, `ALC_UNCERTAINTY_MODEL=v2.3`, `ALC_KALMAN_UNCERTAINTY_WEIGHTING=1`, `ALC_POLAR_NIGHT_FALLBACK=1`; low-sun nights carry version 231; Payerne CHM15k A on tier 1 only (`station_molecular_params` in options.json); CL61 tier-2 windows capped at 5 km AGL (`TIER2_MAX_END_M`). Plan: `doc/v2.3/network_rerun_plan_2026-11.md`.

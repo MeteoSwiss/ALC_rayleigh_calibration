@@ -14,7 +14,7 @@ $base = "C:/DATA/Projects/202606_E-PROFILE_calibration"
 "=== calibration CL61 spectre correct (910,55 / FWHM 0,188) ==="
 python scripts/run_streams_parallel.py --streams 0-20000-0-06610_C,0-20000-0-10393_C `
     --start 20250101 --end 20260813 --methods rayleigh,cloud `
-    --out "$base/diag_v22_l55s008" --cams "A:/CAMS_Monthly_04;D:/CAMS_daily" --chunks 6 --workers 8
+    --out "$base/diag_v22_l55s008" --cams "D:/CAMS_Monthly_04;D:/CAMS_daily" --chunks 6 --workers 8  # was A:/CAMS_Monthly_04 (moved to D:, same files)
 "=== fin calibration rc=$LASTEXITCODE ==="
 
 "=== extraction par profil (heatmap Hopkin) pour la meme configuration ==="

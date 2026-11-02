@@ -45,7 +45,7 @@ A_G_UM, ALPHA = 5.5, 10e-3            # operational multiple-scattering table pa
 
 
 def _cams_folder():
-    for c in ("A:/CAMS_Monthly_04/", "D:/CAMS/"):
+    for c in ("D:/CAMS_Monthly_04/", "D:/CAMS/"):  # was A:/CAMS_Monthly_04 (moved to D:, same files)
         if Path(c).exists() and any(Path(c).glob("CAMS_Beta_202606*.nc")):
             return c
     raise FileNotFoundError("no CAMS file for June 2026")

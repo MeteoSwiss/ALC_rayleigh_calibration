@@ -73,7 +73,7 @@ DATA = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/rayleigh_availability
 OUT_DIR = DATA / "dark_clearsky"
 DEFAULT_L1 = Path("D:/E-PROFILE_L1_2026")
 DEFAULT_CSV = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/calout_v22_04")
-DEFAULT_CAMS = "A:/CAMS_Monthly_04;D:/CAMS_daily"
+DEFAULT_CAMS = "D:/CAMS_Monthly_04;D:/CAMS_daily"  # was A:/CAMS_Monthly_04 (moved to D:, same files)
 WV_LUT = REPO / "calibration" / "data" / "abs_cross_wv_910nm.nc"
 
 # Nuits retenues : tout flag ou l'ecran nuit-claire est passe (le fit a ete TENTE). -1 (pas une

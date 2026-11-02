@@ -10,6 +10,26 @@ cohérent mais sans contre-recalcul indépendant), **(contexte)** (chiffre héri
 
 ## 1. La réponse courte
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+Every CL61 constant in this report (both methods) used 910.74/1.0:
+- **Rayleigh.** Re-expressing over each fit window lowers the Rayleigh constant by ×0.81 (network median;
+  Payerne same 7 nights in a full recalibration on CAMS 0.4°: 1.227 → 1.006, ×0.83).
+- **Cloud.** The cloud constant falls by ×0.86 (Payerne ×0.85).
+- **Ratio.** C_ray/C_cloud at Payerne moves from 0.862 to **0.805** (stream medians, `calout_v22_04`
+  re-expressed, `DATA/cbh_native_l55/rescale_rayleigh.log`).
+
+**Verdicts changed:**
+- "WV quasi common-mode, ±0.15 %": this held for a column error at a fixed spectrum. The spectrum change
+  itself is NOT common-mode; it moves the ratio by about −6 %.
+- The "+8.32 %/km cloud residual, unidentified": it is the retired WV model (+0.79 ± 1.68 %/km at the
+  correct line).
+- The "summer spectral drift" candidate was computed around 910.74/1.0. At 910.55 nm the narrow line sits
+  in an absorption valley: ±0.1 nm gives a 3.5 % swing (report 03 §3.3 update, CAMS 0.4°), with a different sign structure.
+- The dark-corrected closure budget has to be redone on 910.55 constants; it is not closed by this audit.
+
 L'écart nuage/Rayleigh du CL61 de Payerne n'est **pas** une erreur de paramètre optique de la méthode nuage.
 Il se décompose ainsi, dans le régime **v2.0-strict** (nuits claires, fenêtres médianes 4,3 km AGL) :
 
@@ -93,6 +113,11 @@ corrigé médian : strict 1,249 → 1,352 ; recovered 0,957 → 1,184.
 
 ### 2.3 WV tranché [confirmé]
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** At 910.55/0.188: 2τ_wv ≈ 0.026 at the Rayleigh windows (T² ≈ 0.974) and ≈ 0.02 at the cloud (T² ≈ 0.98), against 0.24 / 0.17 with the retired model. The two methods do not share the spectral error. Changing the spectrum moves the ratio by about −6 % (see §1 update).
+
 Les **deux** séries appariées (Rayleigh et nuage) ont été calibrées avec le CAMS 0,4° (`options.json`
 `cams_folder = D:/CAMS_Monthly_04` au commit 83f451f du rerun 2026-07-13 ; `A:/CAMS_Monthly_04` pour le run frais ;
 journaliers 0,4° pour juin–août). L'artefact d'orographie du 1° (point de grille à 894 m, PWV −26 %,
@@ -127,6 +152,11 @@ fenêtre-Rayleigh qui s'applique :
 
 ## 3. Les paramètres optiques : code vs spec vs littérature
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** Rows to correct: (i) 'λ_mol CL61 910.0 → 910.74 nm' should read 910.55 nm (+0.24 % on C_ray, as stated for the network); (ii) 'WV laser spectrum CL61 (910.74, FWHM 1.0) — compliant' is **not compliant**: the correct entry is (910.55, 0.188), now the code default.
+
 Inventaire vérifié ligne à ligne et recalculé indépendamment [confirmé] :
 
 | Paramètre | Code | Valeur | Source / littérature | Verdict |
@@ -160,6 +190,11 @@ Inventaire vérifié ligne à ligne et recalculé indépendamment [confirmé] :
 ---
 
 ## 4. Les tables η : aucun jeu statique ne marche — démonstration
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** The search for a static η table to fix the +8.3 %/km CL61 residual is moot: at 910.55/0.188 the residual is +0.79 ± 1.68 %/km with the existing `_ETA_CL61` (keep it, as action C1 says).
 
 Balayage complet de la machinerie PVC de référence (`validation/multiple_scattering_eta.py`, non modifiée ; la
 table livrée `_ETA_CL61` s'y reproduit à rms 0,000 %) : 50 combos a_G 3–9 µm × α 5–30 /km × 3 types, 11 FOV
@@ -208,6 +243,11 @@ CBH — mais elle ne fermera pas le +8,3 %/km, qui après WV across-night (−1,
 ---
 
 ## 5. Laquelle des deux méthodes corriger, et comment
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** Action R2 becomes 'λ_mol CL61 910.0 → 910.55 nm' (+0.24 %). Action C4 (dynamic η) loses its CL61 motivation. The Rayleigh dark action R1 stands; its magnitudes must be re-derived on 910.55 constants.
 
 **Verdict : les deux, mais pas symétriquement.** Pour le **niveau**, c'est la méthode **Rayleigh** qui porte le
 biais (dark électronique) — la méthode nuage reste l'ancrage absolu et ses paramètres optiques n'ont **pas besoin

@@ -114,4 +114,12 @@ Notes on the table:
 
 ## CL61 (911 nm)
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+Both the Kalman C_L and the WV correction of the OmB used the retired model. At the correct line the Rayleigh
+constant is ×0.82 (lower) and the in-band WV division is 12–16 % weaker. Net, the calibrated CL61 β vs the CHM15k changes
+by −2 to +5 points at Payerne (report 05 §2.3 update), i.e. a few hundredths on the log-scale OmB bias. The CL61 −0.115 (ours) vs −0.104 (operational) reading therefore stands within that margin. Not rerun.
+
 ![omb CL61 — Observation-minus-Background vs CAMS aerosol backscatter, Payerne 2026-05 (911 nm, Angstrom 532/1064 + water-vapour correction; operational L2 constant vs Kalman C_L)](omb_payerne/figs/omb_CL61.png)

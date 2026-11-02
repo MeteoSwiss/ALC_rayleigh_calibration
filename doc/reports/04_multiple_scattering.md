@@ -19,6 +19,15 @@ range dependence, CL61 borrowing CL51). At low cloud base η ≈ 0.95 (vs the le
 records the deep check and the four independent validation campaigns that led to this state; the
 legacy tables are retained only as clearly-labelled history.
 
+> **Correction 2026-11-02 (droplet size):** the 5.5 µm "measured calibration-scene droplet radius" is the
+> Cloudnet effective radius r_e (`der`, fixed-N retrieval, Frisch et al. 2002 method 1 with the CloudnetPy
+> default N = 200 cm⁻³ and σ = 0.35 (cloudnetpy/products/der.py), median over
+> CBH −30 m to +300 m, all liquid statuses), not the PVC input a_G. PVC needs the equivalent-area radius
+> a_G = √⟨r²⟩ = 0.832 r_e (lognormal, σ = 0.35). Re-read on the lowest 100 m above the liquid base,
+> `der_retrieval_status` = 1 only, and with `der_scaled`, the same Cloudnet files give r_e ≈ 4.0 µm and
+> a_G ≈ 3.3 µm (lowest 50 / 100 / 150 m: 3.0 / 3.3 / 3.6 µm). See
+> [`04_multiple_scattering_v2.md`](04_multiple_scattering_v2.md) §3.1. The operational tables are unchanged.
+
 ## Contents
 
 - [1. What was checked, and the current tables](#1-what-was-checked-and-the-current-tables)
@@ -275,6 +284,40 @@ reference method remains the Rayleigh calibration. (Enforced by
 
 ## 6. Impact on real CL31/CL51/CL61 data
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+Rerun with `validation/_eta_impact_experiment_l55.py`: same 10 stations, Mar–May 2026, legacy vs PVC (8 µm);
+the CL61 borrows the CL51 table as in July. Tables come from `validation/_eta_impact_tables_l55.py`, a single
+documented estimator applied to all three runs: profile-level, stream fixed effects, cloud-calibration coefficient C
+(C = 1/C_L). The July |r| table was computed inline with an estimator that was not archived, so it is
+replaced here by this estimator. Outputs: `DATA/eta_impact_l55/`; the 0.4° control is `DATA/eta_impact_l74ctl04/`.
+*Note: the July → correct difference also includes the 1° → 0.4° CAMS change and the code changes since July. The 910.74 control rerun on CAMS 0.4° with today's code (`l74ctl04`) quantifies them below.*
+
+CL61 rows:
+
+| quantity | 910.74 nm (retired model), July, CAMS 1° | 910.74 nm, CAMS 0.4°, today's code (`l74ctl04`) | **910.55 nm (correct), CAMS 0.4°** |
+|---|---|---|---|
+| station-days (both modes) | 121 | 121 | **115** |
+| day-level median C_pvc/C_legacy | 0.969 | 0.968 | **0.972** |
+| C_pvc/C_legacy by CBH band 0.5–1 / 1–1.5 / 1.5–2 / 2–3 km | 0.939 / 0.979 / 0.999 / 1.020 | 0.939 / 0.979 / 0.999 / 1.020 | **0.939 / 0.978 / 0.998 / 1.019** |
+| \|r(ln C, CBH)\| legacy → PVC (profiles, stream FE) | 0.421 → 0.215 | 0.421 → 0.214 | **0.202 → 0.024** |
+| d ln C/dCBH legacy → PVC [%/km] (C convention) | −12.35 → −5.93 | −12.27 → −5.87 | **−5.62 → +0.65** |
+
+The CL31/CL51 rows are unchanged by the spectrum: CL51 |r| 0.255 → 0.033, CL31 0.193 → 0.081 on 0.4°.
+
+**Verdict:**
+- The table-swap ratios (band table, day medians) are WV-independent, as expected: the same WV divides both modes.
+- The CBH test keeps its direction (PVC flatter than legacy) and becomes much cleaner. With the correct WV line
+  the PVC-corrected CL61 constant is flat in CBH (|r| 0.024, slope +0.65 %/km). With the retired model it kept
+  a −5.9 %/km residual in C (i.e. +5.9 %/km in C_L): that residual was the WV error, not a PVC shortfall.
+- On this estimator the CL31 also favours PVC (0.193 → 0.081). The original "legacy flatter for CL31" row came
+  from the unarchived estimator and is not reproduced.
+- CAMS 1° → 0.4° and code drift change nothing here (July vs `l74ctl04` columns are identical to ±0.001).
+
+![Per-profile ratio vs cloud-base height, 910.55 nm (correct)](figs_multiple_scattering/fig_eta_impact_profiles_l55.png)
+
 To quantify what actually changes if the legacy tables were swapped for the reference-exact PVC
 tables, the operational cloud calibration was run **twice per station-day** (identical inputs, only
 the η table swapped) over **Mar–May 2026** on a geographically diverse selection — 3 CL31
@@ -325,6 +368,58 @@ over-correction is an artefact of the 8 µm size choice, resolved by the a_G = 5
 
 ## 7. 2025–2026 confirmation on CL61 — slope, seasonality, Rayleigh agreement
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+Rerun with `validation/_ms_seasonal_experiment_l55.py`: same 3 sites, 2025-01..2026-05, same modes; the CL61
+cloud AND CL61 Rayleigh constants are recomputed. 16 rows that failed with NetCDF write clashes (15 of them
+CHM15k rows already failed in the July cache) were recomputed serially (`_ms_seasonal_fix_errors_l55.py`). One
+cloud day (Lindenberg 2025-01-01) is skipped: it needs CAMS for 2024-12-31, outside the 0.4° archive, and it was
+not run on 1°. Outputs: `DATA/ms_seasonal_l55/`.
+*Note: the July → correct difference also includes the 1° → 0.4° CAMS change and the code changes since July. The middle column (910.74 nm, CAMS 0.4°, today's code, `l74ctl04`) quantifies them.*
+
+(i) Slope test, |corr| of theoretical/observed ηS with height:
+
+| site | 910.74 nm (retired), July, 1°: legacy / PVC | 910.74 nm, 0.4°, today's code: legacy / PVC | **910.55 nm (correct), 0.4°: legacy / PVC** |
+|---|---|---|---|
+| Payerne | 0.242 / **0.057** | 0.233 / **0.047** | **0.022 / 0.212** (signed −0.022 / −0.212): legacy flatter; **inconclusive** (thin Rayleigh sample, see caveat) |
+| Lindenberg | 0.169 / **0.107** | 0.171 / **0.109** | 0.101 / **0.039**: PVC |
+| Aosta | 0.552 / **0.388** | 0.557 / **0.394** | 0.394 / **0.160**: PVC |
+
+(ii) Cloud C_L / CL61 Rayleigh C_L (monthly-median level):
+
+| site | 910.74 nm (retired), July, 1°: legacy / PVC | 910.74 nm, 0.4°, today's code | **910.55 nm (correct), 0.4°** |
+|---|---|---|---|
+| Payerne | 0.90 / 0.93 | 0.952 / 0.973 | **1.048 / 1.080** |
+| Lindenberg | 0.96 / 0.98 | 0.939 / 0.954 | **0.967 / 0.994** |
+| Aosta | 0.84 / 0.87 | 0.828 / 0.858 | **0.871 / 0.910** |
+
+*Caveat (Payerne): the CL61 Rayleigh reference is only 11 nights in 3 months (Mar–May 2026, no February),
+and its monthly medians drift from 1.075 to 0.82. With plain medians on the same rows the ratios are
+0.97 / 0.98 instead of 1.05 / 1.08. The Payerne level ratio and slope-test verdict are therefore
+inconclusive, not a Hopkin (legacy) win.*
+
+Rayleigh constants (910.74 → 910.55, 0.4°): Payerne 1.175 → **0.940**, Lindenberg 1.430 → **1.191**,
+Aosta 1.346 → **1.189**. The PVC cloud constants fall less: 1.144 → 1.015, 1.364 → 1.184, 1.155 → 1.081.
+
+**Verdicts changed:**
+- "Both tests favour PVC at **every** site" no longer holds: Payerne inconclusive (thin Rayleigh sample);
+  Lindenberg and Aosta favour PVC. With the correct WV line, the
+  observed ηS(z) at Payerne is flat under the legacy ladder (−0.02) and over-corrected by PVC (−0.21).
+  PVC still wins clearly at Lindenberg and Aosta, by a wider margin than before (Aosta 0.394 → 0.160).
+  Payerne is the shortest series (5 months, 4 704 profiles) and its CL61 sits in a valley; the PVC
+  preference rests on the two longer sites.
+- Level agreement improves at Lindenberg (PVC/Rayleigh 0.994) and Aosta (0.910). At Payerne the cloud
+  constant now sits 5–8 % ABOVE the Rayleigh constant. This is the direction of the CL61 weak-signal dark
+  offset, which lowers the Rayleigh constant (report 07 §4: −10 %). The "PVC still under-shoots Rayleigh by
+  7–16 %" statement belongs to the retired model.
+- The CAMS 1° → 0.4° change alone moved Payerne from 0.90/0.93 to 0.95/0.97 (valley site, 1° grid ≈ 894 m
+  too high). Lindenberg and Aosta moved by ≤ 0.02.
+
+![Slope discriminator, 910.55 nm (correct)](figs_multiple_scattering/fig_ms_slope_discriminator_l55.png)
+![Seasonal + agreement, 910.55 nm (correct)](figs_multiple_scattering/fig_ms_seasonal_l55.png)
+
 Extending to **17 months (2025-01..2026-05)** on the three CL61 sites with an independent Rayleigh
 reference and a co-located CHM15k (Payerne, Lindenberg, Aosta;
 `validation/_ms_seasonal_experiment.py` + `_ms_seasonal_analyze.py`, ~822 cloud-days, ~55 000
@@ -366,6 +461,44 @@ screening (§8). PVC (at 8 µm here) still under-shoots the Rayleigh level by 7�
 and the a_G = 5.5 µm migration (§9–§10) target it.
 
 ## 8. Co-located multi-FOV + Cloudnet-microphysics validation
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+Rerun with `validation/_ms_fov_experiment_l55.py` → `_ms_fov_analyze_l55.py` (Test 1, C_L vs altitude) and
+`_ms_cloudnet_tests_l55.py` (Tests 2/3, Cloudnet `der` from `D:/Cloudnet_Droplet_radius`): same streams and
+period, CAMS 0.4°. The CL61 and CL31 are recomputed; CHM15k rows are reused (1064 nm, no WV). Outputs:
+`DATA/ms_fov_l55/`.
+*Note: the July → correct difference also includes the 1° → 0.4° CAMS change and the code changes since July.
+The 910.74 control on 0.4° (`DATA/ms_fov_l74ctl04`) was computed, but its analysis was not run (owner decision:
+no further 910.74 controls). The CL31 rows below change by ≤ 0.01, which bounds that effect for a
+spectrum-insensitive instrument.*
+
+| quantity | stream | 910.74 nm (retired model), July, 1°: legacy → PVC | **910.55 nm (correct), 0.4°: legacy → PVC** |
+|---|---|---|---|
+| \|corr(C_L, altitude)\| | Payerne CL61 | 0.20 → **0.01** (PVC) | **0.065 → 0.265 (legacy)** |
+| | Lindenberg CL61 | 0.53 → **0.33** (PVC) | **0.362 → 0.081 (PVC)** |
+| | Payerne CL31 | 0.19 → 0.26 | 0.190 → 0.262 (unchanged) |
+| | Palaiseau CL31 | 0.16 → 0.24 | 0.172 → 0.236 (unchanged) |
+| Test 2 closure \|corr\| | Payerne CL61 (n 4 234 → 4 033) | 0.198 → **0.065** (PVC) | **0.071 vs 0.078 (tie)** |
+| | Lindenberg CL61 (n 24 998 → 23 708) | 0.533 → **0.234** (PVC) | **0.361 → 0.105 (PVC)** |
+| | Palaiseau CL31 | 0.218 → 0.025 | 0.221 → 0.025 (unchanged) |
+| | Payerne CL31 | 0.175 vs 0.182 (tie) | 0.179 vs 0.185 (tie, unchanged) |
+| Test 3 slope vs r_e [/µm] | Lindenberg CL61 | (negative) | −0.0040 |
+
+**Verdicts changed:**
+- **Lindenberg CL61:** PVC wins more decisively with the correct WV line (closure 0.361 → 0.105; C_L-altitude
+  0.081).
+- **Payerne CL61:** the PVC advantage disappears. The legacy ladder is flatter in C_L vs altitude (0.065 vs
+  0.265), and Test 2 is a tie (0.071 vs 0.078). With the retired model, the WV over-correction added a
+  height-dependent term that PVC happened to compensate.
+- The overall verdict for the CL61 (PVC better) therefore rests on Lindenberg (≈ 6× more profiles) and on
+  Aosta (§7), not on Payerne.
+- CL31 conclusions are unchanged. CHM15k saturation is unchanged.
+
+![Test 2 closure, 910.55 nm (correct)](figs_multiple_scattering/fig_test2_cloudnet_l55.png)
+![C_L vs altitude, 910.55 nm (correct)](figs_multiple_scattering/fig_cl_vs_altitude_l55.png)
 
 Using co-located different-FOV ceilometers at Payerne (CL61+CL31+CHM15k), Lindenberg
 (CL61+CHM15k) and Palaiseau/SIRTA (CL31+CHM15k), each with a Cloudnet `der` (droplet effective
@@ -422,6 +555,35 @@ Additional figures for this section: `fig_test1_fov_slopes.png`, `fig_test1_fov_
 
 ## 9. CHM15k β intercomparison — absolute cross-instrument test
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+Rerun with `validation/_ms_beta_intercompare_l55.py`. At 910.55 nm (correct), BOTH the CL61 cloud constants
+(`DATA/ms_fov_l55`) and the CL61 β WV division use the correct line, with CAMS 0.4° and no 1° fallback.
+CHM15k references: the July series plus the serially recomputed nights (`DATA/ms_seasonal_l55`, Palaiseau
+`palaiseau_chm_ray.jsonl`). Output: `DATA/ms_fov_l55/beta_intercompare.json`.
+*Note: the July → correct difference also includes the 1° → 0.4° CAMS change and the code changes since July.
+The 910.74 control was not run for this step (owner decision).*
+
+| stream | 910.74 nm (retired model), July: legacy / PVC 8 µm / **PVC 5.5 µm** | **910.55 nm (correct): legacy / PVC 8 µm / PVC 5.5 µm** |
+|---|---|---|
+| Payerne CL61 | +21.1 / +18.9 / **+12.6 %** | **+25.3 / +23.2 / +15.6 %** |
+| Lindenberg CL61 | +28.5 / +23.9 / **+16.8 %** | **+25.3 / +20.4 / +14.4 %** |
+| Payerne CL31 | +74.5 / +80.5 / +69.8 % | +70.2 / +76.4 / +66.5 % |
+| Palaiseau CL31 | +9.5 / +15.0 / +7.6 % | −55.4 / −52.4 / −56.9 % (see note) |
+
+**Verdict (CL61) unchanged:** PVC at a_G = 5.5 µm stays the best of the three tables at both CL61 sites. The
+CL61 biases move by only −2 … +3 points. The two retired-model errors largely cancel: the constant was too
+high (cloud C_L ×1/0.86, e.g. Payerne 1.058 → 0.902 with PVC 8 µm), and the β WV division was too strong
+(≈ ×1.12–1.16 in-band).
+**Note on Palaiseau CL31:** its cloud constants are identical to July to within 0.3 % (median PVC 7.16e7 vs
+7.14e7). The −55 % shift therefore does not come from the WV line or the CL31 calibration; it comes from today's
+`intercompare` β chain for that site (read, overlap or conversion), or from the 0.4° CAMS. It is outside the
+scope of this audit and is reported to the owner as an open anomaly. Payerne CL31 moved by only −4 points.
+
+![β vs CHM15k, 910.55 nm (correct)](figs_multiple_scattering/fig_beta_vs_chm15k_l55.png)
+
 CHM15k is not cloud-calibrated (it saturates); it is the independent Rayleigh-calibrated 1064 nm
 reference. For each site the co-located Vaisala is cloud-calibrated (legacy vs PVC C_L), its β
 gets the 910 nm WV correction and the 910→1064 nm normalisation, is screened to clear air, and
@@ -463,6 +625,11 @@ a_G = 5.5 µm is the **best of the three at all four streams** — it improves C
 **fixes the CL31 over-correction** (below legacy at both CL31 sites). (The residual CL31 absolute
 bias is instrumental — Payerne CL31's +70% is the bad unit / Kotthaus near-range artefacts, not MS.)
 
+> **Update 2026-11-02, 910.55 nm (correct):** the consolidated verdict below stands for the network (PVC at
+> a_G = 5.5 µm) but no longer holds on "every independent test". At Payerne CL61, with the correct WV line,
+> the slope test and the C_L-vs-altitude test favour the legacy ladder, and Test 2 is a tie (§7, §8 updates).
+> Lindenberg and Aosta favour PVC more strongly than before. The β-vs-CHM15k ranking (§9) is unchanged.
+
 **Consolidated verdict (all tests §6–§10) — implemented in code:**
 - **All 910 nm Vaisala (CL61, CL51, CL31) use the PVC table at the calibration-scene droplet size
   a_G ≈ 5.5 µm** (the reference-exact Hogan physics + the measured droplet climatology). It is
@@ -471,6 +638,15 @@ bias is instrumental — Payerne CL31's +70% is the bad unit / Kotthaus near-ran
 - **CHM15k → Rayleigh only** (cloud saturation); ideal β reference.
 
 ## 10. Droplet-size assumption vs Cloudnet climatology + literature
+
+> **Correction 2026-11-02:** the "valid-calibration scenes" values below (5.8 / 5.6 / 5.4 µm) and the
+> 5.5 µm adopted in the conclusion are the Cloudnet effective radius r_e (`der`, fixed-N retrieval,
+> Frisch et al. 2002 method 1 with the CloudnetPy default N = 200 cm⁻³ and σ = 0.35
+> (cloudnetpy/products/der.py), median over CBH −30 m to +300 m, all liquid statuses), not the PVC input
+> a_G. PVC needs the equivalent-area radius a_G = √⟨r²⟩ = 0.832 r_e (lognormal, σ = 0.35). Re-read on the
+> lowest 100 m above the liquid base, `der_retrieval_status` = 1 only, and with `der_scaled`, the same
+> Cloudnet files give r_e ≈ 4.0 µm and a_G ≈ 3.3 µm (lowest 50 / 100 / 150 m: 3.0 / 3.3 / 3.6 µm). See
+> [`04_multiple_scattering_v2.md`](04_multiple_scattering_v2.md) §3.1. The operational tables are unchanged.
 
 **What a_G is.** a_G is the *equivalent-area* droplet **radius** (√⟨r²⟩) that sets the forward
 diffraction-lobe width θ = λ/(π a_G) in Hogan's model. It is a *radius*: a_G = 8 µm = **16 µm

@@ -1063,6 +1063,11 @@ spurious-window nights that inflate its CV.
 
 ### 6.4 CL61 cross-check — Rayleigh vs liquid-cloud calibration
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E). The CL61 numbers here are yields and relative scatters (σ). The retired WV model scales the CL61 constant (Rayleigh ×1/0.81, cloud ×1/0.86) and adds a humidity- and CBH-dependent term (≈ +9 %/km in CBH; seasonal through the WV column), which inflates σ somewhat. Yields are unaffected, because the WV correction does not gate profiles. Not rerun: these are precision/yield screens, and at the correct line the σ values can only stay equal or decrease.
+
 The CL61 Rayleigh calibration is cross-checked against the **independent liquid-water-cloud
 calibration** (O'Connor/Hopkin) run on the monthly L2 archive (the cloud method needs a month of
 profiles to accumulate enough liquid-cloud returns). The two methods calibrate *different physical
@@ -1110,6 +1115,11 @@ its effect is a physically sensible −4 to −6 % on the coefficient.
 > multiple-scattering η tables and mandatory WV correction, see the liquid-cloud calibration report.*
 
 ### 6.5 The CL61 fleet, and the sign error
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E). The CL61 numbers here are yields and relative scatters (σ). The retired WV model scales the CL61 constant (Rayleigh ×1/0.81, cloud ×1/0.86) and adds a humidity- and CBH-dependent term (≈ +9 %/km in CBH; seasonal through the WV column), which inflates σ somewhat. Yields are unaffected, because the WV correction does not gate profiles. Not rerun: these are precision/yield screens, and at the correct line the σ values can only stay equal or decrease. The sign-error conclusion is unaffected.
 
 **CL61 (new).** The long-run study (§3) had no CL61 (its L2-monthly archive and the old
 `instruments.json` predate the fleet). Running the **10 CL61 from L1 2026 with the WV correction**

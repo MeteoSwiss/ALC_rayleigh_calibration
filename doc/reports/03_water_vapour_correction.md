@@ -124,6 +124,16 @@ Three different "widths" appear in the datasheets and must not be confused:
 
 ### 2.2 Summary — literature/manufacturer values vs our operational config
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm (σ 0.08 nm) is the correct CL61 emission line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+The CL61 row above lists our configuration as (910.74, **1.0**). That is the retired model. The code
+default has been (910.55, 0.188) since 2026-11-02, and operations have used it since the v2.2 cutover
+(2026-08-18). The Qmini measurement (910.74 ± 0.10 nm, apparent width ≈ 1.5 nm) is spectrometer-limited:
+it cannot resolve a 0.19 nm line, and its centroid sits ≈ 0.2 nm too high.
+**Verdict changed:** the CL61 configuration is (910.55, 0.188), not (910.74, 1.0).
+
 | Instrument | central λ₀ | **emission FWHM Δλ** | source(s) | our config | Payerne Qmini (measured, 2026-06-02) |
 |---|---|---|---|---|---|
 | **CL31** | 905 ± 10 nm (older) → 910 ± 10 nm (newer), 25 °C | **≈ 4 nm** (typical); 2021 datasheet omits it | Vaisala CL31 datasheet/ARM VCEIL handbook; Kotthaus et al. 2016; Wiegner et al. 2019 | (909.7, **6.0**) | 909.7, **5–7 nm**, peak wandering 909.0–910.1 nm |
@@ -169,6 +179,17 @@ the measured range (and above the ~4 nm literature value); the breadth is real a
 nominal wavelength is only approximate for the CL31.
 
 ### 2.5 CL61 — only the centre (910.55 nm) is published; the FWHM is undocumented
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm (σ 0.08 nm) is the correct CL61 emission line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+The width is no longer undocumented. σ = 0.08 nm (FWHM 0.188 nm) is a manufacturer value, quoted in the
+authors' reply to referee RC1. It is corroborated by the DA10 transmitter measurements (0.19–0.21 nm FWHM).
+The DA10 guide also names 910.55 nm as the offline wavelength with low water-vapour absorption.
+**Verdicts changed:**
+1. The deliberate "~1 nm averaging" is withdrawn. It made the correction ~7× too strong (§3).
+2. The measured 910.74 nm is withdrawn. It is a centroid bias of the Qmini; 910.55 nm is the line to report.
 
 This is the key gap. **Every** source we found gives only the central wavelength, never an emission
 linewidth:
@@ -261,6 +282,30 @@ greyed; (c) median T²_wv over 500–3000 m for every configuration. Reproduce w
 
 ### 3.1 CL61 — manufacturer 910.55 nm vs measured 910.74 nm
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm (σ 0.08 nm) is the correct CL61 emission line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+Rerun with the July setup (Payerne, same HITRAN LUT, night of the 15th ± 4 h, 500–3000 m median), but on
+**CAMS 0.4°** monthly: the 1° grid point at Payerne is ≈ 894 m too high (PWV −26 %), and it is not used for
+numbers labelled correct. Script `validation/wv_wavelength_sensitivity_l55.py`; log
+`DATA/wv_wavelength_sensitivity_l55.log`. The 1° replication of the July setup (`--cams1deg`, log
+`..._cams1deg.log`, figure `wv_wavelength_sensitivity_l55_cams1deg.png`) gives the same picture: β −11.9 …
+−16.2 %, absorption ×6.4–7.2.
+
+| month | T²_wv 910.74/1.0 (retired model) | T²_wv 910.55/1.0 | **T²_wv 910.55/0.188 (correct)** | β change, correct vs retired | absorption ratio retired/correct |
+|---|---|---|---|---|---|
+| 2026-02 | 0.858 | 0.854 | **0.980** | **−12.4 %** | ×7.1 |
+| 2026-03 | 0.869 | 0.865 | **0.982** | **−11.5 %** | ×7.3 |
+| 2026-04 | 0.819 | 0.815 | **0.972** | **−15.8 %** | ×6.4 |
+| 2026-05 | 0.837 | 0.833 | **0.976** | **−14.2 %** | ×6.7 |
+
+**Verdict changed.** The original comparison moved only the centre and kept FWHM = 1.0 nm, so it could not
+see the real error. At the correct line the two-way absorption is 6–7× smaller: 1.8 % instead of 13.1 % over
+0.5–3 km in March. The retired model therefore over-corrected CL61 β by +12 to +16 %, not by "< 0.5 %".
+
+![CL61 laser models vs H2O lines; T²_wv profiles; monthly absorption — 910.74/1.0 (retired) vs 910.55/0.188 (correct)](figs_wv_resolution/wv_wavelength_sensitivity_l55.png)
+
 At the operational FWHM (1.0 nm) the 0.19 nm difference between the manufacturer and measured
 central wavelengths changes T²_wv by **< 0.5 %**, stable across the season:
 
@@ -278,6 +323,26 @@ correction.
 
 ### 3.2 CL61 — spectral width (FWHM) is the larger lever
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm (σ 0.08 nm) is the correct CL61 emission line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+FWHM ladder around the correct λ₀ = 910.55 nm (March 2026, CAMS 0.4°, 500–3000 m / 2–6 km):
+
+| config | T²_wv (500–3000 m) | T²_wv (2–6 km) | β vs 910.74/1.0 (retired model) |
+|---|---|---|---|
+| 910.74 / 1.0 (retired model) | 0.869 | 0.836 | 0 |
+| **910.55 / 0.188 (correct)** | **0.982** | **0.976** | **−11.5 %** |
+| 910.55 / 0.5 | 0.887 | 0.861 | −2.1 % |
+| 910.55 / 1.0 | 0.865 | 0.833 | +0.4 % |
+| 910.55 / 1.5 | 0.874 | 0.842 | −0.6 % |
+| 910.74 / 0.188 | 0.847 | 0.817 | +2.6 % |
+
+The width matters only together with the centre:
+- A sub-0.2 nm line at 910.55 nm sits in an absorption valley (T²_wv ≈ 0.98).
+- The same narrow line at 910.74 nm sits on the shoulder of strong lines (T² 0.84).
+- Any width ≥ 0.5 nm smears the valley out (T² ≈ 0.86–0.88).
+
 | config (λ₀ = 910.74) | T²_wv (500–3000 m) | T²_wv (2–6 km) | β impact |
 |---|---|---|---|
 | FWHM 0.1 nm (≈monochromatic) | 0.831 | 0.795 | **+4.0 %** |
@@ -290,6 +355,17 @@ treatment raises the corrected β by ~4 % relative to FWHM 1.0 nm. A narrower li
 *average* absorption only if it sits in a micro-window — which leads to the key caveat below.
 
 ### 3.3 Key caveat — do **not** treat the CL61 as monochromatic
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm (σ 0.08 nm) is the correct CL61 emission line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+**Verdict changed.** At the correct line (910.55 nm / 0.188 nm, March, 500–3000 m) the ±0.10 nm centre
+test (CAMS 0.4°) gives T² 0.949 / 0.982 / 0.948, a β swing of **3.5 %**, not 27 %. The 27 % was computed for a narrow
+line at 910.74 nm, which sits on a line flank. At 910.55 nm the narrow line sits at the bottom of a
+≈ 0.3 nm-wide valley, so it is stable within the stated tolerance. Treating the CL61 as a narrow line is
+correct when it is centred at 910.55 nm; the retired 1 nm "robustness" width was the error. The residual
+risk is a temperature drift of the line: about 0.3 nm/K would leave the valley. That is a monitoring item.
 
 The measured CL61 line is intrinsically narrow (true width ≤ 0.03 nm), so one might use a
 near-monochromatic spectrum. But then T²_wv becomes extremely sensitive to the **±0.10 nm
@@ -333,6 +409,22 @@ the wavelength configuration is irrelevant to it (it is the WV-free 1064 nm refe
 
 ### 3.6 Summary of wavelength-configuration sensitivity
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm (σ 0.08 nm) is the correct CL61 emission line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+Corrected CL61 rows:
+
+| Factor | 910.74 nm (retired model) reading | **910.55 nm (correct)** |
+|---|---|---|
+| CL61 retired (910.74/1.0) vs correct (910.55/0.188) | (not tested) | **β −11.5…−15.8 %, absorption ×6.4–7.3** (CAMS 0.4°, Payerne, Feb–May 2026) |
+| CL61 centre 910.55 vs 910.74 at FWHM 1.0 | ≈ 0.4–0.5 % | still 0.4 %, but irrelevant: the width was wrong |
+| CL61 ±0.10 nm centre | 27 % (narrow line at 910.74) | **3.5 %** (narrow line at 910.55) |
+| CL61 two-way absorption, 2–6 km window | 17 % (T² 0.826, 1°) | **2.4 % (T² 0.976, 0.4°)** |
+
+**Bottom line changed:** for the CL61 the wavelength configuration is NOT a < 1 % term. The retired model
+biased the CL61 WV correction by +12 to +16 % in β. The CL31 conclusions (< 1 %) are unchanged.
+
 | Factor | β impact on WV correction | note |
 |---|---|---|
 | CL61 manufacturer (910.55) vs measured (910.74), FWHM 1.0 | **≈ 0.4–0.5 %** | negligible; manufacturer value adequate |
@@ -353,6 +445,27 @@ band makes the WV correction insensitive to its (poorly defined, wandering) cent
 ---
 
 ## 4. CL61 Rayleigh-calibration sensitivity to the WV correction (Payerne)
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm (σ 0.08 nm) is the correct CL61 emission line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+The ≈ 16 % effect (constant ratio 0.86; bias +1.7 % → +19.3 %) belongs to the retired model. With the
+correct line, the WV correction in the CL61 calibration is a **3–4 % term**:
+
+| quantity | 910.74 nm (retired model) | **910.55 nm (correct)** | source |
+|---|---|---|---|
+| C_L(no WV) / C_L(WV), Payerne CL61 Rayleigh | 0.86 (Mar–May 2026, MATLAB/L2) | **0.962** (43 nights, Mar–Aug 2026) | `validation/paper/wv_magnitude_cl61.py` on `DATA/diag_v22_l55s008` vs `diag_v22_nowv` |
+| same, Lindenberg CL61 Rayleigh | — | **0.973** (190 nights) | idem |
+| same, cloud method, Payerne / Lindenberg | about −13 % (report 07 §2.3) | **0.973 / 0.980** | idem |
+| C_L(correct) / C_L(retired), same 7 Payerne nights, today's code, CAMS 0.4° | 1 (median 1.227; 1.268 on 1°) | **0.827 (median 1.006)** | `validation/paper/_cl61_wavelength_experiment_l55.py` |
+
+**Verdict changed:**
+- The correction is still needed: without it the CL61 constant is 3–4 % low.
+- It is not a 16–18 % effect. The "+19 % without WV" tension, and the agreement with the ~20 % literature figure
+  (a CL51-based estimate), belong to the retired model.
+- The MATLAB L2 sensitivity run (`sensitivity_payerne_wv.m`) was not repeated. MATLAB is outside this
+  repository and has the CL61 spectrum hard-coded to 910.74/1.0; the Python numbers above replace it.
 
 **Question.** Does the WV absorption correction **in the CL61 Rayleigh calibration** matter, and by
 how much? The CL61 emits at 910.74 nm, inside the H₂O absorption band, so the high molecular-
@@ -423,6 +536,36 @@ accordingly (+1.7 % → +19.3 % vs the 1064 nm reference). The production datase
 ---
 
 ## 5. Resolution sensitivity of the WV correction (CAMS grid)
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm (σ 0.08 nm) is the correct CL61 emission line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+Rerun of `_wv_10stations.py` and `_wv_payerne_sources.py` through `validation/paper/_wv_resolution_l55.py`:
+same ERA5/IFS/sonde inputs (`DATA/old/wv_resolution`), today's code, tags `l55` and `l74ctl` (outputs
+`DATA/wv_resolution_{l55,l74ctl}`). Payerne, Uccle and Aosta are the CL61 stations; the other stations
+(CL31/CL51) are unchanged and serve as control.
+
+| station (CL61) | WV correction on C at 2 km, 910.74 nm (retired model) | **910.55 nm (correct)** | ΔC CAMS 0.4°−ERA5 winter/summer, retired → correct |
+|---|---|---|---|
+| Payerne | 18.4 % | **2.9 %** | −0.4/−0.0 → **−0.1/−0.0** |
+| Uccle | 21.0 % | **3.5 %** | +0.4/−0.4 → **+0.1/−0.1** |
+| Aosta | 17.3 % | **2.6 %** | +0.0/−1.0 → **+0.0/−0.2** |
+
+Payerne, CAMS-vs-radiosonde error on C at a 2 km cloud base, median [P10, P90]:
+
+| season | 910.74 nm (retired model) | **910.55 nm (correct)** |
+|---|---|---|
+| winter | +0.3 [−0.8, +1.7] % | **+0.1 [−0.1, +0.3] %** |
+| summer | −0.6 [−2.3, +1.3] % | **−0.2 [−0.5, +0.3] %** |
+
+The verdict keeps its direction and becomes stronger. For the CL61 every source and resolution error
+shrinks about 6×, because the correction itself is about 6× smaller. The "6–30 % correction vs IWV"
+magnitude now describes the CL31/CL51; for the CL61 at 910.55 nm it is ≈ 3 %. The valley-orography concern
+remains real for the CL31/CL51 stations (Radstadt, Samedan, Robiei unchanged).
+
+![10 stations, 910.55 nm (correct)](figs_wv_resolution/fig_wv_10stations_impact_l55.png)
+![Payerne seasonal, 910.55 nm (correct)](figs_wv_resolution/fig_wv_payerne_seasonal_l55.png)
 
 Beyond the *spectral* configuration (§3), the WV correction depends on the **humidity profile
 source** — its horizontal resolution, its vertical resolution in the boundary layer, and its
