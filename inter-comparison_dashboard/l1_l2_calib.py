@@ -296,12 +296,13 @@ def build_nowv_channel(chan, outdir=OUT_NOWV):
 METHOD_LABEL = {"rayleigh": "Rayleigh", "cloud": "Liquid clouds"}
 
 
-def run_csv_nights(csv_path, method):
+def run_csv_nights(csv_path, method, min_nights=5):
     """Per-night constants of ONE method from a network-runner <key>_cal.csv
     (columns date,method,flag,cal_value,uncertainty,...). flag 1/0.5 = success/degraded; the runner
     writes it variously as '1', '1.0' or '0.5', so it is compared as a float, and (unlike the
     Payerne NetCDF path) the degraded nights are kept -- the Kalman weighting by relative
-    uncertainty is what keeps them from steering the estimate."""
+    uncertainty is what keeps them from steering the estimate.  min_nights: below it -> None (an
+    extension rerun appended to a longer series passes 1)."""
     f = Path(csv_path)
     if not f.exists():
         return None
@@ -319,7 +320,7 @@ def run_csv_nights(csv_path, method):
                 d.append(datetime.strptime(r["date"], "%Y%m%d"))
                 c.append(v)
                 u.append(float(r["uncertainty"]) if r["uncertainty"] else np.nan)
-    return (d, np.array(c), np.array(u)) if len(d) >= 5 else None
+    return (d, np.array(c), np.array(u)) if len(d) >= max(min_nights, 1) else None
 
 
 def smooth_and_write(key, itype, calib, dates, C, Cstd, outdir, source, created,

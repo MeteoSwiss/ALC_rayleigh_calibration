@@ -19,7 +19,17 @@ from pathlib import Path
 DATA = Path(r"C:/DATA/Projects/202606_E-PROFILE_calibration")
 NETWORK_V22 = DATA / "calout_v22_04"          # network eprof_v2.2 run, 0.4 deg CAMS
 DARK_EST = DATA / "dark_test"                 # same runner + ESTIMATED clear-night dark
-DARK_MEAS = DATA / "diag_v22_dark"            # Payerne: MEASURED covered-telescope dark b(z)
+# Payerne: MEASURED covered-telescope dark b(z), hood profile v3 (10 sessions May-Sep 2026,
+# covered windows detected in the data, smoothed in P = rcs_0/r^2; rayleigh_availability/
+# build_dark_v3.py), rerun for BOTH A and C by rayleigh_availability/run_dark_v3.ps1 (eprof_v2.2,
+# CL61 on the operational 910.55/0.188 spectrum, Rayleigh only -- the cloud constants are
+# dark-immune).  Switched from the 6-session v1 run (diag_v22_dark) on 2026-11-02: v1 produced a
+# spurious +7.8 % CL61-Rayleigh-vs-CHM15k gap (doc/reports/eta_payerne_gap_2026-11-02.md).
+# The PROFILE-side twin of this run is sites.py `dark_npz` -- the two must always be the same
+# version, or a v3-corrected profile gets divided by v1-corrected constants.
+DARK_MEAS = DATA / "diag_v22_dark_v3"
+DARK_MEAS_VERSION = "v3"                      # shown in the labels and the warning prose
+DARK_MEAS_PERIOD = "mai–sept. 2026"           # hood sessions of that version (page language)
 NOWV = DATA / "diag_v22_nowv"                 # same runner, water-vapour correction switched off
 
 # --------------------------------------------------------------------------- CL61 WV spectrum
@@ -47,6 +57,12 @@ LAM_RUNS = {                                  # variant suffix -> runner output 
 REFERENCE_SUFFIX = "l55s008"
 # Only the CL61 streams were re-run: the spectrum in question is the CL61's.
 LAM_TYPES = ("CL61",)
+# The page's "λ910,74" WV-comparison mode ("nom") IS the retired CL61 model by definition -- its
+# labels and its coherent pairing with the 910,74 constants say so -- so it must not follow the
+# code default: validation/paper/intercompare.WV_PARAMS moved the CL61 to 910.55/0.188 on
+# 2026-10-20 (a25977e), which silently turned this mode into a copy of the ★ mode.  The other
+# 910 nm types keep their WV_PARAMS line.
+NOMINAL_WV_SPECTRUM = {"CL61": (910.74, 1.0)}
 
 # --------------------------------------------------------------------------- CL31 WV spectrum
 # The CL31 gets its own SMALL ladder (Payerne B only).  The operational model uses the measured
@@ -63,8 +79,9 @@ CL31_LAM_TYPES = ("CL31",)
 
 # The FULLY-corrected CL61 Rayleigh state: constructor spectrum AND the measured covered-telescope
 # dark subtracted INSIDE the calibration.  Payerne C only (the dark campaign is Payerne-only).
-# This is the reference state for the CL61 Rayleigh channel.
-L55S008DARK = DATA / "diag_v22_l55s008dark"
+# This is the reference state for the CL61 Rayleigh channel.  Since the v3 hood dark it is the C
+# stream of the SAME rerun tree as DARK_MEAS (that rerun used the operational spectrum).
+L55S008DARK = DARK_MEAS
 
 # Ordered variant lists per method (the page renders them in this order).
 VARIANTS = {
@@ -155,6 +172,20 @@ def dark_kind(site_key):
     only at Payerne; everywhere else 'v2.2dark' comes from the clear-night ESTIMATED dark
     (demonstration-only) and the page labels must say so — one variant id, two sources."""
     return "measured" if site_key == "payerne" else "estimated"
+
+
+# Dark-run labels where the dark is MEASURED: they name the hood-profile version, so the page can
+# never show constants of one dark version under another's name.  (The ESTIMATED kind keeps the
+# generic labels plus the render-side "dark ESTIMÉ" suffix.)
+DARK_LABEL_BY_KIND = {"measured": {
+    "v2.2dark": f"v2.2 + fond soustrait (dark capot {DARK_MEAS_VERSION})",
+    "v2.2_l55s008dark": (f"v2.2 — WV λ910,55 σ0,08 (opérationnel) + fond soustrait "
+                         f"(dark capot {DARK_MEAS_VERSION}) ★"),
+}}
+DARK_SHORT_BY_KIND = {"measured": {
+    "v2.2dark": f"v2.2+dark {DARK_MEAS_VERSION}",
+    "v2.2_l55s008dark": f"λ910,55 σ0,08 + dark {DARK_MEAS_VERSION} ★",
+}}
 DARK_NO_TWIN_WHY = ("aucun run d'étalonnage dark-corrigé pour cette variante : seul le PROFIL est "
                     "corrigé ici, la constante reste dark-free. État hybride — à lire comme un "
                     "diagnostic, pas comme une comparaison cohérente.")
@@ -248,8 +279,47 @@ def _csv(root, wmo, ident):
     return root / f"{wmo}_{ident}" / f"{wmo}_{ident}_cal.csv"
 
 
+# --------------------------------------------------------------------------- extension reruns
+# The Payerne window runs to 2026-10-31 since 2026-11-02, past the end of the original runs
+# (2026-08-13; the hood-dark v3 pair 2026-10-08).  run_payerne_ext.ps1 reran each run-based variant
+# with ITS settings over the missing nights, one tree per configuration under EXT_ROOT; the builder
+# reads [original series, extension] and appends only the extension nights dated after the
+# original series' last night (the original series is never altered).
+# "v2.0" (published NetCDFs) has no rerun: its Kalman is held after its last night, and the page
+# prose says so.
+EXT_ROOT = DATA / "dashboard_ext_20261031"
+EXT_TAG = {                                   # variant -> {instrument type: rerun configuration}
+    "v2.2":             {"CHM15k": "l55s008", "CL61": "nominal"},
+    "v2.2dark":         {"CHM15k": "dark_v3"},
+    "v2.2_l55s008dark": {"CL61": "dark_v3"},
+    "v2.2sansWV":       {"CL61": "nowv"},
+    "v2.2_l55s008":     {"CL61": "l55s008"},
+    "v2.2_l55w10":      {"CL61": "l55w10"},
+    "v2.2_l55w01":      {"CL61": "l55w01"},
+    "cloudWV":          {"CL31": "l55s008", "CL61": "nominal"},
+    "cloudNoWV":        {"CL31": "nowv", "CL61": "nowv"},
+    "cloud_l55s008":    {"CL61": "l55s008"},
+    "cloud_l55w10":     {"CL61": "l55w10"},
+    "cloud_l55w01":     {"CL61": "l55w01"},
+    "cloud_cl31l910":   {"CL31": "cl31l910"},
+    "cloud_cl31wieg":   {"CL31": "cl31wieg"},
+}
+
+
 def source_for(site_key, ident, itype, method, variant, wmo):
-    """-> ("nc"|"json"|"csv", arg) or a French string explaining the absence."""
+    """-> ("nc"|"json"|"csv", arg), a LIST of those (original series then its extension rerun,
+    read in order), or a French string explaining the absence."""
+    base = _base_source(site_key, ident, itype, method, variant, wmo)
+    if isinstance(base, str) or site_key != "payerne":
+        return base
+    tag = EXT_TAG.get(variant, {}).get(itype)
+    if tag is None or not _csv(EXT_ROOT / tag, wmo, ident).exists():
+        return base
+    return [base, ("csv", _csv(EXT_ROOT / tag, wmo, ident))]
+
+
+def _base_source(site_key, ident, itype, method, variant, wmo):
+    """The original run of one (instrument, method, variant), without extension."""
     is1064 = itype == "CHM15k"
 
     # --- the fully-corrected CL61 Rayleigh state (constructor spectrum + measured dark) ---------
@@ -314,6 +384,12 @@ def source_for(site_key, ident, itype, method, variant, wmo):
         return ("csv", _csv(NETWORK_V22, wmo, ident))
     if variant == "v2.2dark":
         if site_key == "payerne":
+            # The v3 rerun's CL61 stream carries the 910.55/0.188 spectrum, i.e. it is
+            # 'v2.2_l55s008dark', not this 910.74 + dark entry -- listing it here as well would
+            # show the same nights under the retired spectrum's name.
+            if itype in LAM_TYPES:
+                return (f"pas de rejeu λ910,74 + dark capot {DARK_MEAS_VERSION} (ancien modèle "
+                        f"retiré) — l'état dark-corrigé du CL61 est « λ910,55 σ0,08 + dark »")
             return ("csv", _csv(DARK_MEAS, wmo, ident))
         sub = {"amsterdam": "amst_dark", "lindenberg": "lind_dark"}.get(site_key)
         if sub is None:
@@ -347,6 +423,12 @@ _SPECTRUM_WARN = """<b>★ Spectre d'émission du CL61 — désormais le modèle
 _PAY_WARN = [
     # {tokens} are substituted at BUILD time from the current calibration series
     # (build_v3.prose_tokens), so the numbers in this prose can never go stale again.
+    """<b>Fenêtre prolongée jusqu'au {WIN_END}</b> (L2 d'août à octobre et CAMS d'octobre récupérés
+    sur CSCS le 2026-11-02). Chaque variante est prolongée par un rejeu aux mêmes réglages des
+    nuits qui manquaient à son run d'origine (<code>{EXT_DIR}</code>, lu après la série
+    d'origine). Seule la variante <b>v2.0</b> (NetCDF publiés, non rejouables) s'arrête à sa
+    dernière nuit — CHM15k {A_V20_LAST}, CL61 {C_V20_LAST} — et sa constante de Kalman est
+    maintenue ensuite : ne pas la lire au-delà.""",
     """<b>CL31 : bloc optique remplacé le 2026-07-07 ~13:00.</b> Sa constante par nuit passe de
     ~{B_LVL_SPRING} (jan–mai, médiane) / {B_LVL_JUNE} (juin) à {B_LVL_SUMMER} (après le 8 juillet).
     La fenêtre couvre la bascule <b>volontairement</b> : choisir <b>juin 2026</b> pour l'état
@@ -369,8 +451,14 @@ _PAY_WARN = [
     « λ910,55 σ0,08 ». Les états croisés restent des diagnostics.""",
     """<b>v2.2 + dark (Payerne)</b> : le fond électronique <b>mesuré</b> (télescope couvert) est
     soustrait du profil L1 <i>et</i> la constante vient du run dark-corrigé — les deux côtés ou
-    aucun. Les stations d'Amsterdam et de Lindenberg utilisent un dark <b>estimé</b> depuis les
-    nuits claires, qui ne touche que la constante (variante de démonstration).""",
+    aucun. Profil <b>capot {DARK_VER}</b>, {DARK_PERIOD} : {DARK_NWIN_A} sessions pour le
+    CHM15k, {DARK_NWIN_C} pour le CL61, {DARK_NWIN_B} pour le CL31 (sessions postérieures au
+    remplacement de son bloc optique uniquement) ; fenêtres de couverture détectées dans les
+    données, médiane poolée lissée sur le signal non corrigé de la distance. Constantes du rejeu
+    <code>{DARK_RUN}</code> (eprof_v2.2, CL61 au spectre opérationnel λ910,55 σ0,08, Rayleigh
+    seul). Le CL61 n'a donc pas de variante « v2.2 + dark » à λ910,74. Les stations d'Amsterdam
+    et de Lindenberg utilisent un dark <b>estimé</b> depuis les nuits claires, qui ne touche que la
+    constante (variante de démonstration).""",
     _SPECTRUM_WARN,
 ]
 

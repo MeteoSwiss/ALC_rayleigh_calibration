@@ -133,9 +133,54 @@ Runs par variante sous `C:/DATA/Projects/202606_E-PROFILE_calibration/` (`calout
 `diag_v22_*` locaux — voir `variants_v3.py`), extraits Hopkin par configuration dans
 `cloud_profile_dump_<tag>/`. L1 : `D:/E-PROFILE_L1_2026` ; CAMS **0,4°** uniquement
 (`A:/CAMS_Monthly_04;D:/CAMS_daily` — jamais `D:/CAMS` ni `D:/CAMS_run_v20`, monolithes 1°).
-L2 tel que distribué : CHM15k **et CL61** = calibration Rayleigh v1.0 opérationnelle (activée
-mi-2026 pour le CL61 — d'où ses constantes observées 1,00 sur 48 j puis 2,1257 dès la mi-juin) ;
-CL31 = non calibré (constante par défaut).
+L2 as distributed: the CHM15k **and the CL61** carry the operational Rayleigh v1.0 calibration;
+the CL31 stays uncalibrated (default constant). The CL61's applied constant is the default 1.0
+until 2026-07-28, then 2.1257 from 07-29 to 10-13 and 0.7932 from 10-14; the CHM15k's changes on
+the same two dates (5.51 → 5.88 → 5.83 → 5.30 → 4.87e11). The page dates these runs itself
+from the L2 files (L2-row tooltip and pill); no date is written in its prose (corrected
+2026-11-02: earlier text said the CL61 switch was mid-June).
+
+**Hood dark switched from v1 to v3 (2026-11-02).** Payerne's measured-dark state now uses the
+hood profile **v3** on both sides of the pairing: profile side `dark_profiles_payerne_v3.npz`
+(`sites.py` `dark_npz`; 10 sessions May–Sep 2026 for the CHM15k and the CL61, the CL31's 6
+post-optical-block-swap sessions; covered windows detected in the data, pooled median smoothed
+in P = rcs₀/r²), constants side the reruns `diag_v22_dark_v3` (`variants_v3.DARK_MEAS`, also
+`L55S008DARK`; eprof_v2.2, CL61 on the operational 910.55/0.188 spectrum, Rayleigh only).
+Before, both sides used the 6-session logbook-window profile **v1** (`dark_profiles_payerne.npz`,
+runs `diag_v22_dark` / `diag_v22_l55s008dark`). Reason: v1 produced a spurious CL61-Rayleigh-vs-
+CHM15k gap; with v3 the two Rayleigh calibrations agree every month
+([`doc/reports/eta_payerne_gap_2026-11-02.md`](../doc/reports/eta_payerne_gap_2026-11-02.md)).
+Effect on the summary table (default state, CL61 switched to Rayleigh, 2026-06-11..08-14, CL61
+★ + dark vs CHM15k v2.2 + dark, 500–3000 m median relative difference): **+7.8 % → −0.7 %**;
+per month all hours Jun/Jul/Aug +18.6/+6.2/−2.8 % → +2.7/−0.1/−4.3 %, night only (sun < −10°)
++21.1/+7.2/−0.9 % → +1.9/+0.7/−2.3 %. The v3 rerun carries only the operational CL61 spectrum,
+so the CL61 `v2.2dark` entry (910.74 + dark) is now greyed out at Payerne rather than shown on
+another dark version.
+
+**λ910,74 WV-comparison mode pinned to the retired CL61 line (2026-11-02).** `build_v3` took the
+"nominal" water-vapour array from `validation/paper/intercompare.WV_PARAMS`, whose CL61 entry moved
+to 910.55/0.188 on 2026-10-20 (commit a25977e). Every rebuild since then would have turned the
+page's « λ910,74 » mode (and the PWV panel's 910,74 states) into a copy of the ★ mode; `check_v3`
+caught it (all WV-on CL61 rows off by up to 38 points). `variants_v3.NOMINAL_WV_SPECTRUM` now pins
+that mode to 910.74/1.0 for the CL61; the other types keep `WV_PARAMS`.
+
+**Window extended to 2026-10-31 (2026-11-02).** The Payerne L2 for Aug–Oct and the October CAMS
+daily files were synced from `balfrin:/scratch/mch/mhrvo/{E-PROFILE_L2,CAMS}` into
+`D:/E-PROFILE_L2_2026` and `D:/CAMS_daily`; the stream cache now spans 2026-06-01..10-31 (the
+2026-06-01..08-14 one is kept as `_streams_payerne_to20260814.npz`). Constants: every run-based
+variant is carried past the end of its original run by a rerun with its own settings
+(`run_payerne_ext.ps1` → `dashboard_ext_20261031/<config>/`, mapped in `variants_v3.EXT_TAG`;
+2026-08-14..10-31, the hood-dark v3 pair 2026-10-09..10-31). The builder reads [original series,
+extension] and appends only the extension nights dated after the original series' last night, so
+the original series is never altered. « v2.0 » (published NetCDFs) cannot be rerun: its Kalman is
+held after its last night, as the page prose states. The reruns reproduce the eta-study extension
+runs of the same settings bit for bit on every common night; the only new nights are the October
+ones that had no CAMS before.
+`check_v3` keeps its v2 regression on the snapshot window (2026-06-11..08-14) with snapshot-era
+constants: each series' Kalman is re-run on its nights up to the snapshot end date, because later
+nights re-estimate the filter's series-wide noise and IQR screen and move C_L inside the old window
+(up to ~7 % for the CHM15k v2.2; leaving out its single 08-14 night alone moves it up to 16 %).
+That recipe is gated (1e-4) against the payload on the series that have no later night.
 
 L'ancienne chaîne v2 (`sites.py`, `l1_l2_calib.py`, `build_l1_l2_dashboard.py`,
 `render_l1_l2_dashboard.py`, pages `index_<site>.html`) reste fonctionnelle mais n'est plus le

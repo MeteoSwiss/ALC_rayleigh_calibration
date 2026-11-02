@@ -189,7 +189,8 @@ def corr_arrays(d, station_alt, alt_asl, days):
         # CL61 only -- the manufacturer's measured line (910.55 nm, sigma 0.08 -> FWHM 0.188),
         # which is ~9x less absorbed.  Instruments the finding does not concern keep one array and
         # the page's "constructeur" option falls back to it.
-        specs = {"nom": IC.WV_PARAMS.get(d["itype"], (910.0, 3.4))}
+        specs = {"nom": V3.NOMINAL_WV_SPECTRUM.get(d["itype"],
+                                                   IC.WV_PARAMS.get(d["itype"], (910.0, 3.4)))}
         if d["itype"] in V3.LAM_TYPES:
             specs["ctor"] = (910.55, 0.188)
         W = {k: np.full((len(days), nz), np.nan) for k in specs}
@@ -302,38 +303,60 @@ def _kalman_record(dates, C, U, label_method):
         _kt=kt, _ks=ks)
 
 
+def _spec_nights(spec, ident, method, wmo, min_nights):
+    """(dates, C, U) of ONE source spec, or the reason string when it has none."""
+    kind, arg = spec
+    if kind == "nc":                                  # v2.0 published NetCDFs (Payerne only)
+        try:
+            dates, C, U, M, created, src = CAL.all_nights(ident)
+        except FileNotFoundError:
+            return f"aucun NetCDF ALC_calibration_{wmo}_{ident}<année>.nc sur ce poste"
+        keep = np.isin(M, np.asarray([0 if method == "rayleigh" else 1]))
+        if keep.sum() < min_nights:
+            return f"seulement {int(keep.sum())} nuit(s) « {method} » dans les NetCDF v2.0"
+        return [d for d, k in zip(dates, keep) if k], C[keep], U[keep]
+    if kind == "json":                                # per-night json from the availability corpus
+        nights = CAL.v22_nights(arg)
+        if nights is None:
+            return f"pas de sortie eprof_v2.2 par nuit ({arg}) pour ce canal"
+        return nights
+    nights = CAL.run_csv_nights(arg, method, min_nights=min_nights)   # a network-runner tree
+    if nights is None:
+        return (f"aucune nuit « {method} » exploitable dans "
+                f"{Path(arg).parent.parent.name}/{Path(arg).parent.name}")
+    return nights
+
+
 def calib_for(site_key, ident, itype, method, variant, wmo):
     """(record | None, reason) for one (instrument, method, variant) triple.
 
     Never carries a series over from another variant: a channel a run does not cover is reported as
     UNAVAILABLE with the reason, so the page can grey it out instead of showing someone else's
     numbers under this variant's name.
+
+    A LIST of specs is one variant read from several runs of the same settings, in order: the
+    original series, then its extension rerun(s) (variants_v3.EXT_TAG).  A later spec only APPENDS
+    the nights dated after the last night already held, so the original series is never altered
+    (and check_v3 can rebuild the snapshot-era constants exactly).  Only the first spec must hold
+    enough nights on its own; an extension contributes whatever successful nights it has.
     """
     spec = V3.source_for(site_key, ident, itype, method, variant, wmo)
     if isinstance(spec, str):
         return None, spec
-    kind, arg = spec
-    if kind == "nc":                                  # v2.0 published NetCDFs (Payerne only)
-        try:
-            dates, C, U, M, created, src = CAL.all_nights(ident)
-        except FileNotFoundError:
-            return None, f"aucun NetCDF ALC_calibration_{wmo}_{ident}<année>.nc sur ce poste"
-        keep = np.isin(M, np.asarray([0 if method == "rayleigh" else 1]))
-        if keep.sum() < 5:
-            return None, (f"seulement {int(keep.sum())} nuit(s) « {method} » dans les NetCDF v2.0")
-        dates = [d for d, k in zip(dates, keep) if k]
-        C, U = C[keep], U[keep]
-    elif kind == "json":                              # per-night json from the availability corpus
-        nights = CAL.v22_nights(arg)
-        if nights is None:
-            return None, f"pas de sortie eprof_v2.2 par nuit ({arg}) pour ce canal"
-        dates, C, U = nights
-    else:                                             # kind == "csv": a network-runner tree
-        nights = CAL.run_csv_nights(arg, method)
-        if nights is None:
-            return None, (f"aucune nuit « {method} » exploitable dans "
-                          f"{Path(arg).parent.parent.name}/{Path(arg).parent.name}")
-        dates, C, U = nights
+    specs = spec if isinstance(spec, list) else [spec]
+    nights = []                                       # (datetime, C, U)
+    for i, sp in enumerate(specs):
+        got = _spec_nights(sp, ident, method, wmo, min_nights=5 if i == 0 else 1)
+        if isinstance(got, str):
+            if i == 0:
+                return None, got
+            continue                                  # an extension with no night adds nothing
+        last = max(n[0].date() for n in nights) if nights else None
+        nights += [n for n in zip(*got) if last is None or n[0].date() > last]
+    nights.sort(key=lambda n: n[0])
+    dates = [n[0] for n in nights]
+    C = np.array([n[1] for n in nights], "f8")
+    U = np.array([n[2] for n in nights], "f8")
     rec = _kalman_record(dates, C, U, "Rayleigh" if method == "rayleigh" else "Nuages liquides")
     if rec is None:
         return None, f"trop peu de nuits ({len(C)}) pour le filtre de Kalman"
@@ -473,6 +496,7 @@ def build_site(site_key):
         title=v3["title"], subtitle=v3["subtitle"], warnings=warns,
         streams=streams, corr=corr_out, corr_of={f"{a}|{b}": v for (a, b), v in corr_of.items()},
         dark=dark, dark_kind=V3.dark_kind(site_key), calib=calib,
+        dark_nwin=(dark_sessions() if s.get("dark_npz") else {}),
         l2_applied=BD.l2_applied_constants(npz, t0, t1),
     )
     # Noise-filter ingredients: per-hour admission bits for the four evaluation windows and the
@@ -640,6 +664,19 @@ def _fmt_c(v):
     return f"{v / 10**e:.1f}e{e}"
 
 
+def dark_sessions():
+    """{ident: number of hood sessions pooled into its measured b(z)} from the current site's
+    dark npz (`<ident>_nwin`), or {} where there is no measured dark."""
+    out = {}
+    if BD.DARK_NPZ is None or not BD.DARK_NPZ.exists():
+        return out
+    with np.load(BD.DARK_NPZ) as z:
+        for k in z.files:
+            if k.endswith("_nwin"):
+                out[k[:-len("_nwin")]] = int(z[k])
+    return out
+
+
 def prose_tokens(site_key, calib, t0, t1):
     """Numbers the warning prose interpolates, computed from the SAME series the page uses.
 
@@ -660,6 +697,20 @@ def prose_tokens(site_key, calib, t0, t1):
 
     w0, w1 = str(np.datetime64(t0, "D")), str(np.datetime64(t1, "D"))
     if site_key == "payerne":
+        # hood-dark provenance: the version is pinned in variants_v3, the session counts are read
+        # from the profile file the page actually subtracts
+        nw = dark_sessions()
+        for ident in ("A", "B", "C"):
+            tok[f"DARK_NWIN_{ident}"] = nw.get(ident, "—")
+        tok["DARK_VER"] = V3.DARK_MEAS_VERSION
+        tok["DARK_PERIOD"] = V3.DARK_MEAS_PERIOD
+        tok["DARK_RUN"] = V3.DARK_MEAS.name
+        # window extension: t1 is the EXCLUSIVE end (midnight after the last day)
+        tok["WIN_END"] = str((np.datetime64(t1) - np.timedelta64(1, "s")).astype("datetime64[D]"))
+        tok["EXT_DIR"] = V3.EXT_ROOT.name
+        for ident, name in (("A", "A_V20_LAST"), ("C", "C_V20_LAST")):
+            rec = calib.get(f"{ident}|rayleigh|v2.0")
+            tok[name] = rec["points"][-1]["d"] if rec and rec.get("ok") else "—"
         for v, name in (("v2.0", "V20"), ("v2.2", "V22"), ("v2.2dark", "DARK")):
             tok[f"A_{name}_WIN"] = nights(f"A|rayleigh|{v}", w0, w1)
             tok[f"A_{name}_JA"] = nights(f"A|rayleigh|{v}", "2026-07-08", "2026-08-13")

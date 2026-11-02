@@ -147,8 +147,10 @@ def read_l2(wmo, ident, start, end, workers=12):
 
 # --------------------------------------------------------------------------- L1
                      # --------------------------------------------------- dark baseline (measured)
+# Same hood-dark version as sites.py `dark_npz` (v3 since 2026-11-02); only read when the stream
+# cache is built with ALC_DASH_DARK=1.
 _DARK_NPZ = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/rayleigh_availability"
-                 "/dark_profiles_payerne.npz")
+                 "/dark_profiles_payerne_v3.npz")
 _DARK_CACHE = {}
 
 

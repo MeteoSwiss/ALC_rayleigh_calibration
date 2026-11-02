@@ -46,7 +46,8 @@ TOL_PP = 0.5      # percentage points, on medrelbias_pct / relbias_pct
 TOL_R = 0.15
 
 # L1 rows of the dark-run variants are INFORMATIONAL, not gated: the v2 snapshot predates the
-# 2026-08-16 dark refit + window extension of diag_v22_dark, so their deviation measures data
+# 2026-08-16 dark refit + window extension of diag_v22_dark and the 2026-11-02 switch to the hood
+# dark v3 (diag_v22_dark_v3 + dark_profiles_payerne_v3.npz), so their deviation measures data
 # vintage, not wiring (their L2 rows use no constants and stay gated — they match exactly).
 STALE_CALS = {"v2.2dark", "v2.2dark_est"}
 
@@ -60,6 +61,35 @@ CAL_MAP_RAYLEIGH = {"v2.2dark_est": "v2.2dark"}
 # for a 1064 nm channel the WV correction is an exact no-op, so v2's 'sansWV' variant is the
 # ordinary v2.2 run — v3 dropped that physically meaningless entry (operator request), map it back
 CAL_MAP_1064 = {"v2.2sansWV": "v2.2"}
+
+
+# The page window may run past the v2 snapshot's (the 2026-11-02 extension to October).  The
+# regression sweep stays on the SNAPSHOT window with SNAPSHOT-era constants: each series' Kalman is
+# re-run on its nights dated up to the snapshot's end date (the snapshot was built from series
+# ending that day) and interpolated on the snapshot hours.  Later nights re-estimate the filter's
+# series-wide noise and rolling-IQR screen and move C_L inside the old window (up to ~7 % for the
+# CHM15k v2.2; dropping its single 08-14 night alone moves it up to 16 %, measured 2026-11-02) --
+# data vintage, not wiring.  Exact because an extension only APPENDS nights after the original
+# series' last one (build_v3.calib_for).  The recipe is itself gated: on series with no night after
+# the snapshot end it must reproduce the payload's C_L (build_v3._kalman_record +
+# intercompare.interp_calib) to TOL_SNAP.
+TOL_SNAP = 1e-4
+
+
+def snapshot_c(rec, hours, end):
+    """C_L of one payload series as the v2 snapshot knew it, on `hours` (or None)."""
+    from datetime import datetime
+    from monitoring.kalman import kalman_best_estimate
+    pts = [p for p in rec["points"] if np.datetime64(p["d"]) <= end]
+    if len(pts) < 5:
+        return None
+    dates = [datetime.strptime(p["d"], "%Y-%m-%d") for p in pts]
+    C = np.array([p["v"] for p in pts], "f8")
+    U = np.array([np.nan if p["s"] is None else p["s"] for p in pts], "f8")
+    kt, ks, _ = kalman_best_estimate(dates, C, uncertainties=U)
+    if not len(kt):
+        return None
+    return IC.interp_calib(kt, ks, hours)
 
 
 def dequant(enc):
@@ -406,13 +436,44 @@ def main():
     only = sys.argv[2] if len(sys.argv) > 2 else None
     P = json.loads((DATA / f"v3_{site}.json").read_text(encoding="utf-8"))
     V2 = json.loads((DATA / f"data_{site}.json").read_text(encoding="utf-8"))
-    hday = np.asarray(P["hour_day"])
+    hday_all = np.asarray(P["hour_day"])
     b0, b1 = P["band"]
     band = slice(b0, b1 + 1)
     nz = len(P["z"])
     rng = "r0_" + str(len(V2["months"]) - 1)
     print(f"{P['name']}: {len(P['hours'])} paired hours, {nz} display gates, "
           f"band gates {b0}..{b1} ({b1-b0+1})")
+
+    # ---- the v2 snapshot's window and constants (see snapshot_c) --------------------------------
+    hours_all = np.array([np.datetime64(h) for h in P["hours"]]).astype("datetime64[h]")
+    v2_t0 = np.datetime64(V2["meta"]["start"])
+    v2_t1 = np.datetime64(V2["meta"]["end"])
+    win = (hours_all >= v2_t0) & (hours_all < v2_t1)
+    hday = hday_all[win]
+    nwin = int(win.sum())
+    snap = {}
+
+    def c_snap(key):
+        if key not in snap:
+            rec = P["calib"].get(key)
+            snap[key] = (snapshot_c(rec, hours_all[win], v2_t1)
+                         if (rec and rec.get("ok")) else None)
+        return snap[key]
+
+    snap_dev, n_self = 0.0, 0
+    for key, rec in P["calib"].items():
+        if not (rec.get("ok") and rec["points"]) or np.datetime64(rec["points"][-1]["d"]) > v2_t1:
+            continue
+        c = c_snap(key)
+        if c is None:
+            continue
+        ref = np.asarray(rec["c"], "f8")[win]
+        snap_dev = max(snap_dev, float(np.nanmax(np.abs(c / ref - 1.0))))
+        n_self += 1
+    print(f"regression sweep on the v2 snapshot window {V2['meta']['start']}..{V2['meta']['end']}: "
+          f"{nwin} of {len(P['hours'])} payload hours; constants re-filtered on the nights up to "
+          f"{V2['meta']['end']} (recipe self-test on {n_self} series without later nights: max "
+          f"|rel| {snap_dev:.1e}, tolerance {TOL_SNAP:.0e})")
 
     iref = 0
     zmask = np.zeros(nz, bool)
@@ -438,17 +499,15 @@ def main():
         vals = {}
         for src in P["sources"]:
             for k, (ident, method, variant, db) in enumerate(chans):
-                raw = dequant(P["streams"][f"{src}|{ident}"])
+                raw = dequant(P["streams"][f"{src}|{ident}"])[win]
                 corr = P["corr"][P["corr_of"][f"{src}|{ident}"]]
                 # canonical variant stands in for an inexpressible one, ONLY for the mask
                 vmask = variant or ("v2.2" if method == "rayleigh" else "cloudWV")
-                rec = P["calib"].get(f"{ident}|{method}|{vmask}")
-                if not (rec and rec.get("ok")):
-                    rec = None
-                vals[(src, k)] = transform(raw, rec["c"] if rec else np.ones(len(P["hours"])),
+                c = c_snap(f"{ident}|{method}|{vmask}")
+                vals[(src, k)] = transform(raw, c if c is not None else np.ones(nwin),
                                            corr, wv, wl, hday,
                                            dark=(db if src == "L1" else None),
-                                           calibrated=(src == "L1" and rec is not None))
+                                           calibrated=(src == "L1" and c is not None))
         have = np.logical_and.reduce([np.any(np.isfinite(vals[(s, k)][:, band]), axis=1)
                                       for s in P["sources"] for k in range(len(chans))])
         print(f"\n== {ckey}: rows {int(have.sum())} (v2 n_hours = {v2combo['n_hours']})")
@@ -495,7 +554,7 @@ def main():
     for k, (ident, method, variant, db) in enumerate(chans):
         vals[k] = transform(dequant(P["streams"][f"L1|{ident}"]),
                             P["calib"][f"{ident}|{method}|{variant}"]["c"],
-                            P["corr"][P["corr_of"][f"L1|{ident}"]], True, "molecular", hday)
+                            P["corr"][P["corr_of"][f"L1|{ident}"]], True, "molecular", hday_all)
     have = np.logical_and.reduce([np.any(np.isfinite(vals[k][:, band]), axis=1)
                                   for k in range(len(chans))])
     for k, (ident, method, variant, db) in enumerate(chans):
@@ -503,8 +562,8 @@ def main():
         corr = P["corr"][P["corr_of"][f"L1|{ident}"]]
         c = np.asarray(P["calib"][f"{ident}|{method}|{variant}"]["c"], "f8")
         cfix = np.full_like(c, float(np.median(c[have])))
-        exact = np.nanmedian(transform(raw, c, corr, True, "molecular", hday)[have], axis=0)
-        approx = np.nanmedian(transform(raw, cfix, corr, True, "molecular", hday)[have], axis=0)
+        exact = np.nanmedian(transform(raw, c, corr, True, "molecular", hday_all)[have], axis=0)
+        approx = np.nanmedian(transform(raw, cfix, corr, True, "molecular", hday_all)[have], axis=0)
         m = np.isfinite(exact) & np.isfinite(approx) & (np.abs(exact) > 1e-3)
         d = np.abs(approx[m] - exact[m]) / np.abs(exact[m]) * 100
         if d.size:
@@ -522,10 +581,12 @@ def main():
     print(f"\nworst absolute deviation new-vs-v2: {worst_pp:.4f} pt "
           f"(medrelbias/relbias), {worst_r:.5f} (r_log); noise-filter mismatch "
           f"{nf_worst * 100:.3f} %")
-    print(f"overlap factor deviation: {ov_worst:.2e} (tolerance {TOL_OVERLAP:.0e})")
-    if worst_pp > TOL_PP or worst_r > TOL_R or nf_worst > 0.001 or ov_worst > TOL_OVERLAP:
+    print(f"overlap factor deviation: {ov_worst:.2e} (tolerance {TOL_OVERLAP:.0e}); snapshot "
+          f"C_L recipe self-test {snap_dev:.1e} (tolerance {TOL_SNAP:.0e})")
+    if (worst_pp > TOL_PP or worst_r > TOL_R or nf_worst > 0.001 or ov_worst > TOL_OVERLAP
+            or snap_dev > TOL_SNAP):
         print(f"FAIL: deviation exceeds tolerance ({TOL_PP} pt / {TOL_R} / nf 0.1 % / "
-              f"overlap {TOL_OVERLAP:.0e})")
+              f"overlap {TOL_OVERLAP:.0e} / snapshot recipe {TOL_SNAP:.0e})")
         sys.exit(1)
     print("PASS")
 

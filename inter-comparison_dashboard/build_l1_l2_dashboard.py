@@ -38,7 +38,7 @@ for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
     os.environ.setdefault(_v, "3")
 # The 0.4 deg CAMS monthlies (L137 model levels) — finer than the 1 deg archive, which matters at
 # Payerne where the 1 deg grid-cell surface sits ~900 m above the station.
-os.environ.setdefault("ALC_VAL_CAMS_04", "A:/CAMS_Monthly_04")
+os.environ.setdefault("ALC_VAL_CAMS_04", "D:/CAMS_Monthly_04")  # was A:/CAMS_Monthly_04 (moved to D:, same files)
 
 import numpy as np
 

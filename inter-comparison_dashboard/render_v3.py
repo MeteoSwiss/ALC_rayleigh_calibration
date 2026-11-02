@@ -567,10 +567,13 @@ function diffLayout(title, xr) {
    the label must say which one this site is showing */
 const darkSuffix = v => (DARK_RUNS.indexOf(v) >= 0 && S().dark_kind === 'estimated')
   ? ' — dark ESTIMÉ ciel clair (démonstration)' : '';
+/* where the dark is MEASURED the dark-run labels carry the hood-profile version
+   (variants_v3.DARK_LABEL_BY_KIND), so constants of one dark version never wear another's name */
 const vLabel = (itype, v) =>
-  ((VLBL_BY_TYPE[itype] || {})[v] || VARIANT_LABEL[v] || v) + darkSuffix(v);
+  ((VLBL_BY_TYPE[itype] || {})[v] || (DLBL_BY_KIND[S().dark_kind] || {})[v] ||
+   VARIANT_LABEL[v] || v) + darkSuffix(v);
 const vShort = (itype, v) =>
-  ((VSH_BY_TYPE[itype] || {})[v] || VSHORT[v] || v) +
+  ((VSH_BY_TYPE[itype] || {})[v] || (DSH_BY_KIND[S().dark_kind] || {})[v] || VSHORT[v] || v) +
   (darkSuffix(v) ? ' (dark estimé)' : '');
 function chLabel(k) {
   const P = S(), inst = P.instruments[k], s = state.pick[inst.ident];
@@ -772,18 +775,25 @@ function drawLadder(V) {
 function l2Provenance(inst) {
   const fmt = v => Math.abs(v) >= 1e4 ? (+v).toExponential(1).replace('e+', 'e') : (+v).toFixed(2);
   const d = (S().l2_applied || {})[inst.ident];
-  let obs = '';
+  /* chronological runs of one applied constant, each dated from the L2 itself: a date written in
+     this prose went stale twice (the CL61 switch was claimed "mid-June"; it is 07-29) */
+  const seg = [];
   if (d && d.value && d.value.length) {
-    const cnt = {};
-    d.value.forEach(v => { const k = fmt(v); cnt[k] = (cnt[k] || 0) + 1; });
-    obs = ' Observé sur la fenêtre : ' +
-          Object.keys(cnt).map(k => `${k} (${cnt[k]} j)`).join(', ') + '.';
+    d.value.forEach((v, i) => {
+      const last = seg[seg.length - 1];
+      if (last && Math.abs(v / last.v - 1) < 1e-6) { last.to = d.date[i]; last.n++; }
+      else seg.push({ v, from: d.date[i], to: d.date[i], n: 1 });
+    });
   }
+  const obs = seg.length ? ' Constante appliquée sur la fenêtre : ' + seg.map(s =>
+    `${fmt(s.v)} du ${s.from} au ${s.to} (${s.n} j)`).join(' ; ') + '.' : '';
   /* Operator-stated provenance (2026-08-16, corrected same day): the distributed L2 carries the
-     operational Rayleigh v1.0 calibration for the CHM15k AND — recently activated — the CL61;
-     the CL31 stays on the uncalibrated default. The observed CL61 constants confirm it:
-     1.00 (default) on 48 d then 2.1257 from mid-June 2026 = the v1.0 series going live.
-     The appended observed values keep the tooltip honest if the files ever change. */
+     operational Rayleigh v1.0 calibration for the CHM15k AND — since its activation in 2026 — the
+     CL61; the CL31 stays on the uncalibrated default.  The CL61 activation shows up as the first
+     departure from its default constant 1.0, dated below from the data. */
+  const cl61On = inst.itype === 'CL61'
+    ? seg.find((s, i) => i > 0 && Math.abs(seg[i - 1].v - 1) < 1e-6 && Math.abs(s.v - 1) >= 1e-6)
+    : null;
   const base = {
     CHM15k: { pill:'calibration Rayleigh v1.0 (opérationnelle)', short:'Rayleigh v1.0',
       tip:'Constante issue de la méthode Rayleigh opérationnelle E-PROF v1.0 (pré-v2).' },
@@ -791,11 +801,12 @@ function l2Provenance(inst) {
       tip:'La chaîne opérationnelle n\'applique pas de calibration au CL31 — ' +
           'la constante par défaut explique l\'écart de cette ligne ; c\'est exactement le ' +
           'manque que l\'étalonnage nuage comble.' },
-    CL61: { pill:'calibration Rayleigh v1.0 (opérationnelle, activée mi-2026)',
+    CL61: { pill:'calibration Rayleigh v1.0 (opérationnelle' +
+                 (cl61On ? ', activée le ' + cl61On.from : '') + ')',
       short:'Rayleigh v1.0',
       tip:'Le CL61 est désormais calibré en opérationnel par la méthode Rayleigh v1.0 — ' +
-          'la bascule est visible dans les constantes observées : 1,00 (défaut) avant, puis ' +
-          'la valeur v1.0 depuis la mi-juin 2026.' },
+          'avant sa mise en service, le L2 porte la constante par défaut 1,00' +
+          (cl61On ? ' (ici jusqu\'au ' + seg[seg.indexOf(cl61On) - 1].to + ')' : '') + '.' },
   }[inst.itype] || { pill:'constante appliquée', short:'constante appliquée', tip:'' };
   return { pill: base.pill, short: base.short, tip: base.tip + obs };
 }
@@ -1086,7 +1097,11 @@ function buildControls() {
     const hasDark = !!P.dark[id];
     /* two half-states: profile dark-corrected but constants not (no twin run), and the reverse
        (a dark-run variant with the profile-side box unticked) */
-    const halfProfile = sel.dark && !DARK_TWIN[sel.variant];
+    /* a twin that exists in DARK_TWIN but has no run for THIS channel (CL61 'v2.2dark': the v3
+       dark rerun carries only the operational spectrum) is no twin at all */
+    const twin = DARK_TWIN[sel.variant];
+    const twinOk = !!twin && !!(P.calib[id + '|' + sel.method + '|' + twin] || {}).ok;
+    const halfProfile = sel.dark && !twinOk;
     const halfConst = !sel.dark && hasDark && DARK_RUNS.indexOf(sel.variant) >= 0;
     /* profile-only dark on a CLOUD variant is NOT a warning: the cloud constant is dark-immune
        (CL31 +0.08 % measured, CL61 ~0.001 %), so only the profiles need correcting */
@@ -1096,10 +1111,12 @@ function buildControls() {
         : `<span class="warnflag" title="${DARK_NO_TWIN_WHY.replace(/"/g, '&quot;')}">⚠</span>`)
       : (halfConst
       ? `<span class="warnflag" title="constante issue d'un run dark-corrigé mais profil non corrigé — recocher la case pour l'état cohérent">⚠</span>` : '');
+    const nwin = (P.dark_nwin || {})[id];
     const darkCell = `<label class="chk" title="${hasDark ? 'soustrait le profil b(z) mesuré ' +
-        'télescope couvert avant la division par C_L' : DARK_NO_MEAS_WHY.replace(/"/g, '&quot;')}">
+        'télescope couvert (capot ' + DARK_MEAS_VERSION + (nwin ? ', ' + nwin + ' sessions' : '') +
+        ') avant la division par C_L' : DARK_NO_MEAS_WHY.replace(/"/g, '&quot;')}">
       <input type="checkbox" class="dchk" data-id="${id}" ${sel.dark ? 'checked' : ''}
-       ${hasDark ? '' : 'disabled'}> dark mesuré (capot)</label>${warn}`;
+       ${hasDark ? '' : 'disabled'}> dark mesuré (capot${hasDark ? ' ' + DARK_MEAS_VERSION : ''})</label>${warn}`;
     /* overlap: offered only where it means something (CHM15k), greyed WITH THE REASON when the
        model or the internal temperature is missing — the omit-vs-grey doctrine */
     const ovr = (P.overlap || {})[id];
@@ -1364,6 +1381,9 @@ def html(payloads):
         f"const DARK_CLOUD_OK = {json.dumps(V3.DARK_CLOUD_OK_WHY)};\n"
         f"const DARK_NO_MEAS_WHY = {json.dumps(V3.DARK_NO_MEAS_WHY)};\n"
         f"const DARK_HINT = {json.dumps(V3.DARK_HINT)};\n"
+        f"const DARK_MEAS_VERSION = {json.dumps(V3.DARK_MEAS_VERSION)};\n"
+        f"const DLBL_BY_KIND = {json.dumps(V3.DARK_LABEL_BY_KIND)};\n"
+        f"const DSH_BY_KIND = {json.dumps(V3.DARK_SHORT_BY_KIND)};\n"
         f"const REFERENCE_VARIANTS = {json.dumps(list(V3.REFERENCE_VARIANTS))};\n"
         f"const OVERLAP_WHY = {json.dumps(V3.OVERLAP_WHY)};\n"
         f"const OVERLAP_NA_WHY = {json.dumps(V3.OVERLAP_NA_WHY)};\n"
@@ -1481,9 +1501,10 @@ biaisées sur les scènes qu'ils ne détectent pas individuellement">
       l'autre. Ligne surlignée = variante actuellement sélectionnée ; ligne « <b>L2
       distribué</b> » = le produit tel qu'expédié aujourd'hui (comparé au L2 de la référence),
       avec la provenance de sa constante par instrument sur la pastille — CHM15k et CL61 =
-      calibration Rayleigh v1.0 opérationnelle (activée mi-2026 pour le CL61) ; CL31 = non
-      calibré (constante par défaut, qui laisse passer l'échelle native) — et, en infobulle, les
-      constantes réellement observées sur la fenêtre. Les lignes de l'instrument de
+      calibration Rayleigh v1.0 opérationnelle (pour le CL61, date de mise en service sur la
+      pastille) ; CL31 = non calibré (constante par défaut, qui laisse passer l'échelle native) —
+      et, en infobulle, chaque constante réellement appliquée sur la fenêtre avec ses dates, lues
+      dans le L2. Les lignes de l'instrument de
       référence donnent son écart L1–L2 lorsqu'un L2 existe, sinon « réf. ». Médiane et dispersion
       (médiane du rapport par échantillon, et 1,4826·MAD des mêmes rapports) portent sur la bande
       de statistiques et la période courantes ; la colonne dC/dCBH vient de la configuration

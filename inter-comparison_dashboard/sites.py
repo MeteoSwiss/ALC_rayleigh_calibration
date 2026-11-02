@@ -99,8 +99,10 @@ SITES = {
         ],
         iref=0,
         sources=("L1", "L2"),
-        start="20260601", end="20260814",
-        win_start="20260601", win_end="20260813",
+        # Extended 2026-11-02 to the end of October (L2 Aug-Oct and the October CAMS synced from
+        # CSCS); the 2026-06-01..08-14 cache is kept as _streams_payerne_to20260814.npz.
+        start="20260601", end="20261031",
+        win_start="20260601", win_end="20261031",
         variants=["v2.0", "v2.2", "v2.2dark", "v2.2sansWV"],
         variant_labels={"v2.0": "v2.0 (operational)", "v2.2": "v2.2 (noise-aware gates)",
                         "v2.2dark": "v2.2 + dark (electronic baseline subtracted)",
@@ -111,7 +113,10 @@ SITES = {
                     "v2.2sansWV": DATA_ROOT / "calib_v22nowv"},
         calib_builder="payerne",
         dark_variants=("v2.2dark",),
-        dark_npz=str(DATA_ROOT.parent / "rayleigh_availability" / "dark_profiles_payerne.npz"),
+        # Hood dark profile v3 (10 sessions May-Sep 2026; CL31: its 6 post-swap sessions), the same
+        # version as the v3 dashboard's dark-run constants (variants_v3.DARK_MEAS).  Was the
+        # 6-session v1 dark_profiles_payerne.npz until 2026-11-02.
+        dark_npz=str(DATA_ROOT.parent / "rayleigh_availability" / "dark_profiles_payerne_v3.npz"),
         collapse_combos=False,
         # Page-size containment: the single-Ångström wavelength mode is dropped from the COMBOS
         # (4 variants x 2 WV x 2 modes = 16 combos instead of 18). The other sites keep the default.
