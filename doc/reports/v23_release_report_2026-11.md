@@ -320,10 +320,18 @@ run, so the release CSVs keep the empty column; the NetCDF is the product).
 9. **The tier is not recorded**: nothing in the CSV message or the NetCDF says whether a night came from the strict
    or the fallback tier (flag 0.5 means a partially clear night). A tier token in the message, or a
    `calibration_tier` variable, would make the next comparison and the dashboard filters direct.
+10. **Lerwick OmB lost to one corrupt L1 file** (add-ons array 339770, task 34): the L1 file of 2026-04-01 of
+    `0-20000-0-03005_A` carries range values from -3e30 to 4e17 m, `np.arange` of the OmB grid raised "Maximum
+    allowed size exceeded" and the stream lost its whole OmB pass (the calibration passes had flagged the night
+    -1, "Not a clear night", and were unaffected). Fixed after the run: `calibration.omb.omb.vertical_edges`
+    rejects a degenerate range axis with a clear message and the runner's per-day OmB loop skips such a day
+    (`tests/test_omb_vertical_edges.py`). The Lerwick add-ons are to be rerun with the fixed code before the
+    cutover (`--no-cal --omb --sens` on that stream).
 
 ## 11. Cutover checklist (phases 2-4 of the plan)
 
-- [ ] add-ons array 339770 finished (`_omb_cache.npz`, `_sens_cache.npz` per stream), logs without traceback
+- [ ] add-ons array 339770 finished (`_omb_cache.npz`, `_sens_cache.npz` per stream), logs without traceback;
+      rerun the Lerwick add-ons (`0-20000-0-03005_A`) with the OmB fix of item 10
 - [ ] archive check: adapt `scripts/check_v22_archive.py` to a v2.3 version (expected codes 230 / 231 / 1100, flag
       0.25, the five components, no -99 on the Vaisala streams, the three Czech streams listed as known) and run it on
       the scratch tree

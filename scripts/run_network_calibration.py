@@ -1002,13 +1002,20 @@ def _do_omb(s, start, end, kalman_rows, shared=None):
         c_ours = _const_per_profile(data["time"], kmap, default)
         c_op = _const_per_profile(data["time"], op_map, default)
         rcs = data["rcs"].astype("float64")
-        res = compute_omb(
-            time=data["time"], range_agl=data["range"],
-            beta_sources={"op": rcs / c_op[:, None], "ours": rcs / c_ours[:, None]},
-            station_lat=data["lat"], station_lon=data["lon"], station_alt=data["alt"],
-            wavelength=data["wl"], cams_file=str(cams), instrument=itype,
-            cloud_base_height=data["cbh"], abs_cs_lookup_table=str(WV_LUT),
-        )
+        try:
+            res = compute_omb(
+                time=data["time"], range_agl=data["range"],
+                beta_sources={"op": rcs / c_op[:, None], "ours": rcs / c_ours[:, None]},
+                station_lat=data["lat"], station_lon=data["lon"], station_alt=data["alt"],
+                wavelength=data["wl"], cams_file=str(cams), instrument=itype,
+                cloud_base_height=data["cbh"], abs_cs_lookup_table=str(WV_LUT),
+            )
+        except ValueError as exc:
+            # One bad day (a corrupt range axis, no CAMS overlap) must not cost the stream its whole
+            # OmB pass -- the v2.3 release add-ons lost Lerwick to a single file (2026-04-01).
+            print(f"{key}: omb skipped {ds8}: {type(exc).__name__}: {exc}", flush=True)
+            del data, rcs
+            continue
         del data, rcs
         omb_cache_update(sdir, res)
         any_update = True
