@@ -43,7 +43,7 @@ export STREAM_TIMEOUT=0
 export PLOTS=0
 START=20250101
 END=20261101
-KEYS=/scratch/mch/mhrvo/keys_v23_release.txt
+KEYS=${KEYS_FILE:-/scratch/mch/mhrvo/keys_v23_release.txt}   # KEYS_FILE: a subset keylist (sbatch --export=ALL,KEYS_FILE=...)
 
 if [ ! -f "$KEYS" ]; then
   # the stream list, from the census shipped with the code (LF line endings: a CRLF keylist breaks the task

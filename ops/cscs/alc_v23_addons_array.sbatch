@@ -35,7 +35,7 @@ export ALC_POLAR_NIGHT_FALLBACK=1
 export ALC_WV_SPECTRUM='{"CL61": [910.55, 0.188]}'
 export STREAM_TIMEOUT=0
 export PLOTS=0
-KEYS=/scratch/mch/mhrvo/keys_v23_release.txt
+KEYS=${KEYS_FILE:-/scratch/mch/mhrvo/keys_v23_release.txt}   # KEYS_FILE: a subset keylist (sbatch --export=ALL,KEYS_FILE=...)
 IDX=${SLURM_ARRAY_TASK_ID:-0}
 KEY=$(sed -n "$((IDX + 1))p" "$KEYS" | tr -d '\r')
 [ -z "$KEY" ] && { echo "no key for index $IDX"; exit 1; }
