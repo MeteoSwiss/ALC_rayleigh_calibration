@@ -1,6 +1,27 @@
 {
-  "_comment": "Operator-maintained instrument events that no data file reports (Vaisala CL31/CL51 L1 carry the placeholder serial CL0, so an optical-block replacement is invisible). Key = <wmo>_<ident>; date = UTC day of the change; label = what changed. Shown as markers on the station C_L time series.",
+  "_comment": "Operator-maintained instrument events that no data file reports (Vaisala CL31/CL51 L1 carry the placeholder serial CL0, so an optical-block replacement is invisible). Key = <wmo>_<ident>; date = UTC day of the change; label = what changed. Shown as markers on the station C_L time series. Unit swaps under the same ident (CL31 -> CL51: range gates 770 -> 1540) were found by validation/v23_release/scan_type_changes.py in the v2.3 release comparison.",
   "0-20000-0-06610_B": [
-    {"date": "2026-07-07", "label": "CL31 optical block replaced (C_L step x2.8)"}
+    {
+      "date": "2026-07-07",
+      "label": "CL31 optical block replaced (C_L step x2.8)"
+    }
+  ],
+  "0-20000-0-11450_A": [
+    {
+      "date": "2025-07-16",
+      "label": "CL31 replaced by a CL51 (range 7.7 -> 15.4 km); L1 type attribute updated 2025-10-09; whole record calibrated as CL51 in v2.3"
+    }
+  ],
+  "0-20000-0-11438_A": [
+    {
+      "date": "2026-06-25",
+      "label": "CL31 replaced by a CL51 (range 7.7 -> 15.4 km); L1 type attribute updated 2026-07-03; whole record calibrated as CL51 in v2.3"
+    }
+  ],
+  "0-20000-0-11520_A": [
+    {
+      "date": "2026-06-26",
+      "label": "CL31 replaced by a CL51 (range 7.7 -> 15.4 km); L1 type attribute updated 2026-07-03; whole record calibrated as CL51 in v2.3"
+    }
   ]
 }

@@ -89,3 +89,12 @@ the saved validation outputs and the literature (2026-10-10): [README](paper_v08
 verdict and the ranked must-fix / should-fix lists; the numbered files hold the statement-by-statement tables
 (manuscript, Rayleigh code vs 5.1.1, cloud code vs 5.1.2, validation scripts vs Section 6, Kalman / overlap /
 dark / availability appendices, literature).
+
+## Calibration release v2.3 (2026-11)
+
+[v23_release_report_2026-11.md](v23_release_report_2026-11.md) - the network recompute of calibration v2.3
+(repaired Rayleigh fallback tier, uncertainty budget, polar-summer low-sun nights, cloud eta tables v2) against
+the v2.2 release: provenance (CSCS arrays 337836 / 339769 / 339770, the missing-WV-table incident), completeness,
+Rayleigh changes per type, low-sun nights, uncertainty budget, Kalman, cloud ratio, the three Czech streams that
+swapped CL31 -> CL51 inside the window, NetCDF content, known limits and the cutover checklist. Script
+`validation/v23_release/compare_v22_v23.py`; plan `doc/v2.3/network_rerun_plan_2026-11.md`.

@@ -30,6 +30,7 @@ import csv
 import glob
 import json
 import os
+import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -37,6 +38,7 @@ import numpy as np
 import pandas as pd
 
 REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO))
 FIGS = REPO / "doc" / "reports" / "figs_v23_release"
 SUCCESS = {1.0, 0.5, 0.25}
 TYPE_COL = {"CHM15k": "#d62728", "CL61": "#2ca02c", "Mini-MPL": "#8c564b", "CL31": "#ff7f0e", "CL51": "#9467bd"}
@@ -106,6 +108,51 @@ def nc_summary(tree):
     return n, vers, comps
 
 
+def nc_types(tree):
+    """{key: instrument_type} from the newest NetCDF of each stream (the type the release calibrated with)."""
+    import netCDF4
+    out = {}
+    for d in sorted(glob.glob(str(Path(tree) / "*"))):
+        fs = sorted(glob.glob(str(Path(d) / "*" / "*.nc")))
+        if not fs:
+            continue
+        try:
+            ds = netCDF4.Dataset(fs[-1])
+            out[Path(d).name] = str(ds.getncattr("instrument_type"))
+            ds.close()
+        except Exception:
+            continue
+    return out
+
+
+COMPONENTS = ("ensemble", "vertical", "molecular", "aerosol", "noise")
+
+
+def component_budget(tree, itype_of):
+    """Per instrument type: median relative 2-sigma uncertainty of each budget component (v2.3 NetCDFs, Rayleigh rows)."""
+    import netCDF4
+    acc = defaultdict(lambda: defaultdict(list))
+    for f in glob.glob(str(Path(tree) / "*" / "*" / "*.nc")):
+        key = Path(f).parent.parent.name
+        try:
+            ds = netCDF4.Dataset(f)
+        except Exception:
+            continue
+        if "lidar_constant_uncertainty_ensemble" not in ds.variables:
+            ds.close()
+            continue
+        C = np.asarray(ds["lidar_constant"][:], dtype=float)
+        meth = np.asarray(ds["calibration_method"][:]).astype(int)
+        ok = (meth == 0) & np.isfinite(C) & (C > 0)
+        t = itype_of(key)
+        acc[t]["total"].extend((np.asarray(ds["lidar_constant_uncertainty"][:], dtype=float)[ok] / C[ok]).tolist())
+        for c in COMPONENTS:
+            v = np.asarray(ds[f"lidar_constant_uncertainty_{c}"][:], dtype=float)
+            acc[t][c].extend((v[ok] / C[ok]).tolist())
+        ds.close()
+    return acc
+
+
 def main():
     import matplotlib
     matplotlib.use("Agg")
@@ -136,6 +183,11 @@ def main():
     last23 = {k: int(d.date.max()) for k, d in c23.items()}
     beyond = sorted((k, v) for k, v in last23.items() if v > end)
     say(f"  v2.3 streams with days beyond {end}: {len(beyond)} -> " + ", ".join(f"{k}:{v}" for k, v in beyond[:12]))
+    t22, t23 = nc_types(a.v22), nc_types(a.v23)
+    retyped = sorted((k, t22[k], t23[k]) for k in set(t22) & set(t23) if t22[k] != t23[k])
+    say(f"  streams calibrated with a different instrument type in the two releases (NetCDF attribute): {len(retyped)} -> "
+        + ", ".join(f"{site(k)} {x}->{y}" for k, x, y in retyped))
+    retyped_keys = {k for k, _, _ in retyped}
 
     # ------------------------------------------------------------------ Rayleigh nights
     rows = []
@@ -241,14 +293,20 @@ def main():
             if len(cm) < 10:
                 continue
             r = (b_.loc[cm] / a_.loc[cm]).replace([np.inf, -np.inf], np.nan).dropna()
+            sa_ = k22[k][k22[k].method == m].set_index("date").get("kalman_std")
+            sb_ = k23[k][k23[k].method == m].set_index("date").get("kalman_std")
+            rs22 = float((sa_.loc[cm] / a_.loc[cm]).median()) if sa_ is not None else np.nan
+            rs23 = float((sb_.loc[cm] / b_.loc[cm]).median()) if sb_ is not None else np.nan
             if len(r):
                 krows.append(dict(key=k, itype=itype(k), method=m, n=len(r), ratio_med=float(r.median()),
-                                  ratio_p05=float(r.quantile(.05)), ratio_p95=float(r.quantile(.95))))
+                                  ratio_p05=float(r.quantile(.05)), ratio_p95=float(r.quantile(.95)),
+                                  relstd22=rs22, relstd23=rs23))
     K = pd.DataFrame(krows)
     K.to_csv(out / "kalman_ratio_per_stream.csv", index=False, float_format="%.5g")
     for (t, m), s in K.groupby(["itype", "method"]):
         say(f"  {t:8s} {m:8s}: streams {len(s):3d}  median of per-stream median ratio {s.ratio_med.median():.4f}  "
-            f"(streams P10-P90 {s.ratio_med.quantile(.1):.4f}-{s.ratio_med.quantile(.9):.4f})")
+            f"(streams P10-P90 {s.ratio_med.quantile(.1):.4f}-{s.ratio_med.quantile(.9):.4f}); "
+            f"Kalman relative std (1 sigma) median v2.2 {100 * s.relstd22.median():.1f} % -> v2.3 {100 * s.relstd23.median():.1f} %")
 
     # ------------------------------------------------------------------ cloud days
     crows = []
@@ -272,10 +330,52 @@ def main():
         s = Cd[(Cd.itype == t) & (Cd.date > 0)]
         cnt = Cd[(Cd.itype == t) & (Cd.date < 0)]
         if len(s):
+            s_ok = s[~s.key.isin(retyped_keys)]
             say(f"  {t}: common days {len(s)} (v2.2 {int(cnt.n22.sum())}, v2.3 {int(cnt.n23.sum())}); ratio median {s.ratio.median():.4f} "
-                f"P5-P95 {s.ratio.quantile(.05):.4f}-{s.ratio.quantile(.95):.4f}")
+                f"P5-P95 {s.ratio.quantile(.05):.4f}-{s.ratio.quantile(.95):.4f}"
+                + (f"; without the retyped streams: median {s_ok.ratio.median():.4f} P5-P95 {s_ok.ratio.quantile(.05):.4f}-{s_ok.ratio.quantile(.95):.4f} (n {len(s_ok)})"
+                   if len(s_ok) < len(s) else ""))
+    # days that changed state between the releases, by the flag the other release gave them
+    try:
+        from calibration.flags import FLAG_MEANINGS
+    except Exception:
+        FLAG_MEANINGS = {}
+    lost, gained, lost_stream = Counter(), Counter(), Counter()
+    for k in keys:
+        if k not in c22 or k not in c23 or itype(k) not in ("CL31", "CL51", "CL61"):
+            continue
+        a_ = c22[k]
+        b_ = c23[k]
+        a_ = a_[(a_.method == "cloud") & (a_.date <= end)].set_index("date")
+        b_ = b_[(b_.method == "cloud") & (b_.date <= end)].set_index("date")
+        sa = a_.index[a_.flag.isin(SUCCESS) & (a_.C > 0)]
+        sb = b_.index[b_.flag.isin(SUCCESS) & (b_.C > 0)]
+        for dte in sa.difference(sb):
+            lost[float(b_.flag.get(dte, np.nan))] += 1
+            lost_stream[k] += 1
+        for dte in sb.difference(sa):
+            gained[float(a_.flag.get(dte, np.nan))] += 1
+
+    def label(f):
+        if not np.isfinite(f):
+            return "absent"
+        return FLAG_MEANINGS.get(int(f) if float(f).is_integer() else f, "?")
+
+    say("\n== cloud days that changed state in the common window (the flag the other release gave them) ==")
+    say(f"  lost in v2.3 (success in v2.2 only): {sum(lost.values())}: " + ", ".join(f"{label(f)} ({f:g}) {n}" for f, n in lost.most_common()))
+    say(f"  gained in v2.3 (success in v2.3 only): {sum(gained.values())}: " + ", ".join(f"{label(f)} ({f:g}) {n}" for f, n in gained.most_common()))
+    say("  streams losing most days: " + ", ".join(f"{site(k)} {n}" for k, n in lost_stream.most_common(6)))
 
     # ------------------------------------------------------------------ NetCDF
+    say("\n== v2.3 uncertainty budget, Rayleigh nights in the NetCDFs: median relative 2-sigma per component [%] (P10-P90 of the total) ==")
+    bud = component_budget(a.v23, itype)
+    for t in sorted(bud):
+        b = bud[t]
+        tot = np.array(b["total"])
+        tot = tot[np.isfinite(tot)]
+        parts = "  ".join(f"{c} {100 * np.nanmedian(b[c]):.1f}" for c in COMPONENTS)
+        say(f"  {t}: n {len(tot)}  total {100 * np.median(tot):.1f} (P10-P90 {100 * np.percentile(tot, 10):.1f}-{100 * np.percentile(tot, 90):.1f})  |  {parts}")
+
     say("\n== NetCDF ==")
     for ver, tree in (("v2.2", a.v22), ("v2.3", a.v23)):
         n, vers, comps = nc_summary(tree)
@@ -321,18 +421,19 @@ def main():
     ax.hist(s.top22.dropna() / 1e3, np.arange(2, 9, 0.25), histtype="step", lw=2, color="#9e9e9e", label=f"v2.2 (n {s.top22.notna().sum()})")
     ax.hist(s.top23.dropna() / 1e3, np.arange(2, 9, 0.25), histtype="step", lw=2, color=TYPE_COL["CL61"], label=f"v2.3 (n {s.top23.notna().sum()})")
     ax.set_xlabel("CL61 molecular-window top [km ASL]")
-    ax.set_title("CL61 windows: tier-2 cap at 5 km AGL", fontsize=10)
+    ax.set_title("CL61 window tops: tier-2 capped at 5 km AGL (tier-1 windows unchanged)", fontsize=10)
     ax.legend(fontsize=8)
     ax.grid(alpha=0.3)
     ax = axes[2]
     for t in ("CHM15k", "CL61", "Mini-MPL"):
         s = idn[idn.itype == t]
         if len(s):
-            ax.hist(100 * s.u22.clip(0, 80), np.arange(0, 82, 2), histtype="step", lw=1.2, ls="--", color=TYPE_COL[t])
-            ax.hist(100 * s.u23.clip(0, 80), np.arange(0, 82, 2), histtype="step", lw=2, color=TYPE_COL[t],
+            ax.hist(100 * s.u22.clip(0, 80), np.arange(0, 82, 2), histtype="step", lw=1.2, ls="--", color=TYPE_COL[t], density=True)
+            ax.hist(100 * s.u23.clip(0, 80), np.arange(0, 82, 2), histtype="step", lw=2, color=TYPE_COL[t], density=True,
                     label=f"{t}: v2.2 {100 * s.u22.median():.0f} % -> v2.3 {100 * s.u23.median():.0f} % (n {len(s)})")
-    ax.set_xlabel("relative uncertainty of the nightly constant, 2 sigma [%] (dashed v2.2 ensemble, solid v2.3 budget)")
-    ax.set_title("identical tier-1 nights", fontsize=10)
+    ax.set_xlabel("relative uncertainty of the nightly constant, 2 sigma [%]")
+    ax.set_ylabel("probability density")
+    ax.set_title("identical tier-1 nights: dashed v2.2 ensemble, solid v2.3 budget", fontsize=10)
     ax.legend(fontsize=8)
     ax.grid(alpha=0.3)
     fig.tight_layout()
@@ -344,21 +445,23 @@ def main():
     for t in ("CL31", "CL51", "CL61"):
         s = Cd[(Cd.itype == t) & (Cd.date > 0)]
         if len(s):
-            ax.hist(s.ratio.clip(0.85, 1.05), np.linspace(0.85, 1.05, 81), histtype="step", lw=2, color=TYPE_COL[t],
+            ax.hist(s.ratio.clip(0.85, 1.05), np.linspace(0.85, 1.05, 81), histtype="step", lw=2, color=TYPE_COL[t], density=True,
                     label=f"{t}: median {s.ratio.median():.4f} (n {len(s)})")
     ax.axvline(1, color="grey", lw=1)
-    ax.set_xlabel("cloud C_L v2.3 / v2.2 per day")
+    ax.set_xlabel("cloud C_L v2.3 / v2.2 per day (tail at 1.03: the two streams retyped CL31 -> CL51)")
+    ax.set_ylabel("probability density")
     ax.set_title("eta tables v2 (a_G 3.3 um, alpha 20 /km) vs 2026-07", fontsize=10)
     ax.legend(fontsize=8)
     ax.grid(alpha=0.3)
     ax = axes[1]
     for (t, m), s in K.groupby(["itype", "method"]):
-        ax.hist(s.ratio_med.clip(0.7, 1.3), np.linspace(0.7, 1.3, 61), histtype="step", lw=2 if m == "rayleigh" else 1.4,
+        ax.hist(s.ratio_med.clip(0.9, 1.2), np.linspace(0.9, 1.2, 61), histtype="step", lw=2 if m == "rayleigh" else 1.4,
                 ls="-" if m == "rayleigh" else "--", color=TYPE_COL.get(t, "k"), label=f"{t} {m}: median {s.ratio_med.median():.3f} ({len(s)} streams)")
     ax.axvline(1, color="grey", lw=1)
-    ax.set_xlabel("per-stream median of Kalman v2.3 / v2.2")
+    ax.set_xlabel("per-stream median of Kalman v2.3 / v2.2 (clipped to 0.9-1.2)")
+    ax.set_ylabel("streams")
     ax.set_title("Kalman best estimate (weighting + tier 2 + eta)", fontsize=10)
-    ax.legend(fontsize=7)
+    ax.legend(fontsize=7, loc="upper right")
     ax.grid(alpha=0.3)
     ax = axes[2]
     if len(LS):
@@ -367,8 +470,10 @@ def main():
         ax.set_yticks(y)
         ax.set_yticklabels([f"{s[:18]} ({t})" for s, t in zip(LS.site, LS.itype)], fontsize=7)
         for yy, (n, r) in enumerate(zip(LS.n_lowsun, LS.level_ratio)):
-            ax.text(n + 0.3, yy, f"{n} nights, level {r:.2f} x dark" if np.isfinite(r) else f"{n}", va="center", fontsize=7)
+            plural = "s" if n != 1 else ""
+            ax.text(n + 0.3, yy, f"{n} night{plural}, level {r:.2f} x dark" if np.isfinite(r) else f"{n}", va="center", fontsize=7)
         ax.invert_yaxis()
+        ax.set_xlim(0, float(LS.n_lowsun.max()) * 1.7)
     ax.set_xlabel("polar-summer low-sun nights (flag 0.25) in the v2.3 record")
     ax.set_title("nights that had no calibration before", fontsize=10)
     ax.grid(alpha=0.3, axis="x")

@@ -471,10 +471,13 @@ def _do_cloud(s, start, end, shared=None):
             ok = _is_success(flag) and math.isfinite(cl) and cl > 0
             cl_unc = (cl * std / coef) if (ok and math.isfinite(coef) and coef != 0) else 0.0
             msg = (f"OK ({n} profiles)" if ok else flag_label(flag))
+            # The CSV row carries the cloud version code like the Rayleigh rows carry theirs (the NetCDF
+            # always did; the CSV column was left empty for cloud rows up to the v2.3 release run).
             rows.append(dict(date=ds, method="cloud", flag=flag,
                              cal_value=(cl if ok else -1),
                              uncertainty=(cl_unc if ok else 0), n_profiles=n,
-                             bottom_height=None, top_height=None, message=msg))
+                             bottom_height=None, top_height=None,
+                             version=VERSION_CODES[CF.cloud_version_name()], message=msg))
             if ok:
                 # Same standard NetCDF as Rayleigh, tagged method=1 (cloud, per-day window).
                 rr = CalibrationResult(lidar_constant=cl, flag=flag, uncertainty=cl_unc,
