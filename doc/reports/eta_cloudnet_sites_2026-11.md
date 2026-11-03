@@ -257,3 +257,6 @@ Code: `validation/eta_study/cloudnet_der_download.py` (inventory, download),
 `validation/eta_study/cloudnet_sites_calib_dump.py` (calibration scenes),
 `validation/eta_study/cloudnet_sites_droplet_size.py` (analysis, tables, figures; `--files july` re-runs it on the
 July collection).
+
+Follow-up (2026-11-03): the cloud extinction alpha on the same scenes, maps of both parameters, and what explains the
+site differences (aerosol, temperature, retrieval, neighbouring sites) are in `eta_cloudnet_sites_extinction_2026-11.md`.
