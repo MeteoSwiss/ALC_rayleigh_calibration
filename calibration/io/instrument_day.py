@@ -72,6 +72,23 @@ def _read_meta(path: Path) -> Tuple[Optional[str], Optional[float]]:
     return units, wl
 
 
+def usable_wavelength(file_wl, nominal_nm):
+    """The file's l0_wavelength when it is a usable number, else the type's nominal wavelength.
+
+    Two L1 days of the v2.3 release add-ons (Oslo CHM15k, Libus CL51) carried l0_wavelength = 0, and the
+    sensitivity's molecular extinction divided by it; the per-day reader now falls back to the nominal value.
+    """
+    if file_wl is None:
+        return nominal_nm
+    try:
+        wl = float(file_wl)
+    except (TypeError, ValueError):
+        return nominal_nm
+    if not np.isfinite(wl) or wl <= 0:
+        return nominal_nm
+    return wl
+
+
 @dataclass
 class InstrumentDayData:
     """One instrument-day, read once and shared across every processing step.
@@ -194,7 +211,7 @@ class InstrumentDayData:
             if vis.size == cbh.size:
                 cbh = np.fmin(cbh, vis)  # fmin ignores NaN: vis where clear, min where both
         order = np.argsort(time)
-        wl = self.wavelength_nm_file if self.wavelength_nm_file is not None else self.wavelength_nm
+        wl = usable_wavelength(self.wavelength_nm_file, self.wavelength_nm)
         return dict(
             time=time[order], rcs=rcs[order], cbh=cbh[order],
             range=np.asarray(n.range_alc, dtype="float64"), wl=wl,

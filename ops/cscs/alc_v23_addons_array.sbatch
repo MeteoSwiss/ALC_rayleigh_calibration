@@ -36,6 +36,8 @@ export ALC_WV_SPECTRUM='{"CL61": [910.55, 0.188]}'
 export STREAM_TIMEOUT=0
 export PLOTS=0
 KEYS=${KEYS_FILE:-/scratch/mch/mhrvo/keys_v23_release.txt}   # KEYS_FILE: a subset keylist (sbatch --export=ALL,KEYS_FILE=...)
+# ADDONS_FORCE: "--force" (default) recomputes every day; export ADDONS_FORCE="" for a rerun that keeps the
+# per-day caches a timed-out task already wrote (sbatch --time=20:00:00 for the long Dutch/DWD streams).
 IDX=${SLURM_ARRAY_TASK_ID:-0}
 KEY=$(sed -n "$((IDX + 1))p" "$KEYS" | tr -d '\r')
 [ -z "$KEY" ] && { echo "no key for index $IDX"; exit 1; }
@@ -43,7 +45,7 @@ KEY=$(sed -n "$((IDX + 1))p" "$KEYS" | tr -d '\r')
 echo "task $IDX  stream $KEY"
 python $CODE/scripts/run_network_calibration.py \
   --stream "$KEY" --start 20250101 --end 20261101 \
-  --no-cal --sens --omb --ignore-coverage --force --workers 1
+  --no-cal --sens --omb --ignore-coverage ${ADDONS_FORCE---force} --workers 1
 rc=$?
 echo "stream $KEY addons rc=$rc"
 exit $rc
