@@ -320,18 +320,32 @@ run, so the release CSVs keep the empty column; the NetCDF is the product).
 9. **The tier is not recorded**: nothing in the CSV message or the NetCDF says whether a night came from the strict
    or the fallback tier (flag 0.5 means a partially clear night). A tier token in the message, or a
    `calibration_tier` variable, would make the next comparison and the dashboard filters direct.
-10. **Lerwick OmB lost to one corrupt L1 file** (add-ons array 339770, task 34): the L1 file of 2026-04-01 of
-    `0-20000-0-03005_A` carries range values from -3e30 to 4e17 m, `np.arange` of the OmB grid raised "Maximum
-    allowed size exceeded" and the stream lost its whole OmB pass (the calibration passes had flagged the night
-    -1, "Not a clear night", and were unaffected). Fixed after the run: `calibration.omb.omb.vertical_edges`
-    rejects a degenerate range axis with a clear message and the runner's per-day OmB loop skips such a day
-    (`tests/test_omb_vertical_edges.py`). The Lerwick add-ons are to be rerun with the fixed code before the
-    cutover (`--no-cal --omb --sens` on that stream).
+10. **OmB lost to a corrupt L1 range axis** at three streams of the add-ons array (Lerwick `0-20000-0-03005_A`,
+    2026-04-01: range values from -3e30 to 4e17 m; `0-20008-0-HTM_A`; `0-20008-0-CYP_A`): `np.arange` of the OmB
+    grid raised and the stream lost its whole OmB pass (the calibration passes were unaffected). Fixed after the
+    run: `calibration.omb.omb.vertical_edges` rejects a degenerate range axis with a clear message and the
+    runner's per-day OmB loop skips such a day (`tests/test_omb_vertical_edges.py`); the three streams are in the
+    rerun array 346135.
+11. **Zero wavelength in an L1 file** (Oslo `0-20000-0-01492_A`, Libus `0-20000-0-11520_A`): a day whose
+    `l0_wavelength` is 0 made the sensitivity's molecular extinction divide by zero and cost both streams their
+    add-ons. Fixed after the run: the per-day reader falls back to the type's nominal wavelength
+    (`usable_wavelength` in `calibration/io/instrument_day.py`, `tests/test_sensitivity_wavelength.py`); both
+    streams are in the rerun array.
+12. **OmB has no CAMS for the four out-of-domain stations** (Edmonton `0-20008-0-EDT_A/B`, Lauder `0-20008-0-LAU_A`,
+    Auckland `0-554-10-UAAONIWACL31_A`): the calibration reads their regional CAMS boxes, the OmB reader only the
+    Europe monthlies, so their OmB fails with "No CAMS file" (their sensitivity product is fine). Known since the
+    regional routing was added (calibration yes, OmB no); not rerun.
+13. **36 add-on tasks exceeded the 6 h limit**: the Dutch (KNMI) and DWD high-resolution streams need 6-20 h for the
+    22-month OmB pass at 24 GB. Rerun with a 20 h limit and the existing per-day caches kept (array 346135).
 
 ## 11. Cutover checklist (phases 2-4 of the plan)
 
-- [ ] add-ons array 339770 finished (`_omb_cache.npz`, `_sens_cache.npz` per stream), logs without traceback;
-      rerun the Lerwick add-ons (`0-20000-0-03005_A`) with the OmB fix of item 10
+- [x] add-ons array 339770 finished 2026-11-04 04:18Z: 398 of 434 tasks completed, 36 hit the 6 h limit (the Dutch
+      and DWD high-resolution CHM15k and CL31 streams, OmB done, sensitivity not reached), 9 raised: 3 corrupt range
+      axes (item 10), 2 zero file wavelengths (item 11), 4 out-of-domain stations without OmB CAMS (item 12)
+- [ ] add-ons rerun array **346135** (41 streams: the 36 timed-out plus the 5 fixable failures; 20 h limit,
+      `ADDONS_FORCE=` so the per-day caches already written are kept; code copy = 46bb407 + the fixes 3910899 and
+      b5bb31d) finished, logs without traceback
 - [ ] archive check: adapt `scripts/check_v22_archive.py` to a v2.3 version (expected codes 230 / 231 / 1100, flag
       0.25, the five components, no -99 on the Vaisala streams, the three Czech streams listed as known) and run it on
       the scratch tree
