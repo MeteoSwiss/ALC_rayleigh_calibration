@@ -13,36 +13,37 @@ export ALC_CAMS_DIR="/data/zue/E_PROFILE/ALC/CAMS"                  # CAMS cache
 export ALC_CENSUS="$ALC_REPO/validation/scope_l1_2026_census.json" # station census (wmo/ident/type/lat/lon) -- also used as the dashboard manifest
 
 # --- calibration output (per-stream <key>_cal.csv + yearly NetCDFs) -----------------------------
-export ALC_FULLCAL_DIR="/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.0"
 
 # ==================================================================================================
-# v2.2 CUTOVER BLOCK -- uncomment ALL FOUR LINES TOGETHER, never individually.
+# v2.3 OPERATIONAL BLOCK (active since the v2.3.0 cutover). These lines change TOGETHER, never one by one.
 # ==================================================================================================
-# This is the flip. Procedure, prerequisites and rollback: doc/OPERATIONS_v22_cutover.md.
+# The daily runner MERGES into the per-stream CSVs, so code of one release writing into another
+# release's tree interleaves two vintages irreversibly. Output tree, method, uncertainty model, Kalman
+# weighting, polar fallback and water-vapour spectrum therefore change in the SAME edit.
+# Acceptance before the switch: scripts/check_v23_archive.py --new <tree> --ref <release tree> = GO.
+# Rollback: git checkout v2.2.0 (this file then carries the v2.2 block), full dashboard rebuild
+# (no --changed-only), publish. The v2.2 tree is left untouched by v2.3.
 #
-# Why one block: the daily runner MERGES into the per-stream CSVs, so v2.2 code writing into the
-# v2.0 tree interleaves the two vintages irreversibly and destroys the archive you would roll back
-# to. The method, the water-vapour spectrum and the output tree must therefore change in the SAME
-# edit -- which is also why they ship commented out: deploying the code must not flip anything.
-#
-# Do NOT uncomment before scripts/check_v22_archive.py passes against the new tree.
-# Rollback = re-comment these lines (or restore ops/config.sh.pre_v22_<date>), then rebuild the
-# dashboard WITHOUT --changed-only and publish.
-#
-export ALC_FULLCAL_DIR="/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.2"
-export ALC_MOLECULAR_METHOD="eprof_v2.2"
+export ALC_FULLCAL_DIR="/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.3"
+export ALC_MOLECULAR_METHOD="eprof_v2.3"
+export ALC_UNCERTAINTY_MODEL="v2.3"
+export ALC_KALMAN_UNCERTAINTY_WEIGHTING="1"
+export ALC_POLAR_NIGHT_FALLBACK="1"
 export ALC_WV_SPECTRUM='{"CL61": [910.55, 0.188]}'
-export ALC_OPCOEFF_CSV="/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.2/operational_coefficients.csv"
+export ALC_OPCOEFF_CSV="/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.3/operational_coefficients.csv"
 #
-# Deliberately NOT set: ALC_DARK_PROFILE. The measured hood dark exists only at Payerne, and the
-# operator's decision (2026-08-17) is to keep the network homogeneous; Payerne CHM15k therefore
-# keeps its known ~-24 % near-top-of-window bias (phase4_network_validation.md §4.4).
+# Deliberately NOT set: ALC_DARK_PROFILE (network kept homogeneous, operator decision 2026-08-17) and
+# ALC_ETA_TABLES (unset = cloud eta tables generation v2, version code 1100).
+#
+# Previous release, for reference only (the v2.2.0 tag carries it active):
+#   ALC_FULLCAL_DIR=.../ALC_calibration_v2.2  ALC_MOLECULAR_METHOD=eprof_v2.2
+#   ALC_WV_SPECTRUM='{"CL61": [910.55, 0.188]}'  ALC_OPCOEFF_CSV=.../ALC_calibration_v2.2/operational_coefficients.csv
 # ==================================================================================================
 
 # --- dashboard (static site, served by your web server at a SEPARATE path) ----------------------
 export ALC_DASHBOARD_DIR="/data/zue/E_PROFILE/ALC/Calibration/dashboard"
 export ALC_L2_DIR="/data/zue/E_PROFILE/ALC/L2_FILES"                                                # optional: L2 archive for station name/country (blank = skip)
-export ALC_OPCOEFF_CSV="${ALC_OPCOEFF_CSV:-/data/zue/E_PROFILE/ALC/Calibration/ALC_calibration_v2.0/operational_coefficients.csv}"                       # optional: operational-constant CSV for the comparison maps (blank = skip). Guarded: the v2.2 cutover block above must win.
+export ALC_OPCOEFF_CSV="${ALC_OPCOEFF_CSV:-}"                       # optional: operational-constant CSV for the comparison maps (blank = skip); set in the operational block above.
 export ALC_OLDRAY_DIR="/data/pay/REM/ACQ/E_PROFILE_ALC/Calibration/rayleigh"   # old operational Rayleigh (v1) overlay
 export ALC_CEDA_LINKS="$ALC_REPO/validation/ceda_links.json"     # {key: CEDA-L2 URL} for the per-page CEDA link (committed; blank = skip). Refresh occasionally: python scripts/build_ceda_links.py --out "$ALC_CEDA_LINKS"
 
