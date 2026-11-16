@@ -20,6 +20,7 @@ from netCDF4 import Dataset
 
 from calibration import calibrate_rayleigh, CalibrationOptions, InstrumentInfo
 from calibration.config import InstrumentType, DataLevel
+from calibration.io.cams import find_cams_file
 from calibration.io.output import version_code
 from calibration.rayleigh import calibration as C
 from calibration.rayleigh import molecular_methods as M
@@ -178,8 +179,18 @@ def test_scope_leaves_other_methods_and_explicit_params_alone():
 # --------------------------------------------------------------------------------------------
 # End to end on the fixtures
 # --------------------------------------------------------------------------------------------
+def _skip_without_cams(itype, date):
+    """910 nm types need the CAMS month for the water-vapour correction, which is not bundled."""
+    if itype is not InstrumentType.CL61:
+        return
+    folder = CalibrationOptions.from_json(OPTIONS).cams_folder
+    if not folder or find_cams_file(folder, date) is None:
+        pytest.skip(f"CAMS for {date[:6]} not found in {folder!r} (910 nm water-vapour correction)")
+
+
 @pytest.mark.parametrize("wmo,date,itype", TIER1_NIGHTS, ids=["CHM15k", "Mini-MPL", "CL61"])
 def test_tier1_nights_bit_identical(wmo, date, itype):
+    _skip_without_cams(itype, date)
     results = {}
     for method in ("eprof_v2.2", "eprof_v2.3"):
         o = _options(method)
@@ -211,6 +222,7 @@ def test_forced_tier2_runs_only_the_validated_parts(wmo, date, itype, noise, vc,
         calls["vc"] += 1
         return check_column(*args, **kwargs)
 
+    _skip_without_cams(itype, date)
     monkeypatch.setattr(M, "_binned_mean_noise", counted_noise)
     monkeypatch.setattr(M, "_vertical_consistency", counted_vc)
     r23 = calibrate_rayleigh(date, _info(wmo, itype, date), _options("eprof_v2.3", **FORCE_TIER2))
