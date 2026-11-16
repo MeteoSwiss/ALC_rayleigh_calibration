@@ -35,6 +35,9 @@ import numpy as np
 from netCDF4 import Dataset
 
 REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO))
+from calibration.io.vaisala_type import file_instrument_type  # noqa: E402
+
 L1_ROOT = Path(os.environ.get("ALC_L1_ROOT", "D:/E-PROFILE_L1_2026"))
 CENSUS = Path(os.environ.get("ALC_CENSUS", str(REPO / "validation" / "scope_l1_2026_census.json")))
 
@@ -93,6 +96,9 @@ def scan_archive(root: Path, year: str) -> dict:
             except Exception as exc:  # noqa: BLE001 - a single unreadable file must not abort the scan
                 print(f"[refresh] skip {wmo}_{ident}: {type(exc).__name__}: {exc}", flush=True)
                 continue
+            # Vaisala: the attribute lags a CL31 -> CL51 swap by weeks (Usti nad Labem: CL51 range since
+            # 2026-09-16, attribute still CL31 in November); the range extent of the newest file is exact.
+            itype = file_instrument_type(fs[-1], itype)
             found[_key(wmo, ident)] = dict(
                 wmo=wmo, ident=ident, type=itype, site=site,
                 lat=lat, lon=lon, alt=alt,

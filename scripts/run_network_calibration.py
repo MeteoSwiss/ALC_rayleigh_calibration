@@ -88,6 +88,7 @@ from calibration.io.classification import (  # noqa: E402
     classification_files_for_night, read_classification_curtain)
 from calibration.io.data_loader import build_file_paths  # noqa: E402
 from calibration.io.instrument_day import load_instrument_day  # noqa: E402
+from calibration.io.vaisala_type import file_instrument_type  # noqa: E402
 from calibration.flags import cloud_flag, flag_label, dominant_cloud_reject_flag  # noqa: E402
 from calibration.plotting import plot_cloud_diagnostics_compact  # noqa: E402
 from calibration.io.output import (  # noqa: E402
@@ -166,6 +167,9 @@ SENS_FIELDS = ["period", "date_start", "date_end", "wavelength", "icao_alt_200",
 # what produced it, and the dashboard was left ASSERTING a hard-coded "v2.0" over v2.2 numbers.
 CSV_FIELDS = ["date", "method", "flag", "cal_value", "uncertainty",
               "n_profiles", "bottom_height", "top_height", "version", "message"]
+# Operator-maintained instrument events (unit swaps, optical-block replacements). Entries with
+# "kalman_restart": true start a new Kalman segment on that day: a constant belongs to ONE unit.
+EVENTS_FILE = REPO / "monitoring" / "instrument_events.json"
 _SUCCESS = (1, 1.0, 0.5, 0.25)          # 0.25 = polar-summer low-sun night (option polar_night_fallback)
 _HK_NAN = {k: float("nan") for k in ("laser_life_time", "status_detector", "status_laser",
                                      "temperature_optical_module", "window_transmission",
@@ -303,10 +307,13 @@ def _make_shared_reader(s):
             return cache[ds]
         night = [str(f) for f in build_file_paths(ds, info, o) if f.exists()]
         idd = None
-        if night:
+        # Vaisala: each file's type from its range extent. A night that straddles a CL31 -> CL51 swap
+        # mixes two range grids and two types: no shared read, each pass loads its own day.
+        types = {file_instrument_type(f, s["type"]) for f in night}
+        if night and len(types) == 1:
             try:
                 idd = load_instrument_day(
-                    night, s["type"], CAMS, cams_folder_fallback=fb,
+                    night, types.pop(), CAMS, cams_folder_fallback=fb,
                     read_cams=False, build_working=False)  # Rayleigh uses .native; cloud/OmB/sens/
                     # classify re-coarsen each day via slice_to_date (memoised) -- night grid unused
             except Exception:  # noqa: BLE001 - a bad read falls back to each step's own load
@@ -403,14 +410,25 @@ def _do_cloud(s, start, end, shared=None):
     except Exception:  # noqa: BLE001 - a cleanup failure must not abort the calibration
         pass
     rows = []
+    warned_type = False
     for d in _days(start, end):
         fp = _l1_file(s["wmo"], s["ident"], d)
         if not fp.exists():
             continue
         ds = d.strftime("%Y%m%d")
+        # Vaisala CL31/CL51: the day's type from the file's range extent, not the census (which follows
+        # the lagging L1 attribute). Every other type: the census type. info follows the day's type.
+        dtype = file_instrument_type(fp, s["type"])
+        info = _info(dict(s, type=dtype))
+        if dtype != s["type"] and not warned_type:
+            warned_type = True
+            known = any(r.date() <= d.date() for r in _kalman_restarts(key))
+            print(f"{key}: {ds} calibrated as {dtype} (range extent), census says {s['type']}"
+                  + ("" if known else "; no kalman_restart event in instrument_events.json, add the swap"),
+                  flush=True)
         try:
             cfg = set_defaults(CloudCalConfig(
-                nc_file=str(fp), instrument=s["type"],
+                nc_file=str(fp), instrument=dtype,
                 # ALC_WV_DISABLE=1 : variante R&D sans correction WV (voir _do_rayleigh)
                 apply_wv_correction=(os.environ.get("ALC_WV_DISABLE") != "1"),
                 apply_transmission_correction=True, aerosol_lidar_ratio=50.0,
@@ -426,7 +444,7 @@ def _do_cloud(s, start, end, shared=None):
             idd = shared(ds) if shared is not None else None
             if idd is None:  # shared read unavailable -> load just this day (still coarse)
                 idd = load_instrument_day(
-                    [str(fp)], s["type"], CAMS,
+                    [str(fp)], dtype, CAMS,
                     cams_folder_fallback=(str(CAMS_FALLBACK) if CAMS_FALLBACK else ""),
                     read_cams=False, build_working=False)  # sliced per day; night grid unused
             if idd is not None:
@@ -533,14 +551,52 @@ def _kalman_weighting():
     return bool(CalibrationOptions.from_json(REPO / "options.json").kalman_uncertainty_weighting)
 
 
-def _kalman_rows(rows, weighted=None):
+def _kalman_restarts(key):
+    """Days on which the stream's Kalman starts afresh (instrument_events.json, kalman_restart)."""
+    if not key:
+        return []
+    try:
+        ev = json.loads(EVENTS_FILE.read_text(encoding="utf-8")).get(key, [])
+    except (OSError, ValueError, AttributeError):
+        return []
+    out = []
+    for e in ev:
+        if isinstance(e, dict) and e.get("kalman_restart"):
+            try:
+                out.append(datetime.strptime(str(e["date"]), "%Y-%m-%d"))
+            except (KeyError, ValueError):
+                continue
+    return sorted(set(out))
+
+
+def _kalman_excluded_flags(key):
+    """Flags kept out of this stream's Kalman (options.json station_kalman_params.exclude_flags)."""
+    if not key:
+        return set()
+    params = CalibrationOptions.from_json(REPO / "options.json").station_kalman_params.get(key, {})
+    try:
+        return {float(f) for f in params.get("exclude_flags", [])}
+    except (TypeError, ValueError):
+        return set()
+
+
+def _kalman_rows(rows, weighted=None, key=None):
+    """Kalman best estimate per method from the calibration rows of ONE stream.
+
+    ``key`` ('<wmo>_<ident>') enables the stream's options: flags excluded from the input
+    (station_kalman_params) and a fresh filter after each unit change (instrument_events.json), so the
+    best estimate never carries one unit's constant across to the next."""
     if weighted is None:
         weighted = _kalman_weighting()
+    excluded = _kalman_excluded_flags(key)
+    restarts = _kalman_restarts(key)
     out = []
     for method in ("rayleigh", "cloud"):
         pts = []
         for r in rows:
             if r["method"] != method or not _is_success(r["flag"]):
+                continue
+            if excluded and float(r["flag"]) in excluded:
                 continue
             try:
                 v = float(r["cal_value"])
@@ -552,18 +608,21 @@ def _kalman_rows(rows, weighted=None):
                 except (TypeError, ValueError):
                     u = float("nan")
                 pts.append((datetime.strptime(r["date"], "%Y%m%d"), v, u))
-        if len(pts) < 5:
-            continue
         pts.sort()
-        # Uncertainty weighting (option): kalman_best_estimate keeps the empirical variance scale and
-        # only takes the night-to-night RATIO of the relative uncertainties (clipped to x4 in sigma).
-        uncs = [p[2] for p in pts] if weighted else None
-        grid, state, std = kalman_best_estimate([p[0] for p in pts], [p[1] for p in pts],
-                                                uncertainties=uncs)
-        for g, sv, sd in zip(grid, state, std):
-            out.append(dict(method=method,
-                            date=np.datetime_as_string(g, unit="D").replace("-", ""),
-                            kalman=f"{sv:.6e}", kalman_std=f"{sd:.6e}"))
+        edges = [None] + restarts + [None]
+        for lo, hi in zip(edges[:-1], edges[1:]):
+            seg = [p for p in pts if (lo is None or p[0] >= lo) and (hi is None or p[0] < hi)]
+            if len(seg) < 5:
+                continue
+            # Uncertainty weighting (option): kalman_best_estimate keeps the empirical variance scale
+            # and only takes the night-to-night RATIO of the relative uncertainties (clipped x4 in sigma).
+            uncs = [p[2] for p in seg] if weighted else None
+            grid, state, std = kalman_best_estimate([p[0] for p in seg], [p[1] for p in seg],
+                                                    uncertainties=uncs)
+            for g, sv, sd in zip(grid, state, std):
+                out.append(dict(method=method,
+                                date=np.datetime_as_string(g, unit="D").replace("-", ""),
+                                kalman=f"{sv:.6e}", kalman_std=f"{sd:.6e}"))
     return out
 
 
@@ -1256,14 +1315,15 @@ def _process_stream(payload):
             rows.sort(key=lambda r: (r["method"], r["date"]))
             _write_csv_atomic(sdir / f"{key}_cal.csv", CSV_FIELDS, rows)
             _write_csv_atomic(sdir / f"{key}_kalman.csv",
-                              ["method", "date", "kalman", "kalman_std"], _kalman_rows(rows))
+                              ["method", "date", "kalman", "kalman_std"], _kalman_rows(rows, key=key))
             _write_monitoring()   # monitoring panel: daily HK means + decoded status/availability
             n_ok = sum(1 for r in rows if _is_success(r["flag"]))
 
     # OmB / sensitivity add-ons consume the Kalman C_L: the fresh one if we just
     # calibrated, else the existing <key>_kalman.csv (the --no-cal reuse path).
     if do_sens or do_omb:
-        kalman_rows = _kalman_rows(rows) if rows else _read_kalman_csv(sdir / f"{key}_kalman.csv")
+        kalman_rows = (_kalman_rows(rows, key=key) if rows
+                       else _read_kalman_csv(sdir / f"{key}_kalman.csv"))
         try:
             if do_omb:
                 try:

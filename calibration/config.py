@@ -221,6 +221,11 @@ class CalibrationOptions:
     # Per-station override of molecular_params, keyed by '<wmo>_<ident>' (merged on top by the network
     # runner): e.g. Payerne CHM15k A (abnormal receiver) on tier 1 only, {"use_noise": false}.
     station_molecular_params: dict = field(default_factory=dict)
+    # Per-stream Kalman input filter, keyed by '<wmo>_<ident>' (read by the network runner): e.g.
+    # {"0-20000-0-01492_A": {"exclude_flags": [0.25]}} keeps Oslo's polar-summer low-sun nights (2.6x
+    # the dark-night level in the v2.3 release, under investigation) out of its best estimate while
+    # they stay in the CSV and the NetCDF.
+    station_kalman_params: dict = field(default_factory=dict)
     # Flag -9 ("another layer with lower signal"): reject when the chosen window's slope exceeds
     # the 10th percentile of clean-window slopes by more than this factor. Was previously read via
     # getattr with a hard-coded 2.0 and existed in neither the dataclass nor options.json.
@@ -366,6 +371,7 @@ class CalibrationOptions:
             profile_outlier_nmad=float(data.get("profile_outlier_nmad", 4.0)),
             molecular_params=dict(data.get("molecular_params", {}) or {}),
             station_molecular_params=dict(data.get("station_molecular_params", {}) or {}),
+            station_kalman_params=dict(data.get("station_kalman_params", {}) or {}),
             aerosol_qc_enabled=bool(data.get("aerosol_qc_enabled", 1)),
             aerosol_scattering_threshold=float(data.get("aerosol_scattering_threshold", 2.0)),
             use_classification_mask=bool(data.get("use_classification_mask", 1)),
