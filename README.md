@@ -1,3 +1,20 @@
+> [!WARNING]
+> **Decommissioned.** This repository is no longer maintained. Its last release is tag
+> **`v2.3.0`** (calibration v2.3, November 2026). Development continues, with this repository's
+> history, in three repositories:
+>
+> * **[MeteoSwiss/ALC_calibration](https://github.com/MeteoSwiss/ALC_calibration)**: the operational
+>   calibration (Rayleigh and liquid cloud, Kalman, add-ons), the `alc-calibration` package and the
+>   daily run;
+> * **[MeteoSwiss/ALC_calibration_dashboard](https://github.com/MeteoSwiss/ALC_calibration_dashboard)**:
+>   the calibration monitor and its publication on the European Weather Cloud;
+> * **[MeteoSwiss/ALC_calibration_validation](https://github.com/MeteoSwiss/ALC_calibration_validation)**:
+>   the studies, release reports and comparisons.
+>
+> Commit IDs changed in the split; each new repository carries the old-to-new map in
+> `doc/history/commit-map.txt`. This repository stays readable (archived) so that the IDs quoted
+> in reports and release provenance files keep resolving here.
+
 # Calibration for Automated Lidars and Ceilometers (Rayleigh & cloud)
 
 The Python package `calibration` provides Rayleigh (molecular) **and** liquid-cloud calibration of ceilometers and lidars used in the MeteoSwiss / E-PROFILE network. Includes water-vapour correction for 910 nm instruments, six selectable molecular-window detection methods, and a suite of analysis / validation scripts for the E-PROFILE ALC paper.
