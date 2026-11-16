@@ -40,6 +40,9 @@ export STREAM_TIMEOUT=28800
 OUT=${OUT:-/scratch/mch/mhrvo/dash_payloads_v23}
 START=${START:-20250101}
 : "${END:?set END=YYYYMMDD (the last day of the tree)}"
+# One payload worker per allocated CPU, minus a margin (240 workers on a 64-CPU allocation was killed:
+# BrokenProcessPool, 284 GB RSS).
+WORKERS=$(( ${SLURM_CPUS_PER_TASK:-8} > 16 ? ${SLURM_CPUS_PER_TASK:-8} - 16 : ${SLURM_CPUS_PER_TASK:-8} ))
 [ -d "$ALC_FULLCAL_DIR" ] || { echo "REFUSING: $ALC_FULLCAL_DIR does not exist" >&2; exit 1; }
 IDX=${SLURM_ARRAY_TASK_ID:-0}
 NT=${SLURM_ARRAY_TASK_COUNT:-1}
@@ -59,7 +62,7 @@ echo "task $IDX/$NT  streams: $(( ${#KEYS[@]} / 2 ))   window: $START..$END   ou
 python "$CODE/scripts/build_station_dashboard.py" "${KEYS[@]}" \
   --start "$START" --end "$END" \
   --cal-dir "$ALC_FULLCAL_DIR" --l1-root "$ALC_L1_ROOT" \
-  --out "$OUT" --work "$OUT/_work_$IDX" --payloads --no-pages --workers 240
+  --out "$OUT" --work "$OUT/_work_$IDX" --payloads --no-pages --workers "$WORKERS"
 rc=$?
 echo -n "stations with payloads: "; ls -d "$OUT"/data/*/ 2>/dev/null | wc -l
 echo -n "payload files:          "; find "$OUT/data" -name '*.json' 2>/dev/null | wc -l
