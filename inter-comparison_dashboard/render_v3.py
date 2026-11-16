@@ -141,10 +141,11 @@ function decodeF32(blk) { return blk ? new Float32Array(b64bytes(blk.b).buffer) 
 
 /* ===================== state ===================== */
 /* boot state (operator-confirmed): WV comparison on the manufacturer spectrum, molecular
-   wavelength, noise filter off, full period — per-instrument picks come from each site's
-   default/default_dark in variants_v3.SITE_V3 */
-const state = { site:null, wv:'ctor', wl:'molecular', filter:false, logx:false, r0:0, r1:0,
-                iref:0, pick:{} };
+   wavelength, noise filter off (window preset to 5 min, scene threshold to Rayleigh), full
+   period — per-instrument picks come from each site's default/default_dark in
+   variants_v3.SITE_V3 */
+const state = { site:null, wv:'ctor', wl:'molecular', logx:false, r0:0, r1:0,
+                iref:0, pick:{}, nf:{ mode:'off', win:0, thr:1 } };
 const CACHE = {};
 const PCFG = { displaylogo:false, responsive:true };
 const BASE = { template:'plotly_white', margin:{l:64,r:16,t:34,b:46}, font:{size:12}, height:470,
@@ -162,7 +163,7 @@ const MONTH_LABEL = ym => { const [y, m] = ym.split('-').map(Number);
 function siteCache() {
   const P = S();
   if (CACHE[state.site]) return CACHE[state.site];
-  const c = { raw:{}, corr:{} };
+  const c = { raw:{}, corr:{}, nf:null };
   for (const k in P.streams) c.raw[k] = decodeStream(P.streams[k]);
   for (const k in P.corr) {
     const q = P.corr[k];
@@ -170,8 +171,114 @@ function siteCache() {
                   wv:decodeF32(q.wv), wv2:decodeF32(q.wv2),
                   bml:decodeF32(q.bml), bmt:decodeF32(q.bmt) };
   }
+  /* noise-filter bit masks (build_v3/nf_v3): per-hour admissions, u1 per instrument (bit =
+     window index), u1 common intersection, u2 scene (bit = threshold*4 + window) */
+  if (P.nf) {
+    c.nf = { inst:{}, common:b64bytes(P.nf.common.b),
+             scene:(P.nf.scene ? new Uint16Array(b64bytes(P.nf.scene.b).buffer) : null),
+             p2:{} };
+    for (const id in P.nf.inst) c.nf.inst[id] = b64bytes(P.nf.inst[id].b);
+    for (const id in P.nf.p2)
+      c.nf.p2[id] = { sn:decodeF32(P.nf.p2[id].sn), ss:decodeF32(P.nf.p2[id].ss) };
+  }
   CACHE[state.site] = c;
   return c;
+}
+
+/* ===================== noise filter (SNR) ===================== */
+/* Admission masks are computed at BUILD time on the native streams (the payload is hourly, a
+   sub-hourly SNR is not reconstructible here) and frozen at the site's default calibration
+   variants — clicking a variant cannot silently change the sample.  L2 panels inherit the L1
+   masks: same photons.  See nf_v3.py. */
+function nfActive() { return !!S().nf && state.nf.mode !== 'off'; }
+const admOk = (adm, o) => !adm || ((adm.a[o] >> adm.bit) & 1);
+
+/* the mask that decides which (hour x gate) samples ENTER the statistics for instrument k —
+   null = no removal (mode off, and 'p2' which by construction averages everything) */
+function admissionOf(k) {
+  const P = S();
+  if (!nfActive() || state.nf.mode === 'p2') return null;
+  const C = siteCache().nf;
+  if (state.nf.mode === 'inst') {
+    const a = C.inst[P.instruments[k].ident];
+    return a ? { a, bit:state.nf.win } : null;
+  }
+  if (state.nf.mode === 'common') return { a:C.common, bit:state.nf.win };
+  if (state.nf.mode === 'scene' && C.scene)
+    return { a:C.scene, bit:state.nf.thr * 4 + state.nf.win };
+  return null;
+}
+/* the "% of hours detected" overlay: the instrument's OWN detection at the chosen window — in
+   'p2' mode this is exactly the diagnostic the mode deliberately does not filter by */
+function overlayAdmissionOf(k) {
+  const P = S();
+  if (!nfActive()) return null;
+  if (state.nf.mode === 'inst' || state.nf.mode === 'p2') {
+    const a = siteCache().nf.inst[P.instruments[k].ident];
+    return a ? { a, bit:state.nf.win } : null;
+  }
+  return admissionOf(k);
+}
+
+/* 'p2' display mask: SNR of the PERIOD AGGREGATE per gate, in raw units (median over the
+   selected rows of the L1 raw stream, dark-subtracted where measured, against the pooled noise
+   from the monthly sums sn/ss).  Signed, like intercompare.snr_mask: a negative aggregate is
+   not a detection. */
+function p2Mask(V, k) {
+  const P = S(), C = siteCache(), nz = V.nz, id = P.instruments[k].ident;
+  const out = new Array(nz).fill(true);
+  const nf = C.nf;
+  if (!nf || !nf.p2[id]) return out;
+  const raw = C.raw['L1|' + id];
+  if (!raw) return out;
+  const sn = nf.p2[id].sn, ss = nf.p2[id].ss, dark = P.dark[id];
+  const rows = V.rows, buf = new Float64Array(rows.length);
+  for (let g = 0; g < nz; g++) {
+    let Sn = 0, Ss = 0;
+    for (let m = state.r0; m <= state.r1; m++) { Sn += sn[m * nz + g]; Ss += ss[m * nz + g]; }
+    if (!(Sn > 0) || !(Ss > 0)) continue;      /* no noise estimate -> keep (snr_mask rule) */
+    let c = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const v = raw[rows[i] * nz + g];
+      if (isFinite(v)) buf[c++] = v;
+    }
+    if (!c) continue;
+    const sub = buf.subarray(0, c).slice().sort((a, b) => a - b);
+    let m0 = quantiles(sub)[0];
+    if (dark) m0 -= dark[g];
+    const snr = m0 / (Math.sqrt(Ss / Sn) / Math.sqrt(Sn));
+    out[g] = !isFinite(snr) || snr >= P.nf.snr;
+  }
+  return out;
+}
+
+/* The selection bias, MEASURED: median of the quiet referee's samples (band, selected period)
+   restricted to the hours the noisiest instrument's own SNR mask keeps, vs unrestricted.  Any
+   difference is pure SAMPLING (SNR-detected hours over-represent loaded scenes) — the referee
+   itself is detected essentially everywhere, so its calibration cancels in the ratio. */
+function samplingBias(V) {
+  const P = S(), nf = P.nf;
+  if (!nf || state.nf.mode !== 'inst' || !nf.noisiest || !nf.ref) return null;
+  const kr = P.instruments.findIndex(i => i.ident === nf.ref);
+  if (kr < 0 || !V.ok[kr]) return null;
+  const noisy = siteCache().nf.inst[nf.noisiest];
+  if (!noisy) return null;
+  const A = V.L1[kr], nz = V.nz, rows = V.rows, b0 = V.b0, b1 = V.b1;
+  const all = [], msk = [];
+  for (let i = 0; i < rows.length; i++) {
+    const o = rows[i] * nz;
+    for (let g = b0; g <= b1; g++) {
+      const v = A[o + g];
+      if (!isFinite(v)) continue;
+      all.push(v);
+      if ((noisy[o + g] >> state.nf.win) & 1) msk.push(v);
+    }
+  }
+  if (all.length < 100 || msk.length < 50) return null;
+  all.sort((a, b) => a - b); msk.sort((a, b) => a - b);
+  const ma = quantiles(all)[0], mm = quantiles(msk)[0];
+  if (!(ma > 0)) return null;
+  return { pct:(mm / ma - 1) * 100, nAll:all.length, nMsk:msk.length };
 }
 
 /* ===================== the transform ===================== */
@@ -194,6 +301,12 @@ function computeSel(id, src, sel) {
   /* measured hood dark b(z), in rcs_0 units, subtracted BEFORE the calibration division — the
      per-hour band values are stored per gate, so this is exact, not a band-mean approximation. */
   const dark = (src === 'L1' && sel.dark && P.dark[id]) ? P.dark[id] : null;
+  /* temperature-dependent overlap residual (Hervo 2016): factor = 1 + (a(z)*T_int + b(z))/100,
+     applied AFTER the dark (the dark is an additive electronic offset, the overlap a
+     multiplicative property of the optical path) and BEFORE the calibration division.  The factor
+     is DIMENSIONLESS, so unlike the dark it is equally valid on the L2 product — same instrument,
+     same optics, same hour.  Twin of validation/paper/overlap.correct_rcs. */
+  const ovr = (sel.ov && P.overlap && P.overlap[id] && P.overlap[id].ok) ? P.overlap[id] : null;
   const wvArr = state.wv === 'none' ? null
               : (state.wv === 'ctor' && cr.wv2 ? cr.wv2 : cr.wv);
   const needWL = cr.lam !== null && Math.abs(cr.lam - P.target) >= 1.0;
@@ -203,9 +316,16 @@ function computeSel(id, src, sel) {
   for (let h = 0; h < nh; h++) {
     const d = P.hour_day[h], o = h * nz, dof = d * nz;
     const scale = src === 'L1' ? 1e6 / cl[h] : 1.0;
+    const Tov = ovr ? ovr.t[h] : null;
     for (let g = 0; g < nz; g++) {
       let v = raw[o + g];
       if (dark) v -= dark[g];
+      /* a null temperature keeps factor 1 (no correction) rather than blanking the hour —
+         the same rule correct_rcs applies to non-finite T */
+      if (ovr && Tov !== null) {
+        let f = 1 + (ovr.a[g] * Tov + ovr.b[g]) / 100;
+        v *= Math.min(Math.max(f, ovr.fmin), ovr.fmax);
+      }
       v *= scale;
       if (wvArr) v /= wvArr[dof + g];
       if (useMol) v = cr.bmt[dof + g] + (v - cr.bml[dof + g]) * cr.f;
@@ -256,14 +376,31 @@ function profileOf(V, src, k) {
   const P = S(), nz = V.nz, A = V[src][k], rows = V.rows;
   const med = new Array(nz), q1 = new Array(nz), q3 = new Array(nz), n = new Array(nz);
   const buf = new Float64Array(rows.length);
+  /* adm removes samples from the statistics (modes inst/common/scene); ovAdm only feeds the
+     "% of hours detected" overlay — in mode p2 nothing is removed, by construction */
+  const adm = admissionOf(k), ovAdm = overlayAdmissionOf(k);
+  const avail = ovAdm ? new Array(nz).fill(null) : null;
   for (let g = 0; g < nz; g++) {
-    let c = 0;
-    for (let i = 0; i < rows.length; i++) { const v = A[rows[i] * nz + g]; if (isFinite(v)) buf[c++] = v; }
+    let c = 0, cAll = 0, cOv = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const o = rows[i] * nz + g, v = A[o];
+      if (!isFinite(v)) continue;
+      cAll++;
+      if (ovAdm && ((ovAdm.a[o] >> ovAdm.bit) & 1)) cOv++;
+      if (adm && !((adm.a[o] >> adm.bit) & 1)) continue;
+      buf[c++] = v;
+    }
     const sub = buf.subarray(0, c).slice().sort((a, b) => a - b);
     const [m, a, b] = quantiles(sub);
     med[g] = m; q1[g] = a; q3[g] = b; n[g] = c;
+    if (avail && cAll) avail[g] = cOv / cAll * 100;
   }
-  return { med, q1, q3, n, keep:keepMask(med, n, P.z, rows.length) };
+  const keep = keepMask(med, n, P.z, rows.length);
+  if (nfActive() && state.nf.mode === 'p2') {
+    const pk = p2Mask(V, k);
+    for (let g = 0; g < nz; g++) keep[g] = keep[g] && pk[g];
+  }
+  return { med, q1, q3, n, keep, avail };
 }
 
 /* noise-floor mask — port of build_l1_l2_dashboard._keep_mask (coverage, sign, sustained rise) */
@@ -293,16 +430,20 @@ function keepMask(med, n, z, nprof) {
   return med.map((_, i) => good[i] && i < cut);
 }
 
-/* per-gate median of the per-hour relative difference (cur vs ref), in % */
+/* per-gate median of the per-hour relative difference (cur vs ref), in % — the active noise
+   filter removes a sample when EITHER side rejects it (per-instrument masks therefore act as
+   their intersection here, which is exactly the paired-statistics requirement) */
 function diffProfile(V, src, k, kref) {
   const nz = V.nz, A = V[src][k], B = V[src][kref], rows = V.rows;
+  const admA = admissionOf(k), admB = admissionOf(kref);
   const out = new Array(nz).fill(null);
   const buf = new Float64Array(rows.length);
   for (let g = 0; g < nz; g++) {
     let c = 0;
     for (let i = 0; i < rows.length; i++) {
       const o = rows[i] * nz + g, a = A[o], b = B[o];
-      if (isFinite(a) && isFinite(b) && b > 0) buf[c++] = (a - b) / b * 100;
+      if (isFinite(a) && isFinite(b) && b > 0 && admOk(admA, o) && admOk(admB, o))
+        buf[c++] = (a - b) / b * 100;
     }
     if (c) { const sub = buf.subarray(0, c).slice().sort((x, y) => x - y);
              out[g] = quantiles(sub)[0]; }
@@ -314,16 +455,18 @@ function diffProfile(V, src, k, kref) {
 const HIST_EDGES = (() => { const e = []; for (let v = -100; v <= 200.0001; v += 2.5) e.push(v);
                             return e; })();
 function bandStats(V, src, k, kref) {
-  return bandStatsAB(V[src][k], V[src][kref], V);
+  return bandStatsAB(V[src][k], V[src][kref], V, admissionOf(k), admissionOf(kref));
 }
-function bandStatsAB(A, B, V) {
+function bandStatsAB(A, B, V, admA, admB) {
   const nz = V.nz, rows = V.rows, [b0, b1] = [V.b0, V.b1];
   const a = [], b = [];
   for (let i = 0; i < rows.length; i++) {
     const o = rows[i] * nz;
     for (let g = b0; g <= b1; g++) {
       const x = A[o + g], y = B[o + g];
-      if (isFinite(x) && isFinite(y)) { a.push(x); b.push(y); }
+      if (isFinite(x) && isFinite(y) && admOk(admA, o + g) && admOk(admB, o + g)) {
+        a.push(x); b.push(y);
+      }
     }
   }
   const n = a.length;
@@ -367,7 +510,7 @@ function bandStatsAB(A, B, V) {
 function zoneShape() { const P = S();
   return { type:'rect', xref:'paper', yref:'y', x0:0, x1:1, y0:P.zmin, y1:P.zmax,
            fillcolor:'rgba(31,119,180,0.045)', line:{width:0}, layer:'below' }; }
-const mask = (arr, keep) => state.filter ? arr.map((v, i) => keep[i] ? v : null) : arr;
+const mask = (arr, keep) => nfActive() ? arr.map((v, i) => keep[i] ? v : null) : arr;
 
 function profileTraces(V, src) {
   const P = S(), out = [];
@@ -381,6 +524,13 @@ function profileTraces(V, src) {
     out.push({ x:mask(p.med, p.keep), y:P.z, mode:'lines', line:{color:c.color, width:2.2},
                name:chLabel(k),
                hovertemplate:'%{y:.0f} m<br>' + c.label + ' = %{x:.3f}<extra></extra>' });
+    /* retained-fraction overlay (top axis): makes the sampling loss of the active noise
+       filter visible per gate — in mode p2 it is the instrument's own detection rate, which
+       the mode deliberately does NOT filter by */
+    if (p.avail) out.push({ x:p.avail, y:P.z, mode:'lines', xaxis:'x2',
+      line:{color:c.color, width:1, dash:'dot'}, opacity:0.55, showlegend:false,
+      hovertemplate:'%{y:.0f} m<br>' + c.label + ' : %{x:.0f} % des heures détectées' +
+                    '<extra></extra>' });
   });
   return out;
 }
@@ -396,6 +546,9 @@ function profileLayout(title) {
     : { title:{text:'β<sub>att</sub> [Mm⁻¹ sr⁻¹]'}, range:[0, 1.0], zeroline:false };
   lay.yaxis = { title:{text:'Altitude a.g.l. [m]'}, range:[0, ZTOP] };
   lay.shapes = [zoneShape()];
+  if (nfActive()) lay.xaxis2 = { overlaying:'x', side:'top', range:[0, 105], showgrid:false,
+    zeroline:false, tickfont:{size:9}, ticksuffix:' %',
+    title:{text:'% heures détectées (pointillé)', font:{size:10}} };
   return lay;
 }
 function diffLayout(title, xr) {
@@ -414,10 +567,13 @@ function diffLayout(title, xr) {
    the label must say which one this site is showing */
 const darkSuffix = v => (DARK_RUNS.indexOf(v) >= 0 && S().dark_kind === 'estimated')
   ? ' — dark ESTIMÉ ciel clair (démonstration)' : '';
+/* where the dark is MEASURED the dark-run labels carry the hood-profile version
+   (variants_v3.DARK_LABEL_BY_KIND), so constants of one dark version never wear another's name */
 const vLabel = (itype, v) =>
-  ((VLBL_BY_TYPE[itype] || {})[v] || VARIANT_LABEL[v] || v) + darkSuffix(v);
+  ((VLBL_BY_TYPE[itype] || {})[v] || (DLBL_BY_KIND[S().dark_kind] || {})[v] ||
+   VARIANT_LABEL[v] || v) + darkSuffix(v);
 const vShort = (itype, v) =>
-  ((VSH_BY_TYPE[itype] || {})[v] || VSHORT[v] || v) +
+  ((VSH_BY_TYPE[itype] || {})[v] || (DSH_BY_KIND[S().dark_kind] || {})[v] || VSHORT[v] || v) +
   (darkSuffix(v) ? ' (dark estimé)' : '');
 function chLabel(k) {
   const P = S(), inst = P.instruments[k], s = state.pick[inst.ident];
@@ -478,17 +634,39 @@ function draw() {
   hl.yaxis = { title:{text:'part des échantillons [%]'} };
   Plotly.react('p_hist', ht, hl, PCFG);
 
+  /* sampling-bias line (mode « par instrument » only, where the bias lives) */
+  const nfb = document.getElementById('nfbias');
+  const sb = samplingBias(V);
+  if (sb) {
+    const nf = P.nf;
+    const refL = (P.instruments.find(i => i.ident === nf.ref) || {}).label || nf.ref;
+    const noiL = (P.instruments.find(i => i.ident === nf.noisiest) || {}).label || nf.noisiest;
+    const wl = ['5 min', '30 min', '60 min', '3 h'][state.nf.win];
+    nfb.innerHTML = `<b>Biais d'échantillonnage mesuré</b> — médiane ${refL} (bande, période
+      courante) restreinte aux heures que le masque SNR ${wl} du ${noiL} retient :
+      <b>${sb.pct > 0 ? '+' : ''}${sb.pct.toFixed(1)} %</b> par rapport à la médiane sans
+      restriction (${sb.nMsk.toLocaleString('fr-FR')} / ${sb.nAll.toLocaleString('fr-FR')}
+      échantillons). Cette part de l'écart vient de l'<b>échantillonnage</b> (les heures
+      détectées par SNR sur-représentent les scènes chargées), pas de l'étalonnage — elle est
+      mesurée sur l'instrument silencieux sous le masque de l'instrument bruité. Modes
+      « masque commun », « moyenne d'abord » ou « masque scène » pour une comparaison sans ce
+      biais.`;
+    nfb.style.display = '';
+  } else { nfb.innerHTML = ''; nfb.style.display = 'none'; }
+
   /* L1 vs L2, same instrument */
   if (hasL2) {
     const tt = [];
     P.instruments.forEach((c, k) => {
       if (!V.ok[k]) return;
       const nz = V.nz, A = V.L1[k], B = V.L2[k], rws = V.rows;
+      const adm = admissionOf(k);           /* same instrument both sides: one mask */
       const out = new Array(nz).fill(null), buf = new Float64Array(rws.length);
       for (let g = 0; g < nz; g++) {
         let cc = 0;
         for (let i = 0; i < rws.length; i++) { const o = rws[i] * nz + g, x = A[o], y = B[o];
-          if (isFinite(x) && isFinite(y) && y > 0) buf[cc++] = (x - y) / y * 100; }
+          if (isFinite(x) && isFinite(y) && y > 0 && admOk(adm, o))
+            buf[cc++] = (x - y) / y * 100; }
         if (cc) { const sub = buf.subarray(0, cc).slice().sort((p, q) => p - q);
                   out[g] = quantiles(sub)[0]; }
       }
@@ -535,18 +713,19 @@ function drawLadder(V) {
          and both profile states are coherent user choices. */
       const rdark = sel.method === 'rayleigh'
         ? (DARK_RUNS.indexOf(vn) >= 0 && !!P.dark[id]) : sel.dark;
-      const A = computeSel(id, 'L1', { method:sel.method, variant:vn, dark:rdark });
+      const A = computeSel(id, 'L1', { method:sel.method, variant:vn, dark:rdark,
+                                       ov:sel.ov });
       if (!A) return;
       let delta = '—', disp = '—';
       if (k === kref) {
         if (hasL2 && V.L2[k]) {
-          const s = bandStatsAB(A, V.L2[k], V);
+          const s = bandStatsAB(A, V.L2[k], V, admissionOf(k), admissionOf(k));
           delta = (s.medrel === null ? '—' : (s.medrel > 0 ? '+' : '') + s.medrel.toFixed(1) +
                    ' %<span class="muted"> vs L2</span>');
           disp = s.mad === null ? '—' : s.mad.toFixed(1) + ' %';
         } else { delta = '<span class="muted">réf.</span>'; }
       } else if (ref) {
-        const s = bandStatsAB(A, ref, V);
+        const s = bandStatsAB(A, ref, V, admissionOf(k), admissionOf(kref));
         delta = s.medrel === null ? '—' : (s.medrel > 0 ? '+' : '') + s.medrel.toFixed(1) + ' %';
         disp = s.mad === null ? '—' : s.mad.toFixed(1) + ' %';
       }
@@ -571,7 +750,7 @@ function drawLadder(V) {
     if (hasL2 && V.ok[k] && V.L2 && V.L2[k]) {
       let delta = '<span class="muted">réf.</span>', disp = '—';
       if (k !== kref && V.ok[kref] && V.L2[kref]) {
-        const s = bandStatsAB(V.L2[k], V.L2[kref], V);
+        const s = bandStatsAB(V.L2[k], V.L2[kref], V, admissionOf(k), admissionOf(kref));
         delta = s.medrel === null ? '—' : (s.medrel > 0 ? '+' : '') + s.medrel.toFixed(1) + ' %';
         disp = s.mad === null ? '—' : s.mad.toFixed(1) + ' %';
       }
@@ -596,18 +775,25 @@ function drawLadder(V) {
 function l2Provenance(inst) {
   const fmt = v => Math.abs(v) >= 1e4 ? (+v).toExponential(1).replace('e+', 'e') : (+v).toFixed(2);
   const d = (S().l2_applied || {})[inst.ident];
-  let obs = '';
+  /* chronological runs of one applied constant, each dated from the L2 itself: a date written in
+     this prose went stale twice (the CL61 switch was claimed "mid-June"; it is 07-29) */
+  const seg = [];
   if (d && d.value && d.value.length) {
-    const cnt = {};
-    d.value.forEach(v => { const k = fmt(v); cnt[k] = (cnt[k] || 0) + 1; });
-    obs = ' Observé sur la fenêtre : ' +
-          Object.keys(cnt).map(k => `${k} (${cnt[k]} j)`).join(', ') + '.';
+    d.value.forEach((v, i) => {
+      const last = seg[seg.length - 1];
+      if (last && Math.abs(v / last.v - 1) < 1e-6) { last.to = d.date[i]; last.n++; }
+      else seg.push({ v, from: d.date[i], to: d.date[i], n: 1 });
+    });
   }
+  const obs = seg.length ? ' Constante appliquée sur la fenêtre : ' + seg.map(s =>
+    `${fmt(s.v)} du ${s.from} au ${s.to} (${s.n} j)`).join(' ; ') + '.' : '';
   /* Operator-stated provenance (2026-08-16, corrected same day): the distributed L2 carries the
-     operational Rayleigh v1.0 calibration for the CHM15k AND — recently activated — the CL61;
-     the CL31 stays on the uncalibrated default. The observed CL61 constants confirm it:
-     1.00 (default) on 48 d then 2.1257 from mid-June 2026 = the v1.0 series going live.
-     The appended observed values keep the tooltip honest if the files ever change. */
+     operational Rayleigh v1.0 calibration for the CHM15k AND — since its activation in 2026 — the
+     CL61; the CL31 stays on the uncalibrated default.  The CL61 activation shows up as the first
+     departure from its default constant 1.0, dated below from the data. */
+  const cl61On = inst.itype === 'CL61'
+    ? seg.find((s, i) => i > 0 && Math.abs(seg[i - 1].v - 1) < 1e-6 && Math.abs(s.v - 1) >= 1e-6)
+    : null;
   const base = {
     CHM15k: { pill:'calibration Rayleigh v1.0 (opérationnelle)', short:'Rayleigh v1.0',
       tip:'Constante issue de la méthode Rayleigh opérationnelle E-PROF v1.0 (pré-v2).' },
@@ -615,11 +801,12 @@ function l2Provenance(inst) {
       tip:'La chaîne opérationnelle n\'applique pas de calibration au CL31 — ' +
           'la constante par défaut explique l\'écart de cette ligne ; c\'est exactement le ' +
           'manque que l\'étalonnage nuage comble.' },
-    CL61: { pill:'calibration Rayleigh v1.0 (opérationnelle, activée mi-2026)',
+    CL61: { pill:'calibration Rayleigh v1.0 (opérationnelle' +
+                 (cl61On ? ', activée le ' + cl61On.from : '') + ')',
       short:'Rayleigh v1.0',
       tip:'Le CL61 est désormais calibré en opérationnel par la méthode Rayleigh v1.0 — ' +
-          'la bascule est visible dans les constantes observées : 1,00 (défaut) avant, puis ' +
-          'la valeur v1.0 depuis la mi-juin 2026.' },
+          'avant sa mise en service, le L2 porte la constante par défaut 1,00' +
+          (cl61On ? ' (ici jusqu\'au ' + seg[seg.indexOf(cl61On) - 1].to + ')' : '') + '.' },
   }[inst.itype] || { pill:'constante appliquée', short:'constante appliquée', tip:'' };
   return { pill: base.pill, short: base.short, tip: base.tip + obs };
 }
@@ -905,12 +1092,16 @@ function buildControls() {
         title="${(why || '').replace(/"/g, '&quot;')}">${vLabel(inst.itype, v)}${ok ? '' : ' — indisponible'}</option>`;
     }).join('');
     const badge = REFERENCE_VARIANTS.indexOf(sel.variant) >= 0
-      ? `<span class="pill ref" title="${REFERENCE_NOTE.replace(/"/g, '&quot;')}">★ hypothèse de référence</span>` : '';
+      ? `<span class="pill ref" title="${REFERENCE_NOTE.replace(/"/g, '&quot;')}">★ modèle opérationnel</span>` : '';
     /* profile-side measured-dark checkbox: only where the covered-telescope campaign measured b(z) */
     const hasDark = !!P.dark[id];
     /* two half-states: profile dark-corrected but constants not (no twin run), and the reverse
        (a dark-run variant with the profile-side box unticked) */
-    const halfProfile = sel.dark && !DARK_TWIN[sel.variant];
+    /* a twin that exists in DARK_TWIN but has no run for THIS channel (CL61 'v2.2dark': the v3
+       dark rerun carries only the operational spectrum) is no twin at all */
+    const twin = DARK_TWIN[sel.variant];
+    const twinOk = !!twin && !!(P.calib[id + '|' + sel.method + '|' + twin] || {}).ok;
+    const halfProfile = sel.dark && !twinOk;
     const halfConst = !sel.dark && hasDark && DARK_RUNS.indexOf(sel.variant) >= 0;
     /* profile-only dark on a CLOUD variant is NOT a warning: the cloud constant is dark-immune
        (CL31 +0.08 % measured, CL61 ~0.001 %), so only the profiles need correcting */
@@ -920,10 +1111,30 @@ function buildControls() {
         : `<span class="warnflag" title="${DARK_NO_TWIN_WHY.replace(/"/g, '&quot;')}">⚠</span>`)
       : (halfConst
       ? `<span class="warnflag" title="constante issue d'un run dark-corrigé mais profil non corrigé — recocher la case pour l'état cohérent">⚠</span>` : '');
+    const nwin = (P.dark_nwin || {})[id];
     const darkCell = `<label class="chk" title="${hasDark ? 'soustrait le profil b(z) mesuré ' +
-        'télescope couvert avant la division par C_L' : DARK_NO_MEAS_WHY.replace(/"/g, '&quot;')}">
+        'télescope couvert (capot ' + DARK_MEAS_VERSION + (nwin ? ', ' + nwin + ' sessions' : '') +
+        ') avant la division par C_L' : DARK_NO_MEAS_WHY.replace(/"/g, '&quot;')}">
       <input type="checkbox" class="dchk" data-id="${id}" ${sel.dark ? 'checked' : ''}
-       ${hasDark ? '' : 'disabled'}> dark mesuré (capot)</label>${warn}`;
+       ${hasDark ? '' : 'disabled'}> dark mesuré (capot${hasDark ? ' ' + DARK_MEAS_VERSION : ''})</label>${warn}`;
+    /* overlap: offered only where it means something (CHM15k), greyed WITH THE REASON when the
+       model or the internal temperature is missing — the omit-vs-grey doctrine */
+    const ovr = (P.overlap || {})[id];
+    let ovCell;
+    if (inst.itype !== 'CHM15k') {
+      ovCell = `<span class="muted" title="${OVERLAP_NA_WHY.replace(/"/g, '&quot;')}">—</span>`;
+    } else {
+      const ok = ovr && ovr.ok;
+      const tip = ok
+        ? `${OVERLAP_WHY} Modèle ${ovr.file} : actif sous ${ovr.ztop.toFixed(0)} m, no-op ` +
+          `au-dessus (facteur exactement 1) ; T interne médiane ${ovr.tmed.toFixed(1)} °C → ` +
+          `facteur ${ovr.fband.toFixed(4)} à ${S().zmin.toFixed(0)} m, sur ${ovr.nt}/${ovr.nh} ` +
+          `heures avec température.`
+        : (ovr ? ovr.why : 'modèle absent du payload — relancer build_v3.py');
+      ovCell = `<label class="chk" title="${tip.replace(/"/g, '&quot;')}">
+        <input type="checkbox" class="ochk" data-id="${id}" ${sel.ov ? 'checked' : ''}
+         ${ok ? '' : 'disabled'}> recouvrement T (Hervo 2016)</label>`;
+    }
     return `<tr>
       <td><span class="swatch" style="background:${inst.color}"></span><b>${inst.label}</b>
           <span class="muted">${inst.itype}</span></td>
@@ -931,13 +1142,15 @@ function buildControls() {
       <td><select class="vsel" data-id="${id}">${opts}</select>${badge}</td>
       <td>${nightsBadge(id, sel.method, sel.variant)}</td>
       <td>${darkCell}</td>
+      <td>${ovCell}</td>
       <td><label class="chk"><input type="radio" name="iref" value="${k}"
            ${state.iref === k ? 'checked' : ''}> référence</label></td></tr>`;
   }).join('');
   const anyDark = P.instruments.some(i => state.pick[i.ident].dark);
   document.getElementById('instr').innerHTML =
     `<thead><tr><th>Instrument</th><th>Méthode</th><th>Variante d'étalonnage</th>
-      <th>Disponibilité</th><th>Fond électronique</th><th>Différences /</th></tr></thead>
+      <th>Disponibilité</th><th>Fond électronique</th><th>Recouvrement</th>
+      <th>Différences /</th></tr></thead>
      <tbody>${rows}</tbody>`;
   document.getElementById('darkhint').innerHTML = anyDark
     ? `<span class="muted">${DARK_HINT}</span>` : '';
@@ -971,6 +1184,38 @@ function buildControls() {
     s.innerHTML = P.months.map((m, i) => `<option value="${i}">${MONTH_LABEL(m)}</option>`).join('');
     s.value = state[w];
   });
+
+  /* noise filter */
+  const nf = P.nf;
+  const nm = document.getElementById('nfmode'), nwn = document.getElementById('nfwin'),
+        nth = document.getElementById('nfthr'), nfo = document.getElementById('nfinfo');
+  document.getElementById('nfgroup').classList.toggle('off', !nf);
+  [nm, nwn, nth].forEach(e => e.disabled = !nf);
+  if (!nf) {
+    nm.title = 'payload sans blocs SNR — relancer build_v3.py pour ce site';
+  } else {
+    if (state.nf.mode === 'scene' && !nf.scene) state.nf.mode = 'off';
+    const refI = P.instruments.find(i => i.ident === nf.ref);
+    const so = nm.querySelector('option[value="scene"]');
+    so.textContent = 'masque scène (réf. ' + (refI ? refI.label : nf.ref) + ')';
+    so.disabled = !nf.scene;
+    if (!nf.scene) so.title = nf.scene_why || 'masque scène indisponible pour ce site';
+    nm.value = state.nf.mode;
+    nwn.value = String(state.nf.win);
+    nth.value = String(state.nf.thr);
+    nwn.disabled = state.nf.mode === 'off';
+    nth.disabled = state.nf.mode !== 'scene';
+    nfo.title = 'SNR = médiane de fenêtre / (σ robuste / √n), le même critère « SNR3 » que le ' +
+      'produit opérationnel, évalué sur le signal brut dark-soustrait là où le b(z) mesuré ' +
+      'existe (' + (P.dark && Object.values(P.dark).some(x => x) ? 'ici : oui'
+                    : 'pas de mesure capot sur ce site') + ') — la case « dark mesuré » ne ' +
+      'change PAS les masques, la détection est une propriété des photons. Masques précalculés ' +
+      'au build sur les flux L1 natifs, constantes gelées aux variantes par défaut du site (' +
+      Object.entries(nf.consts || {}).map(([i, c]) => i + ':' + c).join(', ') + ') — changer ' +
+      'de variante ne change pas l’échantillon. Panneaux L2 : masques hérités du L1 ' +
+      '(mêmes photons). Les rideaux et le panneau PWV, statiques, ne suivent pas ce filtre. ' +
+      'La courbe pointillée (axe du haut) = % des heures à données que le filtre retient.';
+  }
   fillL2Pill();
   bindRow();
 }
@@ -1027,6 +1272,10 @@ function bindRow() {
     }
     buildControls(); draw();
   }));
+  document.querySelectorAll('#instr .ochk').forEach(c => c.addEventListener('change', e => {
+    state.pick[e.target.dataset.id].ov = e.target.checked;
+    buildControls(); draw();
+  }));
   document.querySelectorAll('#instr input[name=iref]').forEach(r =>
     r.addEventListener('change', e => { state.iref = +e.target.value; draw(); }));
 }
@@ -1056,7 +1305,7 @@ function setSite(key) {
        on a Rayleigh channel the pairing rule (dark iff dark-run) overrides default_dark */
     let dk = !!(dd[i.ident] && P.dark[i.ident]);
     if (method === 'rayleigh') dk = DARK_RUNS.indexOf(variant) >= 0 && !!P.dark[i.ident];
-    state.pick[i.ident] = { method, prev:null, dark:dk, variant };
+    state.pick[i.ident] = { method, prev:null, dark:dk, variant, ov:false };
   });
   state.iref = P.iref;
   state.r0 = 0; state.r1 = P.months.length - 1;
@@ -1088,7 +1337,12 @@ document.querySelectorAll('#wvseg button').forEach(b => b.addEventListener('clic
   if (b.disabled) return; state.wv = b.dataset.wv; buildControls(); draw(); }));
 document.querySelectorAll('#wlseg button').forEach(b => b.addEventListener('click', () => {
   if (b.disabled) return; state.wl = b.dataset.wl; buildControls(); draw(); }));
-document.getElementById('nfilt').addEventListener('change', e => { state.filter = e.target.checked; draw(); });
+document.getElementById('nfmode').addEventListener('change', e => {
+  state.nf.mode = e.target.value; buildControls(); draw(); });
+document.getElementById('nfwin').addEventListener('change', e => {
+  state.nf.win = +e.target.value; draw(); });
+document.getElementById('nfthr').addEventListener('change', e => {
+  state.nf.thr = +e.target.value; draw(); });
 document.getElementById('logx').addEventListener('change', e => { state.logx = e.target.checked; draw(); });
 ['r0', 'r1'].forEach(w => document.getElementById(w).addEventListener('change', e => {
   state[w] = +e.target.value;
@@ -1127,7 +1381,12 @@ def html(payloads):
         f"const DARK_CLOUD_OK = {json.dumps(V3.DARK_CLOUD_OK_WHY)};\n"
         f"const DARK_NO_MEAS_WHY = {json.dumps(V3.DARK_NO_MEAS_WHY)};\n"
         f"const DARK_HINT = {json.dumps(V3.DARK_HINT)};\n"
+        f"const DARK_MEAS_VERSION = {json.dumps(V3.DARK_MEAS_VERSION)};\n"
+        f"const DLBL_BY_KIND = {json.dumps(V3.DARK_LABEL_BY_KIND)};\n"
+        f"const DSH_BY_KIND = {json.dumps(V3.DARK_SHORT_BY_KIND)};\n"
         f"const REFERENCE_VARIANTS = {json.dumps(list(V3.REFERENCE_VARIANTS))};\n"
+        f"const OVERLAP_WHY = {json.dumps(V3.OVERLAP_WHY)};\n"
+        f"const OVERLAP_NA_WHY = {json.dumps(V3.OVERLAP_NA_WHY)};\n"
         f"const REFERENCE_NOTE = {json.dumps(V3.REFERENCE_NOTE)};\n")
 
     return f"""<!doctype html>
@@ -1181,8 +1440,47 @@ s'applique qu'à l'aérosol">avancée (moléculaire + aérosol α=1)</button>
         <span class="ctl-label">Période</span>
         <select id="r0"></select><span class="muted">→</span><select id="r1"></select>
       </div>
+      <div class="ctl-group" id="nfgroup">
+        <span class="ctl-label">Filtre bruit</span>
+        <select id="nfmode" title="Comment traiter les données sous SNR 3. Le filtrage SNR
+conditionne l'échantillon au signal : un mode par instrument biaise l'instrument bruité (CL31)
+vers ses scènes chargées — les autres modes neutralisent ce biais de sélection.">
+          <option value="off" title="aucun filtrage : toutes les heures appariées entrent dans
+les statistiques">sans</option>
+          <option value="inst" title="chaque instrument filtré par son propre SNR de fenêtre —
+le filtre littéral. ATTENTION : conditionne l'échantillon au signal et biaise l'instrument
+bruité vers les scènes chargées ; le biais est quantifié sous l'histogramme">par instrument
+(SNR ≥ 3)</option>
+          <option value="common" title="intersection : un pixel (fenêtre × porte) n'entre que si
+TOUS les instruments du site le détectent à SNR ≥ 3 — échantillon atmosphérique identique pour
+tous, couverture dictée par le plus bruité">masque commun (∩ instruments)</option>
+          <option value="p2" title="rien n'est retiré avant la moyenne (un bruit à moyenne nulle
+ne biaise pas une médiane) ; le profil de période est seulement MASQUÉ là où le SNR de l'agrégat
+< 3. La fenêtre choisie pilote la courbe « % détecté » (diagnostic)">moyenne d'abord, SNR
+après</option>
+          <option value="scene" title="le masque est construit depuis l'instrument référent (le
+CHM15k du site) et appliqué à TOUS — la sélection dépend de l'atmosphère, pas du bruit de
+chacun ; choisir le seuil β_att absolu à droite">masque scène (réf.)</option>
+        </select>
+        <select id="nfwin" title="fenêtre d'évaluation du SNR (alignée sur l'horloge). 5 et
+30 min : décision précalculée au build sur les flux natifs — l'heure est admise si au moins la
+moitié de ses données tombe dans des fenêtres détectées ; 60 min et 3 h : décision par heure">
+          <option value="0">sur 5 min</option>
+          <option value="1">sur 30 min</option>
+          <option value="2">sur 60 min</option>
+          <option value="3">sur 3 h</option>
+        </select>
+        <select id="nfthr" title="seuil de scène absolu : la fenêtre est gardée quand la
+RÉFÉRENCE mesure β_att ≥ seuil (à 1064 nm) ET le détecte (≥ 3σ/√n de son propre bruit) — le
+même masque est appliqué à tous les instruments, qui contribuent des valeurs bruitées mais NON
+biaisées sur les scènes qu'ils ne détectent pas individuellement">
+          <option value="0">seuil : β_att ≥ 0,1 Mm⁻¹ sr⁻¹</option>
+          <option value="1">seuil : β_att ≥ 0,25 Mm⁻¹ sr⁻¹</option>
+          <option value="2">seuil : β_att ≥ 0,5 Mm⁻¹ sr⁻¹</option>
+        </select>
+        <span class="warnflag ok" id="nfinfo">ⓘ</span>
+      </div>
       <div class="ctl-group">
-        <label class="chk"><input type="checkbox" id="nfilt"> filtrage du plancher de bruit</label>
         <label class="chk"><input type="checkbox" id="logx"> axe β logarithmique</label>
       </div>
       <span class="muted"><b id="period">–</b> · <b id="nhours">–</b> heures appariées</span>
@@ -1203,9 +1501,10 @@ s'applique qu'à l'aérosol">avancée (moléculaire + aérosol α=1)</button>
       l'autre. Ligne surlignée = variante actuellement sélectionnée ; ligne « <b>L2
       distribué</b> » = le produit tel qu'expédié aujourd'hui (comparé au L2 de la référence),
       avec la provenance de sa constante par instrument sur la pastille — CHM15k et CL61 =
-      calibration Rayleigh v1.0 opérationnelle (activée mi-2026 pour le CL61) ; CL31 = non
-      calibré (constante par défaut, qui laisse passer l'échelle native) — et, en infobulle, les
-      constantes réellement observées sur la fenêtre. Les lignes de l'instrument de
+      calibration Rayleigh v1.0 opérationnelle (pour le CL61, date de mise en service sur la
+      pastille) ; CL31 = non calibré (constante par défaut, qui laisse passer l'échelle native) —
+      et, en infobulle, chaque constante réellement appliquée sur la fenêtre avec ses dates, lues
+      dans le L2. Les lignes de l'instrument de
       référence donnent son écart L1–L2 lorsqu'un L2 existe, sinon « réf. ». Médiane et dispersion
       (médiane du rapport par échantillon, et 1,4826·MAD des mêmes rapports) portent sur la bande
       de statistiques et la période courantes ; la colonne dC/dCBH vient de la configuration
@@ -1213,9 +1512,12 @@ s'applique qu'à l'aérosol">avancée (moléculaire + aérosol α=1)</button>
   </div>
 
   <h2>Profils verticaux <span class="muted">— médiane (trait) et intervalle interquartile
-    (bande). Courbes brutes par défaut ; cocher « filtrage du plancher de bruit » pour arrêter
-    chaque courbe là où l'instrument n'a plus de signal. Vue par défaut 0–4 km — dézoomer pour le
-    reste.</span></h2>
+    (bande). Courbes brutes par défaut ; le sélecteur « Filtre bruit » retire ou masque les
+    données sous SNR 3 sur la fenêtre choisie (le mode règle QUI décide de l'admission — chaque
+    instrument, l'intersection, l'agrégat, ou la scène vue par la référence — car un filtrage
+    SNR par instrument biaise l'instrument bruité vers ses scènes chargées). La courbe
+    pointillée (axe du haut) montre le % d'heures retenues par porte. Vue par défaut 0–4 km —
+    dézoomer pour le reste.</span></h2>
   <div class="grid2">
     <div class="card"><p class="panel-title">L1 + étalonnage v2 <span class="pill l1">C<sub>L</sub>
       Kalman</span></p><p class="panel-sub">rcs_0 / C<sub>L</sub>(t) × 10<sup>6</sup></p>
@@ -1233,6 +1535,7 @@ s'applique qu'à l'aérosol">avancée (moléculaire + aérosol α=1)</button>
     <div class="card"><div id="d_diff"></div></div>
     <div class="card"><div id="p_hist"></div></div>
   </div>
+  <p class="note warnbox" id="nfbias" style="display:none"></p>
 
   <div id="l1l2sec">
     <h2>L1 vs L2 <span class="muted">— ce que le ré-étalonnage change, instrument par

@@ -127,6 +127,11 @@ never calibrated WV-free.
   covered-telescope b(z) profile (rcs_0 units, `rayleigh_availability/dark_profiles.py`) before the
   Rayleigh fit. At Payerne: +24 % on the CHM15k constant, +24 nights/yr, gradient −10.5 → −2.5 %/km.
   Do **NOT** confuse with `subtract_background` (fitted intercept = atmosphere in disguise, keep 0).
+  **Use the v3 profile** (`dark_profiles_payerne_v3.npz`, 10 sessions May–Sep 2026, data-detected windows,
+  P-smoothed; reruns `diag_v22_dark_v3`). The 6-session v1 profile that the inter-comparison dashboard still
+  carries produced a spurious +8 % CL61-Rayleigh-vs-CHM15k gap (June +19 %) in 2026; with v3 on both
+  instruments the two Rayleigh calibrations agree to +1 ± 3 % Jun–Oct 2026
+  (`doc/reports/eta_payerne_gap_2026-11-02.md`).
 - Campaign reports index: `doc/reports/README.md` §2026-08.
 
 ## CL61 water-vapour spectrum & the v3 dashboard (2026-08-16)
@@ -142,19 +147,104 @@ never calibrated WV-free.
   `water_vapor.LASER_SPECTRUM`, cloud `set_defaults` reads it too); **`ALC_WV_DISABLE=1`** turns
   the WV correction off. Runs per hypothesis: `diag_v22_l55s008` (★), `_l55w10`, `_l55w01`,
   `_nowv`, `_l55s008dark` (★+dark, the CL61 Rayleigh reference), CL31 ladder `_cl31l910`/`_cl31wieg`.
-- Three CL61 wavelengths coexist ON PURPOSE: 910.74→WV correction table (update to 910.55/0.188
-  pending final arbitration), 910.0→molecular Rayleigh reference (0.33 % effect), 910.55→η tables.
+- **The 910.55/0.188 spectrum is now OPERATIONAL (verified 2026-08-31).** The arbitration is
+  settled: the per-night NetCDFs published by E-PROFILE (EWC bucket `nc/<wmo>_<ident>/`,
+  `calibration_version` 220 Rayleigh / 1000 cloud) reproduce our `diag_v22_l55s008` reruns
+  **night-for-night** — cloud 70/70 nights within 2 % at a median ratio of 1.0000, Rayleigh 37/40 —
+  and match NO nominal-spectrum run (0/65). Consequences: ★ variants = the operational model, the
+  910.74 ones = retired; the operational Rayleigh constant is **dark-free** (it matches
+  `v2.2_l55s008`, not `_l55s008dark`); CHM15k (1064 nm, no WV term) and CL31 (wide 6 nm line,
+  insensitive: all its spectra agree within 0.5 %) are unaffected — only the CL61 moved.
+  ⚠ **The local `NC_DIR` copy (`C:/Users/hervo/Downloads`) predates the switch** (nights to
+  2026-08-06, no `calibration_version`), so the dashboard's `v2.0`/`cloudWV` variants still show
+  the retired configuration until those files are refreshed from the bucket.
+- **Code default = operational (2026-11-02):** `water_vapor.LASER_SPECTRUM["CL61"]` is now
+  (910.55, 0.188) — before, ONLY the `ALC_WV_SPECTRUM` export in `ops/config.sh` / the CSCS sbatch
+  made it operational, and any run without that env var silently used the Qmini 910.74/1.0. The
+  Qmini line (≈0.3 nm pixels, ≈1.5 nm apparent width) cannot resolve a 0.19 nm laser: never use it
+  for the WV correction. To replay the retired model, set `ALC_WV_SPECTRUM='{"CL61": [910.74, 1.0]}'`
+  explicitly (`run_hopkin_variants.ps1` "nominal" now does).
+- Two other CL61 wavelengths coexist ON PURPOSE: 910.0→molecular Rayleigh reference (0.33 %
+  effect), 910.55→η tables.
 - **Dashboard v3** = `inter-comparison_dashboard/index.html` (one page, 3 sites, per-instrument
   method/variant/dark controls, all-variants ladder table, per-config Hopkin, binned-PWV panel);
   architecture + editing guide in `inter-comparison_dashboard/README.md`; **`variants_v3.py` is
   the file to edit when a new run lands**. Anti-fossil rule: state-dependent numbers in page
   prose are injected at build (`prose_tokens`), never hard-coded.
+- **Noise filter (2026-08-24)**: « Filtre bruit » = SNR≥3 admission masks precomputed by
+  `nf_v3.py` from the NATIVE L1 files (`l1_l2_io.read_l1_native` — the `_streams_*` cache is
+  HOURLY, never use it for noise statistics), windows 5 min (default)/30/60/3 h, four modes
+  (par instrument / intersection / moyenne-d'abord / masque scène, referee = the site CHM15k,
+  `nf_ref` in variants_v3; scene thresholds = ABSOLUTE β_att 0.1/0.25/0.5 Mm⁻¹sr⁻¹ measured
+  AND detected by the referee — operator decisions 2026-08-24). SNR filtering conditions the
+  sample on signal: at Payerne 5 min the
+  CL31 keeps 25 % of band hours and the measured sampling bias (CHM15k median under the CL31
+  mask) is **+26 %** — shown live on the page; the scene/intersection/aggregate modes are the
+  unbiased comparisons. Masks frozen at site-default constants; L2 inherits L1 masks;
+  curtains/PWV stay static. Verification: `check_v3.py` (gate 0.1 %).
+- **CHM15k overlap option (2026-08-25)**: dashboard checkbox « recouvrement T (Hervo 2016) »,
+  CHM15k rows only — the temperature-dependent overlap residual, rcs₀·(1 + (a(z)·T_int + b(z))/100),
+  kernel `validation/paper/overlap.py` (validated vs MATLAB), models one NetCDF per instrument in
+  `ALC_OVERLAP_DIR` (default `D:/TEMP_MODELS/202606`; all 6 CHM15k of the 3 sites covered).
+  Applied after the dark, before the C_L division, and to **L2 as well** (dimensionless factor,
+  same optics — unlike the rcs₀-unit dark). It is a **no-op above ~700–840 m** (a and b vanish at
+  full overlap), so it reshapes the near range only and moves the 500–3000 m band median by
+  +0.01 %: the ladder/statistics and the dark-free constants pairing stay coherent. Verified in
+  `check_v3.py` against the reference kernel (gate 1e-5; observed 2.1e-06 = a/b storage precision).
 - Cloud calibration is dark-immune (+0.08 % CL31, ~0.001 % CL61, measured) and its fixed
   100–2400 m window makes a static dark CBH-flat by construction — never rerun cloud for dark.
-- L2 as distributed: CHM15k **and CL61** = operational Rayleigh v1.0 (the CL61's v1.0
-  calibration went live recently: constant 1.0 default on 48 d then 2.1257 from mid-2026-06 on
-  the paired window — the transition is visible in the L2 row tooltip); CL31 = UNCALIBRATED
-  (flat default 1e8 — the gap the cloud calibration fills).
+- L2 as distributed: CHM15k **and CL61** = operational Rayleigh v1.0 (CL61 applied constant: the
+  default 1.0 until 2026-07-28, 2.1257 from 07-29 to 10-13, 0.7932 from 10-14; the CHM15k's
+  changes on the same dates — the page dates these from the L2 files in the L2 row tooltip);
+  CL31 = UNCALIBRATED (flat default 1e8 — the gap the cloud calibration fills).
+
+## CHM15k temperature coefficient & diurnal bias (2026-10-20, report 19)
+
+- Notation: **κ** = temperature coefficient d ln C_L/dT_int (%/K). Never call it β (β = backscatter).
+- The CHM15k Rayleigh constant rises with **`temp_int`** by **+1.3…+2.1 %/K**. Estimators: synoptic
+  anomalies (season removed), intra-night with elapsed time held fixed, the 11-yr archive, and
+  same-wavelength pairs. It is unit-specific (0…+3.5) and grows with module generation (TUB≤15 ≈ +1,
+  TUB20–24 ≈ +2.5 %/K). Never regress C on raw `temp_int`: it is ~70 % season. Use anomalies.
+- Calibration is night-only, so **daytime L2 is biased high** by κ×(noon T_int rise): median +4.8 %,
+  +7.5 % in summer, >10 % for ⅓ of units. The night κ predicts the day (Schiphol/Budapest/Măgurele pairs
+  r = 0.98).
+- **Mechanism** = multiplicative optical-throughput change tied to the HOUSING temperature (no lag, τ ≈ 0).
+  Leading hypothesis: laser line vs the **1 nm** receiver filter (Lufft datasheet; the 0.1 nm on the Köln wiki is
+  unsupported). Co-equal rival: far-field alignment drift (FOV 0.45 mrad ≈ divergence). The manual puts the filter
+  INSIDE the heater-only laser-optical module (LOM = transmit+receive unit), so the filter theory needs a heat
+  leak; only Lufft can decide (11 questions, report 19 §7.8). Working assumption (operator, 2026-10-20):
+  **W = 1 nm** → the fit needs a filter drift **α ≈ 20 pm/K** (IQR 15–24) = exactly Jenoptik's published
+  JENOFILT coefficient (ΔCWL = (T−22)×0.02 nm; Jenoptik built the CHM15k before Lufft) → a conventional
+  (cemented/evaporated) filter; hard-coated ones (2–5 pm/K) would give only 0.2–0.5 %/K. Laser energy unlikely (PRF −0.06 %/K). Excluded:
+  detector (Peltier), `p_calc` reference, additive dark, overlap, aerosol (AERONET: slope +2.36 → +2.01).
+  `status_laser` is stuck at 100 %. `temp_lom` matters only when the heater-only LOM overheats on hot
+  afternoons (unit-specific sign).
+- κ normalisation before the Kalman shrinks the seasonal amplitude: network median ±16 → ±10 %, 35 % removed
+  (Budapest B ±20 → ±7 %; Kleine Scheidegg weak, ±18 → ±14 %: old module, small swing). κ by module generation:
+  ≤2015 +0.95, 2016–19 +1.65, ≥2020 +2.0 %/K. Breaks: 2015 (dark background ÷4), ~2020 (detector set-point
+  24.85 → 29.85 °C, LOM 33.85 → 34.35–34.85 °C). Pulse count cannot proxy pulse energy (±0.5 %, −0.07 %/K).
+- **Annual cycle attribution (q15, §7.13):** κ×T_int explains only 25–45 % of the ±16 % annual cycle. The rest
+  (~±9 %) is a height-independent GAIN, common to co-located CHM15k (pairs cancel it), absent in the CL61, peaking
+  near the SOLSTICE (DOY ~150–177, vs T_int peak ~206). q16 (§7.14): it is a REAL CHM15k-specific gain (±17 %),
+  every year since 2014 in the independent MATLAB/NCEP archive, same in every fixed window 3–8 km, not twilight,
+  not insolation/humidity/LR/noise/code/raw2l1 (bit-identical beta_raw)/firmware; absent in the CL61. Apply κ only to
+  SUB-DAILY T deviations; keep an annual term. Candidates: sun on the biaxial head (alignment) or firmware → Lufft Q12.
+  Code bug: v2.2 fallback tier nights +9 % (33 % of June nights).
+  Excluded (each ≤ ~1.5 %): aerosol in/below window, molecular model (−1.6 %, anti-phase), H2O at 1064 (0.1 %),
+  laser/PRF, p_calc (division works), window transmission, noise/dark/afterpulse/overlap, window selection.
+  `laser_life_time` wraps at 65 536 h (16-bit). Daytime residual solar baseline +6 %-pt at 4 km (L2 aloft only).
+- The simple exp model beats the v4 housekeeping ML (bagged tree): 13.0 vs 14.2 % operationally, 20.2 vs
+  22.3 % HK-only. The T-correction cuts the day−night bias vs CL61/EARLINET from 7–23 to ≤ 4.5 pts at 6 of
+  7 comparisons.
+- **Payerne CHM15k (TUB140016) is an outlier.** Its receiver is noisy (night bg 5–25× the network), so its
+  night κ is unreliable, and its LOM loses regulation on 37 % of daytime hours with sign −2 %/K. Never
+  apply its night κ. Screen archive outliers PER MODULE (serlom), never per station.
+- `calibration_pulse` drops −15 % (−24 % summer) by day with solar background. That is a real detector
+  loss; the firmware divides it out (`beta_raw = ((P/lp)−b)/(cs·o(r)·p_calc)·r²`). Not an artefact.
+- CHM15k L1 carries `optical_module_id` (TUB…) per file: use it to split eras. Schiphol A–D, Budapest A/B
+  and Măgurele A/B share one station position in L1 and L2.
+- Cache: `C:/DATA/Projects/202610_CHM15k_stability/hk/` (10-min HK + binned clear rcs, all 154 CHM15k +
+  4 CL61). Code: `validation/chm15k_stability/`.
 
 ## Working preferences (user hervo63)
 
@@ -164,3 +254,8 @@ never calibrated WV-free.
 - Wants honest trade-off analysis ending in a **clear recommendation**, not a menu of options.
 - Comfortable in French (often writes FR, mixes EN).
 - **The user pushes git themselves** — prepare commits, do not `git push`.
+
+## Cloud eta tables, generation v2 (2026-11-02)
+
+- `calibration/cloud/_filters.py` `_ETA_CL31/_CL51/_CL61` are now PVC tables at **a_G 3.3 um, alpha 20 /km, S 18.8 sr** (13 nodes to 3.75 km; constants `ETA_V2_AG_UM`, `ETA_V2_ALPHA_KM`); the 2026-07 tables (a_G 5.5 um, alpha 10) stay as `_ETA_PVC55_*` (`ALC_ETA_TABLES=pvc55`), the Hopkin ladder as `hopkin_legacy`. Cloud rows carry `calibration_version` **1100** (1000 = 2026-07 tables). C_L moves by -1..-2.6 pct (CBH 0.5-2 km). Why 20: the extinction of the calibration clouds is 5 /km at the onset, 13 at the signal peak, 25-35 /km 100 m higher (forward inversion, tail decay, Cloudnet) - a homogeneous-table compromise, see `doc/reports/eta_switch_decision_2026-11-02.md` section 9. Never tune alpha / a_G to a check.
+- Release v2.3 switches (`ops/cscs/alc_v23_release*.sbatch`): `ALC_MOLECULAR_METHOD=eprof_v2.3`, `ALC_UNCERTAINTY_MODEL=v2.3`, `ALC_KALMAN_UNCERTAINTY_WEIGHTING=1`, `ALC_POLAR_NIGHT_FALLBACK=1`; low-sun nights carry version 231; Payerne CHM15k A on tier 1 only (`station_molecular_params` in options.json); CL61 tier-2 windows capped at 5 km AGL (`TIER2_MAX_END_M`). Plan: `doc/v2.3/network_rerun_plan_2026-11.md`.

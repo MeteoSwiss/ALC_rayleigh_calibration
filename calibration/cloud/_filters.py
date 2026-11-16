@@ -8,6 +8,7 @@ aerosol transmission correction, plus the small numeric helpers they use. Self-c
 """
 from __future__ import annotations
 
+import os
 import warnings
 from typing import Optional, Tuple
 
@@ -17,19 +18,57 @@ from numpy.typing import NDArray
 S_THEORETICAL = 18.8                     # sr, liquid-water lidar ratio (O'Connor 2004)
 
 
+# Vaisala tables, generation v2 (2026-11): PVC (Hogan 2006) at the Cloudnet calibration-scene droplet
+# size a_G = 3.3 um (equivalent-area radius, lowest 100 m above the liquid base, three sites) and a
+# homogeneous in-cloud extinction alpha = 20 /km for the three types. The extinction of the calibration
+# clouds is strongly height-dependent (forward inversion of the calibrated profiles with S = 18.8 sr:
+# ~5 /km at the cloud onset, ~13 /km at the signal peak, ~10 /km weighted by the signal over the first
+# optical depth; ~30 /km 100-150 m higher from the tail decay and from Cloudnet 2 pi N a_G^2), so one
+# homogeneous value is a compromise: 20 /km is the middle of that range and O'Connor's assumed 15-20
+# (doc/reports/eta_switch_decision_2026-11-02.md sections 7-9, doc/reports/04_multiple_scattering_v2.md).
+# Type optics as in Wiegner & Gasteiger 2014. Written by
+# validation.multiple_scattering_eta.eta_table(itype, ETA_V2_AG_UM, alpha=ETA_V2_ALPHA_KM * 1e-3) on the
+# full 13-node CBH grid (0.25-3.75 km, like the CHM15k table), so the in-cloud window above a 2.4 km cloud
+# base is interpolated, not extrapolated. C_L moves by -1.0..-1.4 / -1.5..-1.9 / -2.3..-2.6 % at CBH
+# 0.5 / 1 / 2 km against the 2026-07 tables.
+ETA_V2_AG_UM = 3.3
+ETA_V2_ALPHA_KM = 20.0
 _ETA_CL31 = np.array([
+    [0.250, 0.92902], [0.375, 0.90460], [0.625, 0.86470], [0.875, 0.83261],
+    [1.125, 0.80593], [1.375, 0.78325], [1.625, 0.76363], [1.875, 0.74645],
+    [2.125, 0.73125], [2.375, 0.71768], [2.750, 0.69987], [3.250, 0.67976],
+    [3.750, 0.66290]])
+
+
+_ETA_CL51 = np.array([
+    [0.250, 0.94990], [0.375, 0.93042], [0.625, 0.89756], [0.875, 0.87025],
+    [1.125, 0.84668], [1.375, 0.82601], [1.625, 0.80766], [1.875, 0.79123],
+    [2.125, 0.77638], [2.375, 0.76289], [2.750, 0.74480], [3.250, 0.72385],
+    [3.750, 0.70581]])
+
+
+_ETA_CL61 = np.array([
+    [0.250, 0.95040], [0.375, 0.93167], [0.625, 0.89966], [0.875, 0.87286],
+    [1.125, 0.84973], [1.375, 0.82944], [1.625, 0.81141], [1.875, 0.79525],
+    [2.125, 0.78065], [2.375, 0.76736], [2.750, 0.74955], [3.250, 0.72888],
+    [3.750, 0.71107]])
+
+
+# Generation pvc55 (2026-07 .. 2026-11): PVC at a_G = 5.5 um (a Cloudnet effective radius mis-assigned
+# as a_G) and a generic alpha = 10 /km. Kept verbatim for comparison runs (ALC_ETA_TABLES=pvc55).
+_ETA_PVC55_CL31 = np.array([
     [0.250, 0.93354], [0.375, 0.91224], [0.625, 0.87665], [0.875, 0.84739],
     [1.125, 0.82263], [1.375, 0.80128], [1.625, 0.78259], [1.875, 0.76604],
     [2.125, 0.75126], [2.375, 0.73795]])
 
 
-_ETA_CL51 = np.array([
+_ETA_PVC55_CL51 = np.array([
     [0.250, 0.95276], [0.375, 0.93630], [0.625, 0.90781], [0.875, 0.88331],
     [1.125, 0.86186], [1.375, 0.84282], [1.625, 0.82573], [1.875, 0.81027],
     [2.125, 0.79618], [2.375, 0.78327]])
 
 
-_ETA_CL61 = np.array([
+_ETA_PVC55_CL61 = np.array([
     [0.250, 0.95368], [0.375, 0.93759], [0.625, 0.90966], [0.875, 0.88566],
     [1.125, 0.86462], [1.375, 0.84593], [1.625, 0.82916], [1.875, 0.81397],
     [2.125, 0.80012], [2.375, 0.78742]])
@@ -56,15 +95,42 @@ _ETA_MPL = np.array([
     [3.750, 0.92105]])
 
 
+# Pre-2026-07 legacy Hopkin ladder (a_G = 8 um; the CL61 borrowed the CL51 table), restored
+# verbatim from git 83f451f^ for COMPARISON runs only (ALC_ETA_TABLES=hopkin_legacy; CL31/CL51/CL61).
+_ETA_LEGACY_CL31 = np.array([
+    [0.250, 0.82854], [0.375, 0.82371], [0.625, 0.81608], [0.875, 0.80811],
+    [1.125, 0.79969], [1.375, 0.79027], [1.625, 0.78227], [1.875, 0.77480],
+    [2.125, 0.76710], [2.375, 0.76088]])
+_ETA_LEGACY_CL51 = np.array([
+    [0.250, 0.82881], [0.375, 0.82445], [0.625, 0.81752], [0.875, 0.81021],
+    [1.125, 0.80241], [1.375, 0.79356], [1.625, 0.78595], [1.875, 0.77877],
+    [2.125, 0.77100], [2.375, 0.76400]])
+
+
+def eta_table_generation() -> str:
+    """Which Vaisala eta tables are active: "v2" (default since 2026-11: PVC, a_G 3.3 um, alpha 20 /km),
+    "pvc55" (the 2026-07 tables: a_G 5.5 um, alpha 10 /km) or "hopkin_legacy" (pre-2026-07 ladder).
+    Selected by the environment variable ALC_ETA_TABLES for comparison runs; unset = v2."""
+    v = os.environ.get("ALC_ETA_TABLES", "").strip().lower()
+    return v if v in ("pvc55", "hopkin_legacy") else "v2"
+
+
+def cloud_version_name() -> str:
+    """VERSION_CODES key (calibration/io/output.py) of the liquid-cloud retrieval for the active eta
+    tables: 'cloud_oconnor_v2' (1100) with the v2 tables, 'cloud_oconnor' (1000) otherwise."""
+    return "cloud_oconnor_v2" if eta_table_generation() == "v2" else "cloud_oconnor"
+
+
 def apply_multiple_scattering_correction(
     beta: NDArray, range_data: NDArray, config: CloudCalConfig) -> NDArray:
     """beta *= eta(range): multiple-scattering correction of the O'Connor method.
 
-    CL31/CL51/CL61 each use their OWN PVC table (Hogan 2006) at the measured calibration-scene
-    droplet radius a_G = 5.5 um (see the tables above): the CL31's wider 0.83 mrad FOV gives a
-    stronger correction than the 0.56 mrad CL51/CL61, and the CL61's slightly larger divergence
-    (0.28 vs 0.21 mrad) gives it a marginally weaker correction than the CL51. This replaces the
-    pre-2026-07 legacy Hopkin ladder (a_G = 8 um, CL61 borrowing the CL51 table). CHM15k, Mini-MPL
+    CL31/CL51/CL61 each use their OWN PVC table (Hogan 2006) at the Cloudnet calibration-scene droplet
+    size a_G = 3.3 um and alpha = 20 /km (generation v2, 2026-11; see the tables above): the CL31's
+    wider 0.83 mrad FOV gives a stronger correction than the 0.56 mrad CL51/CL61, and the CL61's
+    slightly larger divergence (0.28 vs 0.21 mrad) a marginally weaker one than the CL51. The
+    2026-07 tables (a_G 5.5 um, alpha 10 /km) and the pre-2026-07 Hopkin ladder stay selectable through
+    ALC_ETA_TABLES (eta_table_generation) for comparison runs; S stays 18.8 sr. CHM15k, Mini-MPL
     and MPL use their own PVC tables -- the MATLAB applied NO correction for them (ones()). Unknown
     instrument types get no correction, which restores the MATLAB 'otherwise' behaviour."""
     range_km = range_data / 1000.0
@@ -80,6 +146,12 @@ def apply_multiple_scattering_correction(
         "MPL": _ETA_MPL,
     }
     eta = tables.get(inst)
+    gen = eta_table_generation()
+    if inst in ("CL31", "CL51", "CL61") and gen != "v2":
+        if gen == "hopkin_legacy":
+            eta = _ETA_LEGACY_CL31 if inst == "CL31" else _ETA_LEGACY_CL51
+        else:
+            eta = {"CL31": _ETA_PVC55_CL31, "CL51": _ETA_PVC55_CL51, "CL61": _ETA_PVC55_CL61}[inst]
     if eta is None:
         return beta.copy()
     factor_profile = _interp1_linear_extrap(eta[:, 0], eta[:, 1], range_km)

@@ -4,7 +4,7 @@ $ErrorActionPreference = "Continue"
 Set-Location C:\Users\hervo\OneDrive\Documents\ALC_rayleigh_calibration
 $env:ALC_MOLECULAR_METHOD = "eprof_v2.2"
 $env:ALC_L1_ROOT = "D:/E-PROFILE_L1_2026"
-$cams = "A:/CAMS_Monthly_04;D:/CAMS_daily"
+$cams = "D:/CAMS_Monthly_04;D:/CAMS_daily"  # was A:/CAMS_Monthly_04 (moved to D:, same files)
 $base = "C:/DATA/Projects/202606_E-PROFILE_calibration/dark_test"
 $dk = "C:/DATA/Projects/202606_E-PROFILE_calibration/rayleigh_availability/dark_clearsky"
 New-Item -ItemType Directory -Force $base | Out-Null

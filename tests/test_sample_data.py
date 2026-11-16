@@ -38,7 +38,7 @@ needs_cams = pytest.mark.skipif(
 # (type, wmo, date, InstrumentType, needs_cams) — Rayleigh fixtures
 RAYLEIGH = [
     ("CHM15k", "0-20000-0-06610", "20260225", InstrumentType.CHM15k, False),
-    ("Mini-MPL", "0-20000-0-07014", "20260423", InstrumentType.MINI_MPL, False),
+    ("Mini-MPL", "0-20000-0-07014", "20260424", InstrumentType.MINI_MPL, False),
     ("CL61", "0-756-4-EERLCL61", "20260304", InstrumentType.CL61, True),
 ]
 # (type, wmo, date, expect_valid_constant) — cloud fixtures

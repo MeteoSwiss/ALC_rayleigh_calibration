@@ -1,0 +1,38 @@
+{
+  "_comment": "Operator-maintained instrument events that no data file reports (Vaisala CL31/CL51 L1 carry the placeholder serial CL0, so an optical-block replacement is invisible). Key = <wmo>_<ident>; date = UTC day of the change; label = what changed; kalman_restart = true starts a new Kalman segment that day (the network runner), since a constant belongs to one unit. Shown as markers on the station C_L time series. Unit swaps under the same ident (CL31 -> CL51: range 7.7 -> 15.4 km) are calibrated day by day with the type the range extent gives (calibration/io/vaisala_type.py); the runner logs a swap that has no event here.",
+  "0-20000-0-06610_B": [
+    {
+      "date": "2026-07-07",
+      "label": "CL31 optical block replaced (C_L step x2.8)",
+      "kalman_restart": true
+    }
+  ],
+  "0-20000-0-11450_A": [
+    {
+      "date": "2025-07-16",
+      "label": "CL31 replaced by a CL51 (range 7.7 -> 15.4 km); L1 type attribute updated 2025-10-09; calibrated day by day with the type the range gives",
+      "kalman_restart": true
+    }
+  ],
+  "0-20000-0-11438_A": [
+    {
+      "date": "2026-06-25",
+      "label": "CL31 replaced by a CL51 (range 7.7 -> 15.4 km); L1 type attribute updated 2026-07-03; calibrated day by day with the type the range gives",
+      "kalman_restart": true
+    }
+  ],
+  "0-20000-0-11520_A": [
+    {
+      "date": "2026-06-26",
+      "label": "CL31 replaced by a CL51 (range 7.7 -> 15.4 km); L1 type attribute updated 2026-07-03; calibrated day by day with the type the range gives",
+      "kalman_restart": true
+    }
+  ],
+  "0-20000-0-11502_A": [
+    {
+      "date": "2026-09-16",
+      "label": "CL31 replaced by a CL51 (range 7.7 -> 15.4 km); L1 type attribute still CL31 on 2026-11-15; calibrated day by day with the type the range gives",
+      "kalman_restart": true
+    }
+  ]
+}

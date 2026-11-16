@@ -49,7 +49,8 @@ from .rayleigh_fit import (
     validate_calibration,
     RayleighFitResult,
 )
-from ..io.output import write_calibration_result, version_code
+from .molecular_methods import NOISE_INSTRUMENTS, VC_INSTRUMENTS, TIER2_MAX_END_M, resolve_method
+from ..io.output import write_calibration_result, version_code_for
 from ..io.cams import ensure_cams_file
 from ..plotting import (
     plot_rcs_timeseries,
@@ -204,6 +205,36 @@ def _sigma_on_fit_grid(sigma_native, range_fit, n_profiles, options):
     except Exception:
         logger.debug("sigma propagation to the fit grid failed", exc_info=True)
         return None
+
+
+def _window_search_setup(options, instrument_type, sigma_signal, native_per_bin):
+    """Parameter overrides and noise profile handed to the molecular-window search.
+
+    Every method except eprof_v2.3 gets exactly what it always got (options.molecular_params and
+    sigma_signal). eprof_v2.3 (q19, doc/v2.3/vertical_consistency.md) differs on tier-2 nights only,
+    and only on the instrument types q19 validated (an explicit molecular_params entry wins):
+      * measured noise (NOISE_INSTRUMENTS): _sigma_on_fit_grid divides the native noise by
+        sqrt(binned profiles) only, which leaves sigma_signal sqrt(native profiles per bin) too large
+        (x4.2 on 15-s CHM15k). The search gets a corrected copy, the fallback of the noise
+        select_molecular_window measures on the binned stack. sigma_signal itself is left unchanged for
+        its other readers -- the v2.3 uncertainty budget applies its own time-binning correction
+        (uncertainty.time_binning_factor), so correcting it here would count that factor twice.
+      * vertical-consistency test (VC_INSTRUMENTS).
+    Any other type runs the eprof_v2.2 tier 2 unchanged. Returns (method_params or None, search sigma).
+    """
+    params = dict(getattr(options, "molecular_params", None) or {})
+    if resolve_method(getattr(options, "molecular_method", "eprof_v2")) != "eprof_v2.3":
+        return params or None, sigma_signal
+    itype = getattr(instrument_type, "value", instrument_type)
+    if itype not in NOISE_INSTRUMENTS:
+        params.setdefault("measured_noise", False)
+    if itype not in VC_INSTRUMENTS:
+        params.setdefault("use_vc", False)
+    if itype in TIER2_MAX_END_M:                  # CL61: no rescued window above 5 km (dark leverage)
+        params.setdefault("tier2_max_end_m", TIER2_MAX_END_M[itype])
+    if params.get("measured_noise", True) and sigma_signal is not None:
+        sigma_signal = np.asarray(sigma_signal, float) / np.sqrt(native_per_bin)
+    return params or None, sigma_signal
 
 
 # Cloudnet target-classification codes (ceiloclass). 0 = clear sky.
@@ -566,7 +597,16 @@ def calibrate_rayleigh(
         f"{solar_offset:+.2f} h (solar midnight ≈ "
         f"{(-solar_offset) % 24:05.2f} UTC)"
     )
+    data_all = data                       # unfiltered night, for the polar-summer fallback only
     data = filter_time_range(data, date_str, options)
+    low_sun = None                        # set only by the (default-off) polar-summer fallback
+    if getattr(options, "polar_night_fallback", False):
+        from .polar import apply_low_sun_fallback
+        data, low_sun = apply_low_sun_fallback(data_all, data, date_str, options)
+        if fit_inputs_out is not None and low_sun is not None:
+            fit_inputs_out["low_sun"] = low_sun
+        if low_sun is not None and low_sun.rejected:
+            return low_sun.rejection_result
     logger.info(f"After time filtering: {len(data.time)} profiles")
 
     if len(data.time) == 0:
@@ -644,7 +684,10 @@ def calibrate_rayleigh(
     # model -- which is what lets the gates adapt to an ageing laser instead of assuming a healthy
     # one. Cheap (~0.1 s) and gap-safe (pairs are only formed across contiguous profiles).
     sigma_native = _native_noise(data)
+    n_native = len(data.time)
     data = average_ceilometer_data(data, average_time_s=avg_time_s, average_range_m=avg_range_m)
+    # native profiles averaged into each fit profile (eprof_v2.3 noise propagation, _window_search_setup)
+    native_per_bin = max(1.0, n_native / max(len(data.time), 1))
     if avg_time_s or avg_range_m:
         logger.info("Averaged Rayleigh input to %s profiles x %s range bins",
                     len(data.time), len(data.range_alc))
@@ -848,6 +891,8 @@ def calibrate_rayleigh(
     # noise-aware gates and for the offline sweep harness, which must be able to reproduce them
     # from fit_inputs alone.
     sigma_signal = _sigma_on_fit_grid(sigma_native, data.range_alc, rcs_use.shape[0], options)
+    window_params, sigma_window = _window_search_setup(options, info.instrument_type, sigma_signal,
+                                                       native_per_bin)
 
     # Classification screening, on the profiles the fit will actually use. The pre-fit mask joins the
     # temporal MAD screen (union, never replacing it); the veto profile is rebuilt over the same night
@@ -877,7 +922,7 @@ def calibrate_rayleigh(
             altitude=data.altitude, signal_stack=signal_stack,
             hours=np.asarray(data.hours_since_start)[keep_idx],
             sigma_signal=sigma_signal, sigma_native=sigma_native, n_profiles=rcs_use.shape[0],
-            extra_cell_mask=extra_cell_mask,
+            native_per_bin=native_per_bin, extra_cell_mask=extra_cell_mask,
         )
 
     fit_result = find_optimal_molecular_window(
@@ -893,8 +938,8 @@ def calibrate_rayleigh(
         max_rel_error=options.max_window_rel_error,
         method=getattr(options, "molecular_method", "eprof_v2"),
         signal_stack=signal_stack,
-        method_params=getattr(options, "molecular_params", None) or None,
-        sigma_signal=sigma_signal,
+        method_params=window_params,
+        sigma_signal=sigma_window,
         extra_cell_mask=extra_cell_mask,
     )
 
@@ -1111,6 +1156,22 @@ def calibrate_rayleigh(
         f"2σ_robust={uncertainty:.4e} ({uncertainty/cl_median*100:.1f}%)"
     )
 
+    # v2.3 uncertainty budget (option). The default "ensemble" skips it: v2.2 output bit-identical.
+    budget = None
+    _unc_model = getattr(options, "uncertainty_model", "ensemble")
+    if _unc_model not in ("ensemble", "v2.3"):
+        warnings.warn(f"Unknown uncertainty_model {_unc_model!r}; using 'ensemble' (valid: "
+                      "'ensemble', 'v2.3').", UserWarning)
+    elif _unc_model == "v2.3":
+        from .uncertainty import budget_for_night
+        budget = budget_for_night(
+            cl=cl_median, u_ensemble=uncertainty, rcs_mean=rcs_mean, range_alc=data.range_alc,
+            mol_props=mol_props, fit_result=fit_result, sigma_signal=sigma_signal,
+            options=options, info=info, date_str=date_str, sigma_native=sigma_native,
+            hours=np.asarray(data.hours_since_start)[keep_idx], signal_stack=signal_stack)
+        if fit_inputs_out is not None:
+            fit_inputs_out["uncertainty_budget"] = budget
+
     # Also compute the nominal (LR=LRaer, shift=0) result for validation
     nominal = [
         pr for pr in perturbation_results
@@ -1197,9 +1258,16 @@ def calibrate_rayleigh(
     if error_pct > options.threshold_quality:
         logger.warning(f"Method disagreement: {error_pct:.1f}% > {options.threshold_quality}%")
         qc_flag, qc_message = -3, f"Method disagreement: {error_pct:.1f}%"
-    elif uncertainty > cl_median:
+    elif budget is None and uncertainty > cl_median:
         logger.warning(f"Uncertainty exceeds CL value: {uncertainty:.2e} > {cl_median:.2e}")
         qc_flag, qc_message = -6, f"Uncertainty exceeds value: {uncertainty:.2e} > {cl_median:.2e}"
+    elif budget is not None and budget.exceeds_limit:
+        # v2.3: RELATIVE limit on the full budget instead of the 'u > C' gate above
+        logger.warning(f"Relative uncertainty {100 * budget.rel_total:.0f}% > "
+                       f"{100 * budget.max_rel_uncertainty:.0f}% (2 sigma)")
+        qc_flag, qc_message = -6, (f"Relative uncertainty exceeds limit: "
+                                   f"{100 * budget.rel_total:.0f}% > "
+                                   f"{100 * budget.max_rel_uncertainty:.0f}% (2 sigma)")
     elif getattr(options, "aerosol_qc_enabled", True) and fit_result.search_diagnostics is not None:
         # "Another layer with lower signal" gate. Each candidate window's fit slope is a C_L proxy;
         # in clean air they are nearly equal across the 2-6 km search range (molecular two-way
@@ -1241,6 +1309,13 @@ def calibrate_rayleigh(
             logger.warning(f"Rayleigh window contaminated (classification {wfrac * 100:.0f}%)")
             qc_flag, qc_message = -11, (f"Rayleigh window contaminated "
                                         f"(classification {wfrac * 100:.0f}% ice/cloud)")
+
+    # Polar-summer low-sun night (option polar_night_fallback): solar-background QC on the far-range
+    # residual baseline. Never reached when the option is off (low_sun stays None).
+    if qc_flag is None and low_sun is not None:
+        from .polar import low_sun_residual_qc
+        qc_flag, qc_message = low_sun_residual_qc(
+            low_sun, signal, mol_props.p_mol, data.range_alc, fit_result, options, signal_stack)
 
     _outcome = {None: "OK", -3: "method disagreement", -6: "too noisy",
                 -9: "lower-signal layer found", -11: "window contaminated"}.get(qc_flag, "rejected")
@@ -1308,6 +1383,9 @@ def calibrate_rayleigh(
                     cl_matrix=cl_matrix,
                     cl_median=cl_median,
                     cl_uncertainty=uncertainty,
+                    # the full ensemble behind cl_median / uncertainty (plot input only)
+                    cl_cube=cl_cube,
+                    time_samples=ts_used,
                     hours_since_start=disp_hours,
                     time_datetime=disp_dt,
                     rcs=disp_rcs,
@@ -1341,6 +1419,13 @@ def calibrate_rayleigh(
         calibration_top_height=fit_result.altitude_end,
         message=f"Successful (method err: {error_pct:.1f}%, sensitivity 2σ: {uncertainty/cl_median*100:.1f}%)",
     )
+    if budget is not None:
+        # v2.3: same constant, full budget as the reported uncertainty, components for the NetCDF
+        result.uncertainty = budget.u_total
+        result.uncertainty_components = budget.components()
+        result.message += f", v2.3 total 2σ: {100 * budget.rel_total:.1f}%"
+    if low_sun is not None:               # polar-summer low-sun calibration: own flag + message
+        low_sun.mark_result(result)
 
     # Prepare housekeeping data
     housekeeping = {
@@ -1369,7 +1454,7 @@ def calibrate_rayleigh(
         housekeeping=housekeeping,
         # tag the row with the molecular method that actually produced it, so a series spanning an
         # algorithm upgrade stays interpretable
-        version=version_code(getattr(options, "molecular_method", "eprof_v2")),
+        version=version_code_for(getattr(options, "molecular_method", "eprof_v2"), result.flag),
     )
 
     logger.info(f"Results written to {output_path}")

@@ -53,9 +53,10 @@ def run_all(lam0, fwhm, tag):
             out[ds] = float(r.lidar_constant)
     return out
 
+_orig_cl61 = WVMOD.LASER_SPECTRUM["CL61"]
 res_meas = run_all(910.74, 1.0, "measured")
 res_manu = run_all(910.55, 1.0, "manufacturer")
-WVMOD.LASER_SPECTRUM["CL61"] = (910.74, 1.0)   # restore
+WVMOD.LASER_SPECTRUM["CL61"] = _orig_cl61   # restore
 
 common = sorted(set(res_meas) & set(res_manu))
 cm = np.array([res_meas[d] for d in common]); cu = np.array([res_manu[d] for d in common])

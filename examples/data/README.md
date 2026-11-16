@@ -15,16 +15,19 @@ examples/data/
 
 | Instrument (λ) | WMO id (site) | L1 day | L2 day(s) | condition | calibration on the L2 fixture |
 |---|---|---|---|---|---|
-| CHM15k (1064 nm) | `0-20000-0-06610` (Payerne) | 2026-02-25 | 2026-02-25 | clear night | **Rayleigh → flag 1** (self-contained) |
-| Mini-MPL (532 nm) | `0-20000-0-07014` (Lille) | 2026-04-23 | 2026-04-23 | clear night | **Rayleigh → flag 0.5** (self-contained) |
-| CL61 (910 nm) | `0-756-4-EERLCL61` (Sion) | 2026-03-04 | 2026-03-04 | clear night | **Rayleigh → flag 1** (needs CAMS) |
+| CHM15k (1064 nm) | `0-20000-0-06610` (Payerne) | 2026-02-25 | 2026-02-24 eve + 2026-02-25 | clear night | **Rayleigh → flag 1** (self-contained) |
+| Mini-MPL (532 nm) | `0-20000-0-07014` (Lille) | 2026-04-23 | 2026-04-23 eve + **2026-04-24** | clear night | **Rayleigh → flag 1** (self-contained) |
+| CL61 (910 nm) | `0-756-4-EERLCL61` (Sion) | 2026-03-04 | 2026-03-03 eve + 2026-03-04 | clear night | **Rayleigh → flag 1** (needs CAMS) |
 | CL61 (910 nm) | `0-756-4-EERLCL61` (Sion) | — | 2026-04-14 | overcast | **Cloud →** runs, n≈184 in-cloud profiles (needs CAMS) |
 | CL31 (910 nm) | `0-20000-0-06602` (Delémont) | 2026-02-20 | 2026-02-20 | overcast | **Cloud → C ≈ 1.6** (needs CAMS) |
 | CL51 (910 nm) | `0-20000-0-02998` (Helsinki) | 2026-04-09 | 2026-01-16 | overcast | **Cloud → C ≈ 3.6** (needs CAMS) |
 
-**Trimming** (to keep the repo small — total ≈ 11 MB): L2 fixtures are cropped to the
-night window (Rayleigh days) or kept full-day (cloud days) with range ≤ 12 km; L1
-fixtures are decimated (they back the reader test only). All are real data, just cropped.
+**Trimming** (to keep the repo small): L2 Rayleigh fixtures are the FULL day D plus the
+≥16 UTC evening slice of day D−1 (the calibration night is D−1 evening → D morning, and
+the darkness-adaptive SZA window needs both files), range ≤ 12 km; cloud days are kept
+full-day. L1 fixtures are decimated (they back the reader test only). All are real data,
+just cropped. Re-curated 2026-07: nights re-selected to pass the current production
+settings (eprof_v2 + SZA night + post-0fb4cc4 cloud screening on coarse L2 data).
 
 **Water vapour (910 nm).** CL61/CL31/CL51 need a monthly CAMS file for the mandatory WV
 correction, so their tests **skip when CAMS is absent**. The HITRAN WV cross-section LUT

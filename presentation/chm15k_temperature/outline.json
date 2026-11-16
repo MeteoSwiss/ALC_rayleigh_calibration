@@ -1,0 +1,122 @@
+{
+  "language": "EN",
+  "output": "CHM15k_temperature_calibration_v4.pptx",
+  "footer": "© Payerne, October 2026, Maxime Hervo",
+  "slides": [
+    {
+      "type": "title",
+      "title": "CHM15k calibration depends on temperature",
+      "subtitle": "A daytime bias in E-PROFILE L2 – findings and proposal",
+      "notes": "Source: report 19 (doc/reports/19_chm15k_calibration_stability.md). Data: 154 CHM15k of E-PROFILE, L1 2025-01 to 2026-06, plus the 11-year archive of 13 stations (2013-2024)."
+    },
+    {
+      "type": "figure",
+      "title": "Calibrated at night, used all day",
+      "image": "fig/fig_timeline.png",
+      "comment": "The Rayleigh constant is fitted at night only. By day the instrument warms by **+6 K** (summer median) and its effective constant rises by **~8 %**.",
+      "notes": "Network median over 150 units of the internal temperature (temp_int) relative to the same day's night, and of kappa x that rise. Dashed: 90th percentile of units (up to ~20 % in summer afternoons). Report 19 sections 4 and 7."
+    },
+    {
+      "type": "figure",
+      "title": "The constant rises ~2 % per °C",
+      "image": "fig/fig_season_vs_anomaly.png",
+      "comment": "Lindenberg: with the season removed, **+3.4 %/K** remains. Network: **+2.1 %/K**, 100 of 158 units significant, none negative.",
+      "notes": "Left: nightly Rayleigh constants vs internal temperature, coloured by day of year - season and temperature are mixed. Right: anomalies against a 31-day running median (warm/cold spells only). Network value = pooled M2 slope, report 19 section 2."
+    },
+    {
+      "type": "figure",
+      "title": "Four independent tests agree",
+      "image": "fig/fig_estimators.png",
+      "comment": "**+1.4 to +2.1 %/K** whatever the method. Aerosol, checked with AERONET, explains only **~15 %** of it.",
+      "notes": "Warm/cold spells: 31-day anomaly model. Within single nights: elapsed time held fixed. Pairs: co-located CHM15k at Schiphol, Budapest, Magurele, night only, against their temperature difference. AERONET: 27 units within 15 km, Level 1.5 daily AOD. Report 19 sections 2, 3, 7.4."
+    },
+    {
+      "type": "figure",
+      "title": "Twin instruments disagree by day",
+      "image": "fig/fig_pairs.png",
+      "comment": "Same site, same wavelength: the atmosphere cancels in the ratio. Schiphol B/C differ by up to **+25 %** in the afternoon, never at night.",
+      "notes": "Clear-sky signal ratio at 1.5-2.5 km, relative to the night. The cycle is the same at 1-4 km and vanishes in winter, so it is instrumental. Magurele A/B: two units with the same coefficient, so no cycle in the ratio. Report 19 section 4.2. Caveat if asked: Schiphol B is a known problem unit (static overlap ~25 % too low below ~1.6-2 km; paper Sect. 6.3). That defect is present night and day and cancels in this day-minus-night ratio. B's daytime excess is flat from 0.5 to 6 km (+19 to +23 % vs C), so it is a gain: B has the highest temperature coefficient at Schiphol (+2.8 %/K). The healthy pair A/C shows the same flat behaviour at +6 %. Report 19 section 7.7."
+    },
+    {
+      "type": "figure",
+      "title": "Night coefficient predicts the day",
+      "image": "fig/fig_prediction.png",
+      "comment": "Pairs and CL61 sites fall on the 1:1 line (**r = 0.98**). Payerne is the outlier: its receiver is abnormally noisy.",
+      "notes": "Prediction = per-unit coefficient from within-night data x daytime rise of the internal temperature. Payerne: night background 5-25x the network, and its laser module loses temperature regulation on 37 % of daytime hours. Report 19 sections 4.4 and 7.1."
+    },
+    {
+      "type": "figure",
+      "title": "Daytime L2 is ~5 % too high",
+      "image": "fig/fig_excess.png",
+      "comment": "Noon median **+4.8 %**, summer **+7.5 %**. One unit in three exceeds **+10 %** in summer; newer optical modules are more sensitive.",
+      "notes": "Per unit: coefficient x noon rise of the internal temperature. Coefficient by module generation: about +1 %/K up to TUB15, +2 to +2.7 %/K for TUB20-24. Report 19 section 4.4."
+    },
+    {
+      "type": "figure",
+      "title": "Correction fixes 6 of 7 checks",
+      "image": "fig/fig_validation.png",
+      "comment": "Day−night bias against CL61 and EARLINET falls from **7–23** to **≤ 4.5 %-points**. Payerne is over-corrected (receiver issue).",
+      "notes": "Paper-v0.9 validation re-run unchanged, CHM15k multiplied by exp(-kappa (T_int - T_ref)). Night 22-02 UTC, day 10-14 UTC. Spread also drops (Aosta 27 -> 18). The simple model also beats the housekeeping ML (bagged tree): 13.0 vs 14.2 % prediction error on 2024. Report 19 sections 7.5 and 7.6."
+    },
+    {
+      "type": "figure",
+      "title": "Correction shrinks the seasonal cycle",
+      "image": "fig/fig_kalman_slide_bud.png",
+      "comment": "Budapest B, paper Kalman filter: seasonal amplitude **±20 → ±7 %**. Network (127 units): median **±16 → ±10 %**, smaller in 87 % of units.",
+      "notes": "Same operational improve_alc Kalman filter as the paper figure, on the nightly constants as published (grey) and normalised to the median calibration-night internal temperature with the unit's within-night kappa (+2.33 %/K, red); 231 common nights (HK cache ends July 2026); scatter around the model 17.6 -> 14.0 %. Network: median amplitude 16.3 % -> 11.6 % (within-night kappa) -> 10.0 % (multi-day kappa); 35 % of the seasonal amplitude removed (median). The gain scales with kappa x the unit's seasonal temperature swing: weak at Kleine Scheidegg (old module, kappa +1.04 %/K, heater-held winter temperature): +-18 -> +-14 %. Report 19 sections 7.9 and 7.10."
+    },
+    {
+      "type": "figure",
+      "title": "One parameter beats the ML",
+      "image": "fig/fig_equation_ml.png",
+      "comment": "Beats the housekeeping ML: **20.2 vs 22.3 %** alone, **13.0 vs 14.2 %** with recent calibrations.",
+      "notes": "Test year 2024, trained on 2013-2023 (11-year archive, 13 stations), split per optical module (no TUB swap crossed). Error = robust spread of ln(C_obs/C_pred) on the same 1040 test nights. ML = estimate_calib_from_housekeeping_v4.m bagged tree (p_calc, temp_int, base, laser_pulses, state_optics, cs), retrained and averaged over 10 seeds. Housekeeping-only models cannot follow level changes (ageing, servicing), hence the need for recent calibrations. Report 19 section 7.5."
+    },
+    {
+      "type": "text_image",
+      "title": "Leading hypothesis: filter drift",
+      "image": "fig/fig_filter_line.png",
+      "bullets": [
+        "Instrumental: multiplicative, same from 0.5 to 8 km",
+        "Not aerosol, detector, electronics or overlap",
+        "Leading: **1 nm** receiver filter drifting against the laser line",
+        "Rival: thermal alignment drift (field of view ≈ beam divergence)",
+        "Only Lufft can decide: filter sits in the heated laser module"
+      ],
+      "notes": "Lufft manual: the laser-optical module (LOM) is the transmitting AND receiving unit; 'a 1 nm (or less) bandwidth filter in front of the detector'; LOM heater only (no cooling), APD on its own Peltier. Datasheet: 1 nm filter. The filter hypothesis therefore needs a heat leak from the housing into the module. Dielectric filters shift +2 to +20 pm/K (hard to soft coatings); a 1 nm passband with the laser on its flank gives 1-4 %/K. Other causes of a filter shift: angle of incidence (minor), humidity uptake in porous coatings (can be large), stress, ageing. Model inversion (Gaussian passband): curvature implies filter drift/width ~0.02 /K; implied peak temperature median ~31 degC, close to the 34 degC module set-point; but curvature is significant in only 9 of 141 units. Laser energy unlikely (pulse rate flat, crystal in the heated module). Rival: far-field alignment drift (FOV 0.45 mrad vs divergence < 0.5 mrad) gives the same signatures, but should distort the 0.5-1.5 km incomplete-overlap zone, where the effect is observed flat. Report 19 sections 5, 7.2, 7.8."
+    },
+    {
+      "type": "figure",
+      "title": "A physical model of the filter drift",
+      "image": "fig/fig_model.png",
+      "comment": "A 1 nm filter drifting **~20 pm/K** reproduces κ, but curvature is significant in only **9 of 141** units.",
+      "notes": "Model: the detected signal is proportional to the filter transmission at the laser line, a Gaussian passband of FWHM W whose centre drifts linearly with filter temperature, lambda_c = lambda_c0 + alpha (T_f - T0); T_f is taken as T_int (thermal lag scan: < 0.5 h). Fit per unit: ln C = a + kappa dT + c dT^2 on clear nights (150 units for kappa, 141 with curvature); inversion of (kappa, c) gives alpha/W and the detuning Delta0/W. Results: alpha/W = 0.020 /K (IQR 0.015-0.024), i.e. alpha ~ 20 pm/K for W = 1 nm, at the soft-coating end of the published range; Delta0/W = +0.19 (IQR 0.11-0.32), ~10 % transmission loss at the operating point; best-match temperature T* ~ 31 degC (IQR 26-43), near the 33.85 degC module set-point. Band: median and IQR of the predicted signal vs filter temperature over the units. Uncertainties: W from the datasheet ('1 nm or less' in the manual) - a narrower filter needs a smaller alpha; alpha is unknown without the coating type; the passband shape (Gaussian vs flat-top) sets the curvature; whether the filter really follows T_int (it sits in the heated module) is the key open point; the laser line is assumed fixed (heated crystal; a leak would add +3-5 pm/K of Nd:YAG/diode drift). Comparable measured filter drift: Blifford (1966, Appl. Opt. 5, 105, NCAR) measured +8 to +29 pm/K on commercial narrow-band filters from -60 to +60 degC, linear, reversible, passband shape unchanged. References: Lufft CHM15k user manual R19 (2022) and datasheet (2024); H.A. Macleod, Thin-Film Optical Filters, 4th ed. (2010); Newport and Semrock filter temperature-coefficient application notes; Degnan (1995) and Bass (Handbook of Optics, 2003) for Nd:YAG line temperature dependence; Hervo et al. (2016, AMT) and Hopkin et al. (2019, AMT) for CHM15k calibration/overlap temperature effects. Report 19 sections 7.2 and 7.8."
+    },
+    {
+      "type": "figure",
+      "title": "Jenoptik's filter spec fits the data",
+      "image": "fig/fig_jenoptik_filter.png",
+      "comment": "Jenoptik, the original CHM15k maker, specifies its narrow filters at **0.02 nm/K**. With a 1 nm filter that gives **κ ≈ 2.1 %/K**, the median of our fit.",
+      "notes": "Assumption: the CHM15k receiver filter is 1 nm FWHM (Lufft datasheet; the manual says '1 nm or less'). The fit then requires a filter drift alpha = 20 pm/K (IQR 15-24 over the units; Gaussian passband, fitted detuning Delta0/W = 0.19, kappa ~ 0.105 x alpha). Jenoptik datasheet JENOFILT 602 (JENOPTIK Laser, Optik, Systeme GmbH, Jena; doc fil601-99-14-0196-en, January 1996): 'The temperature dependence of CWL is delta-lambda0(T) = (T - 22) x 0.02 nm (T measured in degC)'. That filter is a dielectric narrow bandpass of 11 nm half-bandwidth for 400-1000 nm, assembled from cemented glass slides (conventional coating technology). The CHM15k was manufactured by Jenoptik before Lufft took it over (Cologne observatory CHM15k page; Jenoptik-built units in service since at least 2009). Left panel: 1 nm Gaussian passband, laser line fixed at the fitted detuning; a +6 K rise (summer noon median of T_int) shifts the filter by 120 pm and raises the transmission at the laser line by ~9 % (~1.5 %/K averaged over the shift, 2.1 %/K at the night operating point). Caveats: this is a published coefficient of a Jenoptik filter family, not the part inside the CHM15k; the coefficient of a 1064 nm filter of the same technology may be somewhat larger (the shift grows with wavelength); the model assumes the filter follows T_int, while the manual places it inside the heated laser-optical module. Hard-coated (sputtered) filters drift only 2-5 pm/K and would give 0.2-0.5 %/K with a 1 nm width. Lufft question 2 (filter specification and supplier) decides. Report 19 section 5."
+    },
+    {
+      "type": "figure",
+      "title": "Newer modules react more",
+      "image": "fig/fig_generation.png",
+      "comment": "κ doubles from **+1** (≤2015) to **+2 %/K** (≥2020). Two design breaks: 2015, dark background **÷4**; 2020, detector and module run **warmer**.",
+      "notes": "Optical-module production year from the TUB serial (127 streams, 2025-26). By group <=2015 / 2016-19 / >=2020: kappa 0.95 / 1.65 / 2.02 %/K (Spearman +0.42); night background 0.0038 / 0.0020 / 0.0017 and noise -30 % (Spearman -0.53); detector set-point 29.85 degC instead of 24.85 in most modules from ~2019 (kappa 2.02 vs 1.34 %/K); optical-module set-point 33.85 -> 34.35-34.85 degC. Lufft FAQ: hardware change in June 2015 (firmware _552). No trend in curvature, noon reference-pulse drop, laser age or internal temperature; firmware is not the cause: Spearman kappa vs firmware 0.00, and eleven <=2015 modules on the newest firmware 1.15 keep kappa 0.95 %/K (the low-kappa fw 0.743 group is the UK Met Office network, a site confound). User control: only the detector set-point (ApdTemp, default 30 degC, service mode, 'contact Lufft service first'); no LOM set-point parameter (heater only, 25-49 degC). Among 2019-24 modules, detector 30 vs 25 degC: kappa 2.02 vs 1.87 %/K, so the module generation matters more. Pulses per record and constant level not compared (depend on averaging time and factory scaling). Question 7 for Lufft. Report 19 section 7.11."
+    },
+    {
+      "type": "conclusion",
+      "image": "fig/fig_roadmap.png",
+      "bullets": [
+        "CHM15k constant rises **1.5–2 %/K** with internal temperature",
+        "Night-only calibration: daytime L2 **+5 %**, up to +30 %",
+        "A simple per-unit correction is validated; it beats the ML",
+        "Cause inside the laser module: questions to Lufft",
+        "Proposal: staged introduction, decision needed for the shadow L2"
+      ],
+      "notes": "Recommendation and SWOT: report 19 section 8. Stage 1 changes no product; stage 3 needs agreement with the E-PROFILE Data Hub (L1->L2 code). A single network-wide coefficient is not recommended: units range from 0 to +3.5 %/K."
+    }
+  ]
+}

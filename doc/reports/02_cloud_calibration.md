@@ -199,6 +199,11 @@ consistency_range=10, ratio_filter=0.05, cbh/cal_max=2400, temp=-20, attenuation
 
 ### 4.1 Phase 1 — config trade-off (10 stations/type, L2)
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E). The CL61 numbers here are yields and relative scatters (σ). The retired WV model scales the CL61 constant (Rayleigh ×1/0.81, cloud ×1/0.86) and adds a humidity- and CBH-dependent term (≈ +9 %/km in CBH; seasonal through the WV column), which inflates σ somewhat. Yields are unaffected, because the WV correction does not gate profiles. Not rerun: these are precision/yield screens, and at the correct line the σ values can only stay equal or decrease. The gate ranking (K6/K7) is a CL31/CL51/CL61 trade-off; only the CL61 σ_SD column can move, and only downward.
+
 valid % / σ_SD % (median over streams):
 
 | config | CL31 | CL51 | CL61 |
@@ -221,6 +226,11 @@ but the variability cost is not worth it in phase 1 (CL61 σ_SD 9.1 → 12.5). `
 and `consistency_range` alone (K2) barely move yield.
 
 ### 4.2 Phase 2 — full network (212 CL31 + 49 CL51 + 11 CL61, L2)
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E). The CL61 numbers here are yields and relative scatters (σ). The retired WV model scales the CL61 constant (Rayleigh ×1/0.81, cloud ×1/0.86) and adds a humidity- and CBH-dependent term (≈ +9 %/km in CBH; seasonal through the WV column), which inflates σ somewhat. Yields are unaffected, because the WV correction does not gate profiles. Not rerun: these are precision/yield screens, and at the correct line the σ values can only stay equal or decrease. The 'K6 not recommended for CL61' verdict (σ_SD 16.8 %) may be partly due to the retired model's CBH slope; the adopted configuration (§7) does not depend on it.
 
 All 272 streams, L2, day-sampled (every 5th day). Valid % / σ_SD % (median over streams):
 
@@ -271,6 +281,11 @@ backscatter**; on the raw L1 range-corrected signal far fewer cloud profiles pas
 are consistent.)
 
 ### 5.2 Optimal pre-averaging — do not pre-average
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E). The CL61 numbers here are yields and relative scatters (σ). The retired WV model scales the CL61 constant (Rayleigh ×1/0.81, cloud ×1/0.86) and adds a humidity- and CBH-dependent term (≈ +9 %/km in CBH; seasonal through the WV column), which inflates σ somewhat. Yields are unaffected, because the WV correction does not gate profiles. Not rerun: these are precision/yield screens, and at the correct line the σ values can only stay equal or decrease.
 
 On native L1 (3 streams/type, K6 gates) sweeping `average_time_s ∈ {30 … 1200 s}` (range fixed at
 30 m). **Both yield and precision peak at the finest step and degrade monotonically with coarser
@@ -345,6 +360,11 @@ sets `lidar_constant = cc_applied / cal_median`.
 
 ### 6.3 Results (median dashboard-valid %, σ_SD in parentheses)
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E). The CL61 numbers here are yields and relative scatters (σ). The retired WV model scales the CL61 constant (Rayleigh ×1/0.81, cloud ×1/0.86) and adds a humidity- and CBH-dependent term (≈ +9 %/km in CBH; seasonal through the WV column), which inflates σ somewhat. Yields are unaffected, because the WV correction does not gate profiles. Not rerun: these are precision/yield screens, and at the correct line the σ values can only stay equal or decrease.
+
 | type (n) | baseline | P1 avg | P2 consec | P3 gates | P4 cl61-only | **P5 combo** |
 |---|---|---|---|---|---|---|
 | **CL31** (10) | 16 % (7.4) | 53 % (9.5) | 25 % (11) | 61 % (13) | 16 % (7.4) | **80 % (11)** |
@@ -401,6 +421,11 @@ a handful will need the Kalman smoothing or a slightly tighter CL61-specific gat
 ![CL61 — P5 C_L time series (baseline is empty: 0 valid)](cloud_yield_l1/cl_timeseries_CL61.png)
 
 ## 7. Adopted operational configuration
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E). The adopted operational configuration is unchanged. The CL61 yields (0 → 13 %) are unaffected; the CL61 σ_SD (10.2 %) is a retired-model upper bound. The CL61 cloud level is ×0.86 at the correct line (scene re-expression of `calout_v22_04`, audit file).
 
 The aggressive native+K7 option (P5) was **rejected as too noisy** (σ ~11 %, CL61 outliers). The
 **precision-preserving** option was adopted: **keep the literature gates** (`n_consecutive=5`,

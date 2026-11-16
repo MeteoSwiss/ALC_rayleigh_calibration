@@ -142,7 +142,11 @@ def _create_calibration_file(
                                                              key=lambda kv: kv[1]))
     nc_version.comment = ("code = major*100 + minor*10 + patch of the calibration method, e.g. "
                           "100 = E-PROF v1.0, 120 = v1.2, 200 = v2 (C8), 220 = v2.2 "
-                          "(noise-aware molecular-window gates)")
+                          "(noise-aware molecular-window gates), 230 = v2.3 (v2.2 with a measured "
+                          "noise and a vertical-consistency test in its fallback tier), 221 / 231 = "
+                          "the same on a polar-summer low-sun night (flag 0.25); 1000 = liquid-cloud "
+                          "O'Connor retrieval with the 2026-07 eta tables, 1100 = with the eta tables "
+                          "v2 (a_G 3.3 um, alpha 30 /km, 2026-11)")
 
     # Housekeeping variables
     nc_lifetime = ncid.createVariable('laser_life_time', 'f8', ('time',), zlib=True, fill_value=-999.9)
@@ -180,14 +184,96 @@ def _create_calibration_file(
     return ncid
 
 
+# v2.3 uncertainty budget (calibration/rayleigh/uncertainty.py). These variables are created ONLY when
+# a row carrying the budget is written (options.uncertainty_model == 'v2.3'), so a v2.2 file keeps its
+# exact v2.2 structure. Rows written without the budget (older versions) hold the fill value.
+_V23_UNCERTAINTY_VARS = {
+    "lidar_constant_uncertainty_ensemble": dict(
+        long_name="Ensemble part of the lidar-constant uncertainty (2 sigma)",
+        comments=("2 x robust sigma (max of IQR/1.349, MAD/0.6745) of the 125-member ensemble: aerosol "
+                  "lidar ratio +-10/+-20 sr x window shift +-100/+-200 m x 5 time samples (all "
+                  "profiles + 4 random 70 % subsets). This is the v2.2 lidar_constant_uncertainty.")),
+    "lidar_constant_uncertainty_vertical": dict(
+        long_name="Vertical-consistency part of the lidar-constant uncertainty (2 sigma)",
+        comments=("2 C_L sqrt((|d ln C_L/dz| D)^2 + s_res^2): d ln C_L/dz from C_L recomputed (same "
+                  "Klett/C_L machinery) in sub-windows over the usable molecular range, D = "
+                  "representative inter-night window displacement, s_res = scatter of the "
+                  "sub-window constants about the line not explained by noise. Large when the "
+                  "constant depends on the window height (electronic distortion, faint aerosol, "
+                  "non-molecular window).")),
+    "lidar_constant_uncertainty_molecular": dict(
+        long_name="Molecular-model part of the lidar-constant uncertainty (2 sigma)",
+        comments=("US Standard 1976 vs the real temperature/pressure: climatology of the CAMS vs "
+                  "US-1976 ln-bias of C_L (latitude, season, window height) plus its synoptic "
+                  "residual; a floor only when the molecular reference is CAMS.")),
+    "lidar_constant_uncertainty_aerosol": dict(
+        long_name="Residual-aerosol part of the lidar-constant uncertainty (2 sigma)",
+        comments=("Fixed allowance for a vertically uniform aerosol in the window, invisible to any "
+                  "single-profile test: 1 sigma = 2 % at 1064 nm (CAMS in-window aerosol scaled by "
+                  "its observed transfer to C_L), scaled as (wavelength / 1064 nm)^3.")),
+    "lidar_constant_uncertainty_noise": dict(
+        long_name="Photon-noise part of the lidar-constant uncertainty (2 sigma)",
+        comments=("Noise of the night-mean signal in the window, from the per-gate noise measured by "
+                  "temporal first differences on the native profiles (eprof_v2.2).")),
+    "lidar_constant_height_gradient": dict(
+        long_name="Height gradient of the lidar constant, d ln C_L / dz",
+        units="km-1",
+        comments=("Noise-weighted slope of ln C_L against the sub-window height (same machinery as "
+                  "lidar_constant_uncertainty_vertical). A true lidar constant does not depend on "
+                  "height; a persistent non-zero value flags a profile defect.")),
+}
+
+
+def _ensure_v23_uncertainty_variables(ncid: Dataset, units: str) -> None:
+    """Create the v2.3 uncertainty variables if missing and document the 2-sigma convention."""
+    for name, meta in _V23_UNCERTAINTY_VARS.items():
+        if name in ncid.variables:
+            continue
+        v = ncid.createVariable(name, 'f8', ('time',), zlib=True, fill_value=-999.9)
+        v.long_name = meta["long_name"]
+        v.units = meta.get("units", units)
+        v.comments = meta["comments"]
+    unc = ncid.variables['lidar_constant_uncertainty']
+    unc.long_name = "Uncertainty of the lidar constant (2 sigma, coverage factor k = 2)"
+    unc.coverage_factor = 2
+    unc.comments = ("2-sigma (~95 %) absolute uncertainty. Rows with a valid "
+                    "lidar_constant_uncertainty_vertical (uncertainty model v2.3): "
+                    "2 C_L sqrt(s_ens^2 + s_vert^2 + s_mol^2 + s_aer^2 + s_noise^2), see the five "
+                    "lidar_constant_uncertainty_* components. Other rows (v2.2 and older): "
+                    "the ensemble part alone (2 x robust sigma of the 125-member ensemble).")
+
+
+def _write_v23_uncertainty_row(ncid: Dataset, idx: int, components: Optional[dict]) -> None:
+    """Write (or clear, when ``components`` is None) the v2.3 components of row ``idx``."""
+    for name in _V23_UNCERTAINTY_VARS:
+        if name not in ncid.variables:
+            continue
+        val = None if components is None else components.get(name)
+        ok = val is not None and np.isfinite(val)
+        ncid.variables[name][idx] = float(val) if ok else -999.9
+
+
 # Method name -> numeric version code (major*100 + minor*10 + patch). Numeric so the variable can
 # carry flag_values/flag_meanings and be compared arithmetically ("rows older than 200").
 VERSION_CODES = {
     "eprof_v1.0": 100, "eprof_v1.1": 110, "eprof_v1.2": 120, "eprof_v0.25": 25,
-    "eprof_v2": 200, "eprof_v2p": 205, "eprof_v2.2": 220,
+    "eprof_v2": 200, "eprof_v2p": 205, "eprof_v2.2": 220, "eprof_v2.3": 230,
+    # polar-summer low-sun nights (option polar_night_fallback, flag 0.25): the method's code + 1, so
+    # the NetCDF tells them apart (doc/v2.3/polar_summer.md section 5)
+    "eprof_v2.2_lowsun": 221, "eprof_v2.3_lowsun": 231,
     "earlinet": 300, "bellini": 310, "main": 90, "improved": 95,
-    "cloud_oconnor": 1000,          # the liquid-cloud (O'Connor) retrieval
+    "cloud_oconnor": 1000,          # the liquid-cloud (O'Connor) retrieval, 2026-07 eta tables
+    "cloud_oconnor_v2": 1100,       # same retrieval, eta tables v2 (a_G 3.3 um, alpha 30 /km, 2026-11)
 }
+
+
+def version_code_for(method_name: str, flag=None) -> int:
+    """Version code of a Rayleigh row: the method's code, or the ``<method>_lowsun`` code (+1) for a
+    polar-summer low-sun night (flag 0.25) when that entry exists."""
+    base = version_code(method_name)
+    if flag is not None and float(flag) == 0.25:
+        return VERSION_CODES.get(f"{method_name}_lowsun", base)
+    return base
 
 
 def version_code(method_name: str) -> int:
@@ -275,6 +361,14 @@ def write_calibration_result(
     ncid.variables['lidar_constant'][idx] = result.lidar_constant
     ncid.variables['lidar_constant_uncertainty'][idx] = result.uncertainty
 
+    # v2.3 uncertainty components: only when the row carries them (uncertainty_model 'v2.3') or the
+    # file already has the variables (then a row without them is cleared to fill, never left stale).
+    components = getattr(result, "uncertainty_components", None)
+    if components:
+        _ensure_v23_uncertainty_variables(ncid, info.instrument_type.lidar_constant_units)
+    if components or any(n in ncid.variables for n in _V23_UNCERTAINTY_VARS):
+        _write_v23_uncertainty_row(ncid, idx, components)
+
     if result.calibration_bottom_height is not None:
         ncid.variables['calibration_bottom_height'][idx] = result.calibration_bottom_height
     if result.calibration_top_height is not None:
@@ -345,6 +439,8 @@ def strip_calibration_method(
             kept = {v: np.asarray(nc.variables[v][:])[keep] for v in nc.variables}
         # rewrite the file with only the surviving rows (same structure, from info)
         ncid = _create_calibration_file(filepath, info)
+        if any(n in kept for n in _V23_UNCERTAINTY_VARS):      # file had the v2.3 components
+            _ensure_v23_uncertainty_variables(ncid, info.instrument_type.lidar_constant_units)
         for v, arr in kept.items():
             if arr.size:
                 ncid.variables[v][0:arr.size] = arr

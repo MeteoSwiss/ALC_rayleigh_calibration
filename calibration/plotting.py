@@ -840,13 +840,20 @@ def plot_rayleigh_diagnostics_compact(
     time_datetime: Optional[List[datetime]] = None,
     title: str = "",
     save_path: Optional[Path] = None,
+    cl_cube: Optional[NDArray[np.float64]] = None,
+    time_samples: Optional[NDArray[np.int64]] = None,
 ) -> "Figure":
     """Wide Rayleigh dashboard: molecular, window, sensitivity and an annotated RCS panel.
 
     The RCS panel (``rcs``/``hours_since_start``/``cloud_base_height``/``used_profile_indices``) may be
     on a different (e.g. full pre-screen, native-range) grid than the fit panels; pass its range axis
     as ``rcs_range_alc`` (defaults to ``range_alc``) so excluded profiles can be shown hatched rather
-    than gapped."""
+    than gapped.
+
+    ``cl_cube`` (lidar ratio x window shift x time sample) and ``time_samples`` are the FULL ensemble
+    the reported C_L and uncertainty are computed from; this figure only draws ``cl_matrix`` (the
+    median over time samples). They are accepted so the interactive dashboard panel, which captures
+    this call's arguments, can show every member that enters the uncertainty."""
     plt = _get_plt()
 
     fig = plt.figure(figsize=(24, 14), layout="constrained")

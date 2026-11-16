@@ -48,7 +48,7 @@ CACHE = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/rayleigh_availabilit
 OUT = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/rayleigh_availability")
 FIG = REPO / "doc" / "reports" / "figs_cbh_heterogeneity"
 LUT = REPO / "calibration" / "data" / "abs_cross_wv_910nm.nc"
-CAMS = "A:/CAMS_Monthly_04;D:/CAMS_daily"
+CAMS = "D:/CAMS_Monthly_04;D:/CAMS_daily"  # was A:/CAMS_Monthly_04 (moved to D:, same files)
 L1 = "D:/E-PROFILE_L1_2026"
 
 WMO, LAT, LON, ALT = "0-20000-0-06610", 46.8137, 6.9425, 491.0

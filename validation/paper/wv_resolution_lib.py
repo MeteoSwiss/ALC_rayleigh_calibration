@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from calibration.water_vapor_correction.water_vapor import (  # noqa: E402
     _cams_levels, two_way_wv_transmission, DEFAULT_ABS_CROSS_SECTION,
-    LASER_SPECTRUM, cams_nearest_offset_deg, KB, EPS, G0)
+    LASER_SPECTRUM, laser_spectrum_for, cams_nearest_offset_deg, KB, EPS, G0)
 from calibration.cloud.calibration import _nw_from_T_RH  # noqa: E402
 from calibration.water_vapor_correction.water_vapor import cams_levels_all_times  # noqa: E402
 
@@ -60,7 +60,7 @@ PAYERNE = STATIONS[0]
 
 
 def laser(inst: str):
-    return LASER_SPECTRUM.get(inst, (910.0, 3.4))
+    return laser_spectrum_for(inst, 910.0)   # honours ALC_WV_SPECTRUM (was: the raw table)
 
 
 # ---------------------------------------------------------------- CAMS (0.4 deg, 3-hourly)

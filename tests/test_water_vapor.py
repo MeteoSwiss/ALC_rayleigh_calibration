@@ -156,7 +156,7 @@ def test_n_wv_from_RH_matches_matlab():
 def test_band_and_laser_spectrum():
     assert in_water_vapor_band(910.74) and in_water_vapor_band(905.0)
     assert not in_water_vapor_band(1064.47)
-    assert laser_spectrum_for("CL61", 910.0) == (910.74, 1.0)
+    assert laser_spectrum_for("CL61", 910.0) == (910.55, 0.188)   # manufacturer line, not Qmini
     assert laser_spectrum_for("CHM15k", 1064.0)[0] == pytest.approx(1064.47)
 
 

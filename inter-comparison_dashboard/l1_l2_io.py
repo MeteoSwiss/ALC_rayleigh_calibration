@@ -24,6 +24,7 @@ from __future__ import annotations
 import glob
 import os
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -146,8 +147,10 @@ def read_l2(wmo, ident, start, end, workers=12):
 
 # --------------------------------------------------------------------------- L1
                      # --------------------------------------------------- dark baseline (measured)
+# Same hood-dark version as sites.py `dark_npz` (v3 since 2026-11-02); only read when the stream
+# cache is built with ALC_DASH_DARK=1.
 _DARK_NPZ = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/rayleigh_availability"
-                 "/dark_profiles_payerne.npz")
+                 "/dark_profiles_payerne_v3.npz")
 _DARK_CACHE = {}
 
 
@@ -243,6 +246,99 @@ def _l1_files(files, dark=None):
     return grid, rcsh, cbhh, vvh, temph, rng
 
 
+def _scan_meta(jobs):
+    """First readable file's station metadata + range grid (shared by the hourly and native
+    readers so both see the same grid)."""
+    for _, fs in jobs:
+        for f in fs:
+            try:
+                with Dataset(f) as nc:
+                    return dict(salt=float(np.ravel(nc.variables["station_altitude"][:])[0]),
+                                lat=float(np.ravel(nc.variables["station_latitude"][:])[0]),
+                                lon=float(np.ravel(nc.variables["station_longitude"][:])[0]),
+                                wl=IC._scalar(nc, "l0_wavelength", np.nan),
+                                rng=np.asarray(nc.variables["range"][:], "f8"))
+            except Exception:
+                continue
+    return None
+
+
+def _l1_files_native(files):
+    """One day's L1 file(s) at NATIVE time resolution — no retiming, no dark subtraction, no
+    noise filter.  The nf_v3 window-SNR statistics need the raw per-sample stream; everything
+    else (decoding, fill handling, screening INPUTS cbh/vv) is identical to _l1_files.
+
+    Each file is retried a few times: under the threaded reader, HDF5 sporadically fails a
+    clean open (HDF5-DIAG "unable to open file"), and a silently skipped day makes the read
+    NON-DETERMINISTIC — the build and its verification (check_v3) would then see different
+    hours and the mask comparison fails on data vintage, not wiring."""
+    ts, rcss, cbhs, vvs = [], [], [], []
+    rng = None
+    for f in files:
+        got = None
+        for attempt in range(3):
+            try:
+                with Dataset(f) as nc:
+                    tu = getattr(nc.variables["time"], "units", "days since 1970-01-01")
+                    t = IC._decode_time(np.asarray(nc.variables["time"][:], "f8"), tu)
+                    r = np.asarray(nc.variables["range"][:], "f8")
+                    rcs = IC._clean(nc.variables["rcs_0"][:])
+                    if rcs.shape != (t.size, r.size):
+                        rcs = rcs.T if rcs.shape == (r.size, t.size) else None
+                    if rcs is None or t.size == 0:
+                        got = ()
+                        break
+                    cbh = IC._read2d(nc, "cloud_base_height", t.size, r.size)
+                    vv = IC._read1d(nc, "vertical_visibility", t.size)
+                    got = (t, r, rcs, cbh, vv)
+                    break
+            except Exception:
+                time.sleep(0.3 * (attempt + 1))
+        if not got:
+            continue
+        t, r, rcs, cbh, vv = got
+        if rng is None:
+            rng = r
+        elif r.size != rng.size:
+            continue
+        ts.append(t)
+        rcss.append(np.asarray(rcs, "f4"))          # f4: 60+ days of CL61 must fit in memory
+        cbhs.append(np.asarray(cbh, "f4"))
+        vvs.append(np.asarray(vv, "f4"))
+    if rng is None or not ts:
+        return None
+    t = np.concatenate(ts)
+    o = np.argsort(t)
+    return (t[o], np.concatenate(rcss, axis=0)[o], np.concatenate(cbhs, axis=0)[o],
+            np.concatenate(vvs)[o], rng)
+
+
+def read_l1_native(wmo, ident, start, end, workers=8):
+    """Native-resolution twin of read_l1, for the noise-filter build (nf_v3): same daily files,
+    same decoding, but the raw sample stream instead of hourly medians."""
+    days = list(_daterange(start, end))
+    jobs = [(d, day_files(L1_ROOT, "L1", wmo, ident, d)) for d in days]
+    meta = _scan_meta(jobs)
+    if meta is None:
+        return None
+    nR = meta["rng"].size
+    parts = []
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        for res in ex.map(lambda j: _l1_files_native(j[1]) if j[1] else None, jobs):
+            if res is not None and res[4].size == nR:
+                parts.append(res[:4])
+    if not parts:
+        return None
+    time = np.concatenate([p[0] for p in parts])
+    o = np.argsort(time)
+    return dict(time=time[o], alt=meta["rng"] + meta["salt"],
+                beta=np.concatenate([p[1] for p in parts], axis=0)[o],
+                cbh=np.concatenate([p[2] for p in parts], axis=0)[o],
+                vv=np.concatenate([p[3] for p in parts])[o],
+                station_alt=meta["salt"], lat=meta["lat"], lon=meta["lon"],
+                wavelength=meta["wl"], wmo=wmo, ident=ident)
+
+
 def read_l1(wmo, ident, start, end, workers=12):
     """Hourly-median L1 rcs_0 over [start,end] from the daily archive (+5-minute fallback).
     Same dict shape as intercompare.read_l1, plus `sources`."""
@@ -251,21 +347,7 @@ def read_l1(wmo, ident, start, end, workers=12):
     src = {"daily": 0, "granules": 0, "missing": 0}
     for d, fs in jobs:
         src["missing" if not fs else ("daily" if len(fs) == 1 else "granules")] += 1
-    meta = None
-    for _, fs in jobs:
-        for f in fs:
-            try:
-                with Dataset(f) as nc:
-                    meta = dict(salt=float(np.ravel(nc.variables["station_altitude"][:])[0]),
-                                lat=float(np.ravel(nc.variables["station_latitude"][:])[0]),
-                                lon=float(np.ravel(nc.variables["station_longitude"][:])[0]),
-                                wl=IC._scalar(nc, "l0_wavelength", np.nan),
-                                rng=np.asarray(nc.variables["range"][:], "f8"))
-                break
-            except Exception:
-                continue
-        if meta:
-            break
+    meta = _scan_meta(jobs)
     if meta is None:
         return None
     nR = meta["rng"].size

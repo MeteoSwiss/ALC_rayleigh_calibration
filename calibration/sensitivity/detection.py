@@ -88,6 +88,8 @@ ALPHA_MOL0: Dict[int, float] = {
 def alpha_mol0_for_wavelength(wavelength_nm: float) -> float:
     """Surface molecular extinction for the nearest tabulated wavelength, or a
     lambda^-4 scaling from 1064 nm for anything else."""
+    if not np.isfinite(wavelength_nm) or wavelength_nm <= 0:
+        raise ValueError(f"wavelength must be a positive number of nm, got {wavelength_nm!r}")
     wl = int(round(wavelength_nm))
     if wl in ALPHA_MOL0:
         return ALPHA_MOL0[wl]

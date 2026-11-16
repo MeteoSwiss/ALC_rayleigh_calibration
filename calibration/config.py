@@ -174,6 +174,22 @@ class CalibrationOptions:
     # or station coordinates are missing.
     use_sza_night: bool = True
     sza_night_threshold: float = 100.0  # deg; 100 = sun ~10 deg below horizon (nautical)
+    # Polar-summer low-sun fallback (v2.3, calibration/rayleigh/polar.py; OFF = operational, bit-identical).
+    # When the night window has no more than polar_trigger_dark_hours with SZA > sza_night_threshold
+    # (solar geometry; north of ~56.6 N around the solstice there are none), calibrate on the lowest-
+    # sun profiles instead: SZA > max(min(SZA_max - polar_sza_delta, SZA at +-polar_min_hours/2 from
+    # solar midnight), polar_min_sza), i.e. by default the 6 h centred on solar midnight with the sun
+    # never higher than 12 deg. Such a night is flagged 0.25 (calibration.flags.LOW_SUN_FLAG); it is
+    # rejected (-14) when that window lasts less than min_time_range, or -- only if
+    # polar_max_residual_pct > 0 -- when the far-range (polar_residual_band_m) residual background
+    # implies a larger C_L bias at the window centre (0 = off; see doc/v2.3/polar_summer.md).
+    polar_night_fallback: bool = False
+    polar_trigger_dark_hours: float = 0.0
+    polar_sza_delta: float = 0.0
+    polar_min_hours: float = 6.0
+    polar_min_sza: float = 78.0
+    polar_max_residual_pct: float = 0.0
+    polar_residual_band_m: tuple = (8000.0, 12000.0)
     # Time collapse before the molecular fit: "mean" (efficient for the weak-signal
     # photon noise at 3-6 km) or "median" (robust but ~1.5x noisier there).
     time_aggregation: str = "mean"
@@ -202,6 +218,14 @@ class CalibrationOptions:
     # are read only by the in-line eprof_v1.2 path -- so this dict is the ONLY way to tune their
     # gates from configuration. Empty = each method's registered DEFAULT_PARAMS.
     molecular_params: dict = field(default_factory=dict)
+    # Per-station override of molecular_params, keyed by '<wmo>_<ident>' (merged on top by the network
+    # runner): e.g. Payerne CHM15k A (abnormal receiver) on tier 1 only, {"use_noise": false}.
+    station_molecular_params: dict = field(default_factory=dict)
+    # Per-stream Kalman input filter, keyed by '<wmo>_<ident>' (read by the network runner): e.g.
+    # {"0-20000-0-01492_A": {"exclude_flags": [0.25]}} keeps Oslo's polar-summer low-sun nights (2.6x
+    # the dark-night level in the v2.3 release, under investigation) out of its best estimate while
+    # they stay in the CSV and the NetCDF.
+    station_kalman_params: dict = field(default_factory=dict)
     # Flag -9 ("another layer with lower signal"): reject when the chosen window's slope exceeds
     # the 10th percentile of clean-window slopes by more than this factor. Was previously read via
     # getattr with a hard-coded 2.0 and existed in neither the dataclass nor options.json.
@@ -299,6 +323,21 @@ class CalibrationOptions:
     # method comparison (see atmosphere.klett_inversion / calibrate_rayleigh).
     sign_error_v10: bool = False
 
+    # Uncertainty model of the nightly Rayleigh constant (calibration/rayleigh/uncertainty.py).
+    #   'ensemble' (default) -- v2.2: 2 x robust sigma of the 125-member LR x shift x time ensemble;
+    #                           output bit-identical to v2.2.
+    #   'v2.3'               -- adds, in quadrature, a vertical-consistency term (C_L in sub-windows
+    #                           over the usable molecular range: |d ln C/dz| x a representative window
+    #                           displacement), a molecular-model term (US-1976 vs real T/p) and the
+    #                           photon noise; replaces the 'u > C' QC (-6) by a relative limit and
+    #                           writes the components to the calibration NetCDF. C_L is unchanged.
+    uncertainty_model: str = "ensemble"
+    # Overrides of calibration.rayleigh.uncertainty.DEFAULT_PARAMS (v2.3 model only). Empty = defaults.
+    uncertainty_params: dict = field(default_factory=dict)
+    # Network runner only: weight each night of the Kalman best estimate by its reported relative
+    # uncertainty (monitoring.kalman.kalman_best_estimate(uncertainties=...)). Off = operational.
+    kalman_uncertainty_weighting: bool = False
+
     @classmethod
     def from_json(cls, filepath: Path) -> CalibrationOptions:
         """Load options from a JSON file."""
@@ -314,6 +353,14 @@ class CalibrationOptions:
             min_time_range=data.get("min_time_range", 3),
             use_sza_night=bool(data.get("use_sza_night", 1)),
             sza_night_threshold=float(data.get("sza_night_threshold", 100.0)),
+            polar_night_fallback=bool(data.get("polar_night_fallback", 0)),
+            polar_trigger_dark_hours=float(data.get("polar_trigger_dark_hours", 0.0)),
+            polar_sza_delta=float(data.get("polar_sza_delta", 0.0)),
+            polar_min_hours=float(data.get("polar_min_hours", 6.0)),
+            polar_min_sza=float(data.get("polar_min_sza", 78.0)),
+            polar_max_residual_pct=float(data.get("polar_max_residual_pct", 0.0)),
+            polar_residual_band_m=tuple(float(v) for v in data.get("polar_residual_band_m",
+                                                                   (8000.0, 12000.0))),
             time_aggregation=str(data.get("time_aggregation", "mean")),
             average_time_s=(None if data.get("average_time_s", None) is None else float(data.get("average_time_s"))),
             average_range_m=(None if data.get("average_range_m", None) is None else float(data.get("average_range_m"))),
@@ -323,6 +370,8 @@ class CalibrationOptions:
             screen_profile_outliers=bool(data.get("screen_profile_outliers", 1)),
             profile_outlier_nmad=float(data.get("profile_outlier_nmad", 4.0)),
             molecular_params=dict(data.get("molecular_params", {}) or {}),
+            station_molecular_params=dict(data.get("station_molecular_params", {}) or {}),
+            station_kalman_params=dict(data.get("station_kalman_params", {}) or {}),
             aerosol_qc_enabled=bool(data.get("aerosol_qc_enabled", 1)),
             aerosol_scattering_threshold=float(data.get("aerosol_scattering_threshold", 2.0)),
             use_classification_mask=bool(data.get("use_classification_mask", 1)),
@@ -352,6 +401,9 @@ class CalibrationOptions:
             abs_cs_lookup_table=Path(data.get("abs_cs_lookup_table", "")),
             auto_download_cams=bool(data.get("auto_download_cams", 0)),
             cams_download_scope=str(data.get("cams_download_scope", "day")),
+            uncertainty_model=str(data.get("uncertainty_model", "ensemble")),
+            uncertainty_params=dict(data.get("uncertainty_params", {}) or {}),
+            kalman_uncertainty_weighting=bool(data.get("kalman_uncertainty_weighting", 0)),
         )
 
 
@@ -366,11 +418,15 @@ class CalibrationResult:
     calibration_bottom_height: Optional[float] = None
     calibration_top_height: Optional[float] = None
     message: str = ""
+    # v2.3 uncertainty budget components (calibration.rayleigh.uncertainty.UncertaintyBudget), only
+    # set when options.uncertainty_model == 'v2.3'. None = v2.2 output (nothing extra is written).
+    uncertainty_components: Optional[dict] = None
 
     @property
     def is_successful(self) -> bool:
-        """Check if calibration was successful."""
-        return self.flag == 1 or self.flag == 0.5
+        """Check if calibration was successful (calibration.flags.SUCCESS_FLAGS)."""
+        from .flags import is_success
+        return is_success(self.flag)
 
     @property
     def flag_meaning(self) -> str:

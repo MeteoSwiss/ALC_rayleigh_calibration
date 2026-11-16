@@ -49,7 +49,7 @@ CACHE = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/rayleigh_availabilit
              "dark_clearsky/cache")
 FIG = REPO / "doc" / "reports" / "figs_cbh_heterogeneity"
 LUT = REPO / "calibration" / "data" / "abs_cross_wv_910nm.nc"
-CAMS = "A:/CAMS_Monthly_04;D:/CAMS_daily"
+CAMS = "D:/CAMS_Monthly_04;D:/CAMS_daily"  # was A:/CAMS_Monthly_04 (moved to D:, same files)
 
 SITES = {
     "Payerne": dict(wmo="0-20000-0-06610", ref="A", tst="C", lat=46.8137, lon=6.9425, alt=491.0,

@@ -40,7 +40,7 @@ from calibration.water_vapor_correction.water_vapor import (                    
 
 DATA = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/rayleigh_availability")
 FIG = REPO / "doc" / "reports" / "figs_cbh_heterogeneity"
-CAMS = "A:/CAMS_Monthly_04;D:/CAMS_daily"
+CAMS = "D:/CAMS_Monthly_04;D:/CAMS_daily"  # was A:/CAMS_Monthly_04 (moved to D:, same files)
 LUT = REPO / "calibration" / "data" / "abs_cross_wv_910nm.nc"
 OFFSETS = (-0.30, -0.15, 0.0, +0.15, +0.30)          # nm autour du lambda0 nominal du type
 

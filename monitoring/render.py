@@ -20,6 +20,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from plotly.offline import get_plotlyjs
 
 from monitoring import charts, config, index, metrics, periods as periods_mod
+from monitoring.unit_changes import current_identity, unit_changes
 
 _TEMPLATES = Path(__file__).parent / "templates"
 _STATIC = Path(__file__).parent / "static"
@@ -397,7 +398,7 @@ def _copy_diagnostics(diag: pd.DataFrame, cal: pd.DataFrame, out_dir: Path) -> d
 
 
 def _method_block(key, method, cal, kal, series, op_all=None,
-                  oldray_all=None, alt_m=None):
+                  oldray_all=None, alt_m=None, changes=None):
     """Figures + aggregates for one method section on a station page."""
     g_m = cal[(cal["key"] == key) & (cal["method"] == method)].sort_values("datetime")
     kal_m = kal[(kal["key"] == key) & (kal["method"] == method)] if len(kal) else kal
@@ -412,7 +413,8 @@ def _method_block(key, method, cal, kal, series, op_all=None,
     return dict(
         method=method, label=config.method_label(method), meta=meta,
         figs={
-            "ts": charts.fig_to_div(charts.series_timeseries(g_m, kal_m, method, op_df, oldray_df), f"fig-ts-{safe}"),
+            "ts": charts.fig_to_div(charts.series_timeseries(g_m, kal_m, method, op_df, oldray_df,
+                                                             changes=changes), f"fig-ts-{safe}"),
             "flags": charts.fig_to_div(charts.monthly_flag_bars(g_m, method), f"fig-mf-{safe}"),
             "aux": charts.fig_to_div(charts.aux_timeseries(g_m, method, alt_m), f"fig-aux-{safe}"),
         },
@@ -876,8 +878,14 @@ def _render_one_station(key, ctx) -> str:
     meta = st[st["key"] == key].iloc[0].to_dict()
     methods = [m for m in config.METHOD_ORDER
                if len(cal[(cal["key"] == key) & (cal["method"] == m)])]
+    try:                                   # optical-unit / firmware / operator-listed changes
+        changes = unit_changes(ctx.fullcal_dir, key)
+        identity = current_identity(ctx.fullcal_dir, key)
+    except Exception:                                                       # noqa: BLE001
+        changes, identity = [], {}
     blocks = [_method_block(key, m, cal, kal, series,
-                            ctx.op_all, ctx.oldray_all, alt_m=meta.get("alt")) for m in methods]
+                            ctx.op_all, ctx.oldray_all, alt_m=meta.get("alt"), changes=changes)
+              for m in methods]
     # Cloudnet target classification curtains: a per-day gallery like the calibration diagnostics, but
     # not tied to a calibration method (it has no cal rows), so it renders as its own standalone card.
     class_diags = ctx.diag_by.get((key, "classification"), [])
@@ -933,6 +941,8 @@ def _render_one_station(key, ctx) -> str:
     nc_mb = sum(f["size_mb"] for f in nc_files if f.get("size_mb"))
     nav["nc_mb"] = round(nc_mb, 1) if nc_mb else None
     html = ctx.tmpl.render(base="../", logo=ctx.logo, key=key, meta=meta, cal_classes=cal_classes,
+                           identity=identity,
+                           unit_changes=sorted(changes, key=lambda c: c["date"], reverse=True),
                            nav=nav,
                            img_base=config.IMG_BASE_URL,
                            daily_panel=daily_panel,

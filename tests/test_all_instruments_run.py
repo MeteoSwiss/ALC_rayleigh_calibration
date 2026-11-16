@@ -62,13 +62,15 @@ def _suitability_warned(records):
 
 @pytest.mark.skipif(not CASES, reason="no bundled sample data under examples/data")
 @pytest.mark.parametrize("case", CASES, ids=IDS)
-def test_rayleigh_runs_for_every_instrument(case):
+def test_rayleigh_runs_for_every_instrument(case, tmp_path):
     level, it, f, wmo, ident, lat, lon, alt, _ym = case
     o = CalibrationOptions.from_json(REPO / "options.json")
     o.folder_root = DATA / level
     o.data_level = DataLevel.L1 if level == "L1" else DataLevel.L2_DAILY
     o.plot_main = False
     o.apply_wv_correction = False                 # keep the "does it run" test offline (no CAMS)
+    o.folder_output = tmp_path                    # a SUCCESSFUL night writes its NetCDF here,
+    #                                               not to the server path in options.json
     info = InstrumentInfo(site_name=wmo, wmo_id=wmo, identifier=ident,
                           instrument_type=InstrumentType(it),
                           latitude=lat, longitude=lon, altitude=alt)
@@ -105,6 +107,10 @@ def test_cloud_runs_for_every_instrument(case):
     assert int(res.n_profiles) >= 0
     if res.n_profiles > 0:
         assert np.isfinite(res.cal_median) and res.cal_median > 0
-    # The liquid-cloud method is suitable for every elastic ceilometer/lidar (it is the PRIMARY
-    # method for CL31/CL51), so no suitability warning is expected for any of them.
+    # The liquid-cloud method is the PRIMARY method for the Vaisala 910 nm ceilometers
+    # (no warning), but the photon-counting instruments (CHM15k/CHM8k, Mini-MPL, MPL)
+    # saturate in the liquid-cloud return and must emit the saturation warning.
     assert not _suitability_warned(rec), (it, level, [str(w.message) for w in rec])
+    saturation = any("saturates in liquid clouds" in str(w.message) for w in rec)
+    expect_saturation = it.upper() in ("CHM15K", "CHM8K", "MINI-MPL", "MINIMPL", "MPL")
+    assert saturation is expect_saturation, (it, level, [str(w.message) for w in rec])

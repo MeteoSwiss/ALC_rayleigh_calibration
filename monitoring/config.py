@@ -71,6 +71,8 @@ FLAG_MEANINGS = {
     -9: "Another layer with lower signal",
     -10: "Closest CAMS data too far",
     -11: "Rayleigh window contaminated (classification)",
+    0.25: "Low-sun success (polar summer)",
+    -14: "Low-sun night rejected (polar summer)",
     -20: "Cloud: window transmission too low",
     -21: "Cloud: laser energy too low",
     -22: "Cloud: peak not sharp above",
@@ -87,8 +89,9 @@ FLAG_MEANINGS = {
 #: per-reason outcome breakdown.
 CLOUD_REJECT_FLAGS = (-20, -21, -22, -23, -24, -25, -26)
 
-# A calibration "succeeded" on a night if its flag is one of these.
-SUCCESS_FLAGS = (1.0, 0.5)
+# A calibration "succeeded" on a night if its flag is one of these (0.25 = polar-summer low-sun
+# calibration, only produced with the v2.3 option polar_night_fallback).
+SUCCESS_FLAGS = (1.0, 0.5, 0.25)
 
 # Discrete color per flag: greens = usable, warm = atmospheric/fit reject, greys = no data.
 FLAG_COLORS = {
@@ -106,6 +109,8 @@ FLAG_COLORS = {
     -9: "#e07b39",
     -10: "#5e3c99",
     -11: "#e8a838",
+    0.25: "#a6d96a",      # low-sun (polar summer) calibration: a paler green than 1 / 0.5
+    -14: "#8fa4c8",       # low-sun night rejected: the "no night at this latitude" twilight blue
     -20: "#fff2cc", -21: "#ffe699", -22: "#ffd966", -23: "#f1c232",
     -24: "#e69138", -25: "#d79b00", -26: "#bf9000",
     -99: "#000000",
@@ -197,7 +202,8 @@ CAL_CLASS_COLORS = {
 NO_NIGHT_MARKER = "nighttime window"
 
 _CAL_CLASS_OF_FLAG = {
-    1: "ok", 0.5: "ok",
+    1: "ok", 0.5: "ok", 0.25: "ok",
+    -14: "nonight",          # polar-summer low-sun night rejected: still "no usable night"
     -1: "noscene",
     -2: "atmos", -9: "atmos", -11: "atmos",
     -22: "atmos", -23: "atmos", -24: "atmos", -25: "atmos", -26: "atmos",
@@ -298,8 +304,8 @@ def flag_label(flag, method=None) -> str:
         return "Unknown"
     if f != f:  # NaN (e.g. a station with no parseable calibration nights)
         return "No calibration"
-    # 0.5 is the only non-integer flag; everything else keys as an int.
-    key = f if f == 0.5 else int(f)
+    # Non-integer flags (0.5, 0.25) key as such; everything else keys as an int.
+    key = f if f in FLAG_MEANINGS else int(f)
     ov = METHOD_FLAG_OVERRIDES.get(str(method), {})
     if key in ov:
         return ov[key]
@@ -314,7 +320,7 @@ def flag_color(flag) -> str:
         return "#cccccc"
     if f != f:  # NaN
         return "#cccccc"
-    key = f if f == 0.5 else int(f)
+    key = f if f in FLAG_COLORS else int(f)
     return FLAG_COLORS.get(key, "#cccccc")
 
 

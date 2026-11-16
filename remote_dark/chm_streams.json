@@ -1,0 +1,926 @@
+[
+{
+"wmo": "0-100-20000-0000001",
+"ident": "A",
+"site": "SOFIA_IEBAS",
+"n_days": 149
+},
+{
+"wmo": "0-100-20000-000627",
+"ident": "A",
+"site": "PLOVDIV_UNI",
+"n_days": 149
+},
+{
+"wmo": "0-20000-0-00202",
+"ident": "A",
+"site": "MILANO_BICOCCA",
+"n_days": 7
+},
+{
+"wmo": "0-20000-0-00203",
+"ident": "A",
+"site": "MESSINA",
+"n_days": 8
+},
+{
+"wmo": "0-20000-0-01001",
+"ident": "A",
+"site": "JAN_MAYEN",
+"n_days": 149
+},
+{
+"wmo": "0-20000-0-01010",
+"ident": "A",
+"site": "ANDOYA",
+"n_days": 149
+},
+{
+"wmo": "0-20000-0-01028",
+"ident": "A",
+"site": "BJORNOYA",
+"n_days": 149
+},
+{
+"wmo": "0-20000-0-01062",
+"ident": "A",
+"site": "HOPEN",
+"n_days": 149
+},
+{
+"wmo": "0-20000-0-01311",
+"ident": "A",
+"site": "FLESLAND",
+"n_days": 149
+},
+{
+"wmo": "0-20000-0-01492",
+"ident": "A",
+"site": "OSLO",
+"n_days": 149
+},
+{
+"wmo": "0-20000-0-03005",
+"ident": "A",
+"site": "LERWICK",
+"n_days": 113
+},
+{
+"wmo": "0-20000-0-03018",
+"ident": "A",
+"site": "STORNOWAY",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-03023",
+"ident": "A",
+"site": "SOUTH_UIST",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-03162",
+"ident": "A",
+"site": "ESKDALEMUIR",
+"n_days": 143
+},
+{
+"wmo": "0-20000-0-03354",
+"ident": "B",
+"site": "NOTTINGHAM",
+"n_days": 143
+},
+{
+"wmo": "0-20000-0-03391",
+"ident": "A",
+"site": "CONINGSBY",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-03502",
+"ident": "A",
+"site": "ABERPORTH",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-03590",
+"ident": "A",
+"site": "WATTISHAM",
+"n_days": 147
+},
+{
+"wmo": "0-20000-0-03808",
+"ident": "A",
+"site": "CAMBORNE",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-03838",
+"ident": "A",
+"site": "EXETER",
+"n_days": 143
+},
+{
+"wmo": "0-20000-0-03917",
+"ident": "A",
+"site": "ALDERGROVE",
+"n_days": 145
+},
+{
+"wmo": "0-20000-0-06215",
+"ident": "A",
+"site": "VOORSCHOTEN",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-06235",
+"ident": "A",
+"site": "DE_KOOY",
+"n_days": 147
+},
+{
+"wmo": "0-20000-0-06240",
+"ident": "A",
+"site": "AMSTERDAM_AP_SCHIPHOL",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-06240",
+"ident": "B",
+"site": "AMSTERDAM_AP_SCHIPHOL",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-06240",
+"ident": "C",
+"site": "AMSTERDAM_AP_SCHIPHOL",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-06240",
+"ident": "D",
+"site": "AMSTERDAM_AP_SCHIPHOL",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-06242",
+"ident": "A",
+"site": "VLIELAND",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-06260",
+"ident": "A",
+"site": "DEBILT",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-06267",
+"ident": "A",
+"site": "STAVOREN",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-06269",
+"ident": "A",
+"site": "LELYSTAD_AP",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-06270",
+"ident": "A",
+"site": "LEEUWARDEN",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-06275",
+"ident": "A",
+"site": "DEELEN",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-06279",
+"ident": "A",
+"site": "HOOGEVEEN",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-06280",
+"ident": "A",
+"site": "GRONINGEN_AP_EELDE",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-06290",
+"ident": "A",
+"site": "TWENTHE",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-06310",
+"ident": "A",
+"site": "VLISSINGEN",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-06340",
+"ident": "A",
+"site": "WOENSDRECHT",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-06344",
+"ident": "A",
+"site": "ROTTERDAM_THE_HAGUE_AP",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-06348",
+"ident": "A",
+"site": "CABAUW",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-06350",
+"ident": "A",
+"site": "GILZE_RIJEN",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-06370",
+"ident": "A",
+"site": "EINDHOVEN_AP",
+"n_days": 146
+},
+{
+"wmo": "0-20000-0-06375",
+"ident": "A",
+"site": "VOLKEL",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-06377",
+"ident": "A",
+"site": "ELL",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-06380",
+"ident": "A",
+"site": "MAASTRICHT_AACHEN_AP",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-06610",
+"ident": "A",
+"site": "PAYERNE",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-06736",
+"ident": "A",
+"site": "KLEINE_SCHEIDEGG",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-06784",
+"ident": "A",
+"site": "DAVOS",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-10015",
+"ident": "0",
+"site": "HELGOLAND",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-10020",
+"ident": "0",
+"site": "LIST",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-10035",
+"ident": "0",
+"site": "SCHLESWIG",
+"n_days": 142
+},
+{
+"wmo": "0-20000-0-10055",
+"ident": "0",
+"site": "FEHMARN",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-10093",
+"ident": "0",
+"site": "PUTBUS",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-10113",
+"ident": "0",
+"site": "NORDERNEY",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-10130",
+"ident": "0",
+"site": "ELPERSBUETTEL",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-10140",
+"ident": "0",
+"site": "HAMBURG",
+"n_days": 147
+},
+{
+"wmo": "0-20000-0-10156",
+"ident": "0",
+"site": "LUEBECK",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-10168",
+"ident": "0",
+"site": "GOLDBERG",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-10180",
+"ident": "0",
+"site": "BARTH",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-10210",
+"ident": "0",
+"site": "FRIESOYTHE",
+"n_days": 116
+},
+{
+"wmo": "0-20000-0-10235",
+"ident": "0",
+"site": "SOLTAU",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-10267",
+"ident": "0",
+"site": "KYRITZ",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-10289",
+"ident": "0",
+"site": "GRUENOW",
+"n_days": 147
+},
+{
+"wmo": "0-20000-0-10312",
+"ident": "0",
+"site": "BELM",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-10348",
+"ident": "0",
+"site": "BRAUNSCHWEIG",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-10361",
+"ident": "0",
+"site": "MAGDEBURG",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-10379",
+"ident": "0",
+"site": "POTSDAM",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-10393",
+"ident": "0",
+"site": "LINDENBERG",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-10395",
+"ident": "0",
+"site": "FALKENBERG",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-10410",
+"ident": "0",
+"site": "ESSEN",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-10424",
+"ident": "0",
+"site": "WERL",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-10433",
+"ident": "0",
+"site": "LUEGDE",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-10444",
+"ident": "0",
+"site": "GOETTINGEN",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-10458",
+"ident": "0",
+"site": "HARZGERODE",
+"n_days": 146
+},
+{
+"wmo": "0-20000-0-10471",
+"ident": "0",
+"site": "LEIPZIG",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-10474",
+"ident": "0",
+"site": "WITTENBERG",
+"n_days": 147
+},
+{
+"wmo": "0-20000-0-10495",
+"ident": "0",
+"site": "HOYERSWERDA",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-10505",
+"ident": "0",
+"site": "AACHEN",
+"n_days": 148
+},
+{
+"wmo": "0-20000-0-10519",
+"ident": "0",
+"site": "BONN",
+"n_days": 147
+},
+{
+"wmo": "0-20000-0-10537",
+"ident": "0",
+"site": "ULRICHSTEIN",
+"n_days": 146
+},
+{
+"wmo": "0-20000-0-10548",
+"ident": "0",
+"site": "MEININGEN",
+"n_days": 145
+},
+{
+"wmo": "0-20000-0-10564",
+"ident": "0",
+"site": "SCHLEIZ",
+"n_days": 143
+},
+{
+"wmo": "0-20000-0-10577",
+"ident": "0",
+"site": "CHEMNITZ",
+"n_days": 145
+},
+{
+"wmo": "0-20000-0-10615",
+"ident": "0",
+"site": "DEUSELBACH",
+"n_days": 145
+},
+{
+"wmo": "0-20000-0-10635",
+"ident": "0",
+"site": "FELDBERG-TAUNUS",
+"n_days": 145
+},
+{
+"wmo": "0-20000-0-10648",
+"ident": "0",
+"site": "MICHELSTADT",
+"n_days": 144
+},
+{
+"wmo": "0-20000-0-10675",
+"ident": "0",
+"site": "BAMBERG",
+"n_days": 144
+},
+{
+"wmo": "0-20000-0-10686",
+"ident": "0",
+"site": "WUNSIEDEL",
+"n_days": 144
+},
+{
+"wmo": "0-20000-0-10704",
+"ident": "0",
+"site": "BERUS",
+"n_days": 144
+},
+{
+"wmo": "0-20000-0-10731",
+"ident": "0",
+"site": "RHEINSTETTEN",
+"n_days": 144
+},
+{
+"wmo": "0-20000-0-10739",
+"ident": "0",
+"site": "STUTTGART",
+"n_days": 144
+},
+{
+"wmo": "0-20000-0-10756",
+"ident": "0",
+"site": "FEUCHTWANGEN",
+"n_days": 142
+},
+{
+"wmo": "0-20000-0-10765",
+"ident": "0",
+"site": "ROTH",
+"n_days": 144
+},
+{
+"wmo": "0-20000-0-10782",
+"ident": "0",
+"site": "WALDMUENCHEN",
+"n_days": 144
+},
+{
+"wmo": "0-20000-0-10803",
+"ident": "0",
+"site": "FREIBURG",
+"n_days": 144
+},
+{
+"wmo": "0-20000-0-10818",
+"ident": "0",
+"site": "KLIPPENECK",
+"n_days": 144
+},
+{
+"wmo": "0-20000-0-10838",
+"ident": "0",
+"site": "ULM",
+"n_days": 144
+},
+{
+"wmo": "0-20000-0-10865",
+"ident": "0",
+"site": "MUENCHEN_STADT",
+"n_days": 99
+},
+{
+"wmo": "0-20000-0-10868",
+"ident": "0",
+"site": "OBERSCHLEISSHEIM",
+"n_days": 30
+},
+{
+"wmo": "0-20000-0-10872",
+"ident": "0",
+"site": "GOTTFRIEDING",
+"n_days": 144
+},
+{
+"wmo": "0-20000-0-10895",
+"ident": "0",
+"site": "FUERSTENZELL",
+"n_days": 144
+},
+{
+"wmo": "0-20000-0-10945",
+"ident": "0",
+"site": "LEUTKIRCH",
+"n_days": 144
+},
+{
+"wmo": "0-20000-0-10962",
+"ident": "0",
+"site": "HOHENPEISSENBERG",
+"n_days": 144
+},
+{
+"wmo": "0-20000-0-10982",
+"ident": "0",
+"site": "CHIEMING",
+"n_days": 144
+},
+{
+"wmo": "0-20000-0-12843",
+"ident": "A",
+"site": "BUDAPEST",
+"n_days": 142
+},
+{
+"wmo": "0-20000-0-12843",
+"ident": "B",
+"site": "BUDAPEST",
+"n_days": 140
+},
+{
+"wmo": "0-20000-0-12892",
+"ident": "A",
+"site": "NAPKOR",
+"n_days": 142
+},
+{
+"wmo": "0-20000-0-12944",
+"ident": "A",
+"site": "PECS",
+"n_days": 39
+},
+{
+"wmo": "0-20000-0-12982",
+"ident": "B",
+"site": "SZEGED",
+"n_days": 142
+},
+{
+"wmo": "0-20000-0-12992",
+"ident": "A",
+"site": "BEKESCSABA",
+"n_days": 142
+},
+{
+"wmo": "0-20000-0-14240",
+"ident": "A",
+"site": "GMP_ZAGREB_MAKSIMIR",
+"n_days": 142
+},
+{
+"wmo": "0-20000-0-14246",
+"ident": "A",
+"site": "VARAZDIN",
+"n_days": 97
+},
+{
+"wmo": "0-20000-0-14280",
+"ident": "A",
+"site": "OSIJEK",
+"n_days": 96
+},
+{
+"wmo": "0-20000-0-14328",
+"ident": "A",
+"site": "OGULIN",
+"n_days": 96
+},
+{
+"wmo": "0-20000-0-73009",
+"ident": "A",
+"site": "WESTERN",
+"n_days": 142
+},
+{
+"wmo": "0-20000-0-78990",
+"ident": "A",
+"site": "BONAIRE_FLAMINGO_AP",
+"n_days": 138
+},
+{
+"wmo": "0-20008-0-BRN",
+"ident": "A",
+"site": "BERN",
+"n_days": 131
+},
+{
+"wmo": "0-20008-0-CGR",
+"ident": "A",
+"site": "CAPO_GRANITOLA",
+"n_days": 11
+},
+{
+"wmo": "0-20008-0-CMN",
+"ident": "A",
+"site": "MONTE_CIMONE",
+"n_days": 11
+},
+{
+"wmo": "0-20008-0-INO",
+"ident": "A",
+"site": "MAGURELE",
+"n_days": 142
+},
+{
+"wmo": "0-20008-0-INO",
+"ident": "B",
+"site": "MAGURELE_RADO",
+"n_days": 141
+},
+{
+"wmo": "0-20008-0-MEL",
+"ident": "A",
+"site": "MELPITZ",
+"n_days": 137
+},
+{
+"wmo": "0-20008-0-MSA",
+"ident": "A",
+"site": "MONTSEC",
+"n_days": 113
+},
+{
+"wmo": "0-20008-0-POT",
+"ident": "A",
+"site": "POTENZA",
+"n_days": 142
+},
+{
+"wmo": "0-20008-0-UEX",
+"ident": "A",
+"site": "BADAJOZ",
+"n_days": 138
+},
+{
+"wmo": "0-20008-0-UGR",
+"ident": "A",
+"site": "GRANADA",
+"n_days": 142
+},
+{
+"wmo": "0-20008-0-UVA",
+"ident": "A",
+"site": "VALLADOLID",
+"n_days": 141
+},
+{
+"wmo": "0-208-0-06011",
+"ident": "A",
+"site": "TORSHAVN",
+"n_days": 142
+},
+{
+"wmo": "0-250-1001-07151",
+"ident": "B",
+"site": "PALAISEAU",
+"n_days": 142
+},
+{
+"wmo": "0-250-1001-75105006",
+"ident": "A",
+"site": "QUALAIR",
+"n_days": 4
+},
+{
+"wmo": "0-276-0-10303",
+"ident": "0",
+"site": "LINGEN_BACCUM",
+"n_days": 142
+},
+{
+"wmo": "0-276-0-10386",
+"ident": "A",
+"site": "BERLIN_CHARLOTTENBURG",
+"n_days": 135
+},
+{
+"wmo": "0-276-0-10508",
+"ident": "A",
+"site": "JULICH",
+"n_days": 11
+},
+{
+"wmo": "0-348-1-56312",
+"ident": "A",
+"site": "SZARVAS",
+"n_days": 140
+},
+{
+"wmo": "0-348-1-57202",
+"ident": "A",
+"site": "SZENTES_ALC",
+"n_days": 142
+},
+{
+"wmo": "0-348-1-57311",
+"ident": "A",
+"site": "OROSHAZA",
+"n_days": 142
+},
+{
+"wmo": "0-348-1-63502",
+"ident": "A",
+"site": "FOLYAS",
+"n_days": 142
+},
+{
+"wmo": "0-348-1-64310",
+"ident": "A",
+"site": "DEBRECEN",
+"n_days": 121
+},
+{
+"wmo": "0-348-1-72618",
+"ident": "A",
+"site": "VASAROSNAMAONY",
+"n_days": 142
+},
+{
+"wmo": "0-380-5-1",
+"ident": "0",
+"site": "SAINT-CHRISTOPHE_AOSTA",
+"n_days": 142
+},
+{
+"wmo": "0-380-6-1",
+"ident": "A",
+"site": "ROME",
+"n_days": 10
+},
+{
+"wmo": "0-528-0-06213",
+"ident": "A",
+"site": "HKN",
+"n_days": 142
+},
+{
+"wmo": "0-528-0-06216",
+"ident": "A",
+"site": "HKZA",
+"n_days": 142
+},
+{
+"wmo": "0-528-0-06218",
+"ident": "A",
+"site": "HKWA",
+"n_days": 142
+},
+{
+"wmo": "0-528-0-06233",
+"ident": "A",
+"site": "ASSENDELFT",
+"n_days": 142
+},
+{
+"wmo": "0-528-0-06236",
+"ident": "A",
+"site": "MUIDEN",
+"n_days": 142
+},
+{
+"wmo": "0-528-0-06237",
+"ident": "A",
+"site": "NIEUW_VENNEP",
+"n_days": 142
+},
+{
+"wmo": "0-528-0-06238",
+"ident": "A",
+"site": "NIEUWKOOP",
+"n_days": 142
+},
+{
+"wmo": "0-528-0-06317",
+"ident": "A",
+"site": "BORSSELE_ALFA",
+"n_days": 142
+},
+{
+"wmo": "0-620-3704-5480",
+"ident": "B",
+"site": "EVASO",
+"n_days": 142
+},
+{
+"wmo": "0-724-60000-000000000UGRA001",
+"ident": "A",
+"site": "GUADIANA_UGR",
+"n_days": 126
+},
+{
+"wmo": "0-724-60000-0000000CIEMAT001",
+"ident": "A",
+"site": "CIEMAT_MADRID",
+"n_days": 142
+},
+{
+"wmo": "0-756-2-ERISWIL",
+"ident": "A",
+"site": "ERISWIL",
+"n_days": 139
+},
+{
+"wmo": "0-826-301-3",
+"ident": "A",
+"site": "JODRELL_BANK_OBSERVATORY",
+"n_days": 142
+}
+]

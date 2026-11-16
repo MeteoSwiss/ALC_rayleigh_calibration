@@ -167,6 +167,26 @@ def _snr_screen(beta5: Dict[str, NDArray], range_agl: NDArray, ref_key: str,
         vv[~keep] = np.nan
 
 
+def vertical_edges(range_agl, y_max, resol_z):
+    """Lower-edge grid min(range):resol_z:y_max for the coarse OmB bins, after a sanity check.
+
+    One corrupt L1 file (Lerwick 2026-04-01: range values from -3e30 to 4e17) made ``np.arange`` ask for
+    an astronomical array ("Maximum allowed size exceeded") and the uncaught error cost the stream its
+    whole OmB pass in the v2.3 release add-ons. A range axis that is not finite, not increasing, or that
+    starts below -1 km / above y_max is rejected with a message the per-day loop can log and skip.
+    """
+    r = np.asarray(range_agl, dtype=float)
+    finite = r[np.isfinite(r)]
+    if finite.size < 2:
+        raise ValueError("degenerate range axis: fewer than two finite gates")
+    r0 = float(np.min(finite))
+    if r0 < -1000.0 or r0 > y_max or float(np.max(finite)) > 1e6:
+        raise ValueError(f"degenerate range axis: min {r0:.3g} m, max {float(np.max(finite)):.3g} m")
+    if not np.all(np.diff(finite) > 0):
+        raise ValueError("degenerate range axis: not strictly increasing")
+    return np.arange(r0, y_max + resol_z, resol_z)
+
+
 def compute_omb(
     time: NDArray,
     range_agl: NDArray,
@@ -231,8 +251,7 @@ def compute_omb(
     # Matches average_ceilo_v5: range_mean = min(range):resol_z:max(range), each
     # bin averaging [range_mean(i), range_mean(i)+resol_z), and the lower edge is
     # used as the interpolation altitude.
-    r0 = float(np.nanmin(range_agl))
-    edges = np.arange(r0, y_max + resol_z, resol_z)
+    edges = vertical_edges(range_agl, y_max, resol_z)
     range_mean = edges[:-1]
     n_r = range_mean.size
     gate_bin = np.digitize(range_agl, edges) - 1  # native gate -> bin index

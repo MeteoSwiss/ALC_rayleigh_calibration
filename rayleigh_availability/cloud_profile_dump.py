@@ -49,7 +49,7 @@ sys.path.insert(0, str(REPO))
 L1_ROOT = Path("D:/E-PROFILE_L1_2026")            # holds BOTH 2025 and 2026 (year from date)
 # 0.4-deg monthlies first, then the daily archive (Jun-Aug 2026 only exists as dailies).
 # NEVER D:/CAMS or D:/CAMS_run_v20 -- those are 1-degree (bad orography -> PWV bias).
-CAMS_FOLDERS = "A:/CAMS_Monthly_04;D:/CAMS_daily"
+CAMS_FOLDERS = "D:/CAMS_Monthly_04;D:/CAMS_daily"     # was A:/CAMS_Monthly_04 (moved to D:, same files)
 WV_LUT = REPO / "calibration" / "data" / "abs_cross_wv_910nm.nc"
 CENSUS = REPO / "validation" / "scope_l1_2026_census.json"
 SCENES_CSV = REPO / "rayleigh_availability" / "cbh_native" / "cbh_scenes.csv"

@@ -29,7 +29,10 @@ This is the full version of what `mockup_station_page.py` prototyped. Difference
 from __future__ import annotations
 
 import argparse
+import csv
+import functools
 import json
+import math
 import os
 import sqlite3
 import sys
@@ -47,6 +50,7 @@ sys.path.insert(0, str(REPO))
 
 from monitoring import charts, config                                     # noqa: E402
 from monitoring.render import _load_hk, _load_status                      # noqa: E402
+from monitoring.unit_changes import changes_table_html, unit_changes     # noqa: E402
 from scripts.mockup_station_card import probe_cloud_cover, _month_with_data   # noqa: E402
 from scripts.mockup_station_page import _cl_series, _station_index, TILE_OK   # noqa: E402
 import monitoring.panel as PANEL                                # noqa: E402
@@ -103,6 +107,10 @@ def _meta_from_l1(l1_root, key: str) -> dict | None:
                     "institution": str(getattr(ds, "institution", "") or "").strip(),
                     "lat": g("station_latitude"), "lon": g("station_longitude"),
                     "alt": g("station_altitude"),
+                    # identity of the optical unit + firmware, from the latest L1 file
+                    "unit_id": str(getattr(ds, "optical_module_id", "") or
+                                   getattr(ds, "instrument_serial_number", "") or "").strip(),
+                    "firmware": str(getattr(ds, "instrument_firmware_version", "") or "").strip(),
                     "constants": {}, "status": None, "status_date": None,
                     "src": f"L1 {files[-1].name}"}
     except Exception as exc:                                                 # noqa: BLE001
@@ -139,6 +147,48 @@ def _kal_frame(cal_dir: Path, key: str) -> pd.DataFrame:
 
 
 # ================================================================================== daily payloads
+@functools.lru_cache(maxsize=64)
+def _published_rows(cal_dir: str, key: str) -> dict:
+    """{(date, method): (flag, cal_value, uncertainty)} from the operational ``<key>_cal.csv``."""
+    p = Path(cal_dir) / key / f"{key}_cal.csv"
+    rows = {}
+    if not p.exists():
+        return rows
+
+    def num(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+    with open(p, newline="", encoding="utf-8") as fh:
+        for r in csv.DictReader(fh):
+            rows[(str(r.get("date", "")), str(r.get("method") or "rayleigh"))] = (
+                num(r.get("flag")), num(r.get("cal_value")), num(r.get("uncertainty")))
+    return rows
+
+
+def _attach_published(p: dict, key: str, ds: str, method: str) -> None:
+    """Mark a payload whose recomputed verdict differs from the PUBLISHED row of the same night.
+
+    The panel recomputes a night to draw it, while the C_L series plots the published row; the two
+    must agree. When they do not (a different screen, a code change since the published run, data that
+    arrived later), the page now says so instead of silently showing two verdicts for one night.
+    """
+    ref = os.environ.get("ALC_PANEL_REFERENCE_DIR")
+    if not ref:
+        return
+    row = _published_rows(ref, key).get((ds, method))
+    if row is None:
+        return
+    flag, val, unc = row
+    pub = val if (val is not None and math.isfinite(val) and val > 0) else None
+    mine = p.get("constant")
+    differs = (pub is None) != (mine is None) or (
+        pub is not None and mine is not None and abs(float(mine) - pub) > 0.005 * pub)
+    if differs:
+        p["published"] = {"flag": flag, "constant": pub, "uncertainty": unc, "mismatch": True}
+
+
 def _payload_task(job: tuple) -> tuple:
     """One (day, method) in a worker process: calibrate, write the JSON, report.
 
@@ -164,6 +214,7 @@ def _payload_task(job: tuple) -> tuple:
         p = (payload["days"].get(ds) or {}).get(method)
         if p is None or p.get("kind") == "error":
             return ds, method, False, (p or {}).get("message", "no diagnostic")
+        _attach_published(p, key, ds, method)
         Path(ddir, f"{ds}_{method}.json").write_text(json.dumps(p, separators=(",", ":")),
                                                      encoding="utf-8")
         return ds, method, True, p.get("kind", "")
@@ -303,6 +354,10 @@ def build_page(key: str, rec: dict, args, index: dict, stations: list) -> str:
     kal = _kal_frame(args.cal_dir, key)
     status_df = _load_status(Path(args.status_dir), key)
     hk_df = _load_hk(Path(args.status_dir), key)
+    try:                                   # optical-unit / firmware / operator-listed changes
+        changes = unit_changes(args.cal_dir, key)
+    except Exception:                                                       # noqa: BLE001
+        changes = []
 
     blocks = []
     # ---- C_L over time + headline tiles
@@ -313,7 +368,7 @@ def build_page(key: str, rec: dict, args, index: dict, stations: list) -> str:
         f'<div class="tn">{t["note"]}</div></div>' for t in tiles)
     blocks.append(f'<section class="sect" id="constant"><h2>Calibration coefficient C_L over time</h2>'
                   f'<p class="subtle">{cl_sub}</p><div class="card">{_fig(cl_fig, "fig-cl")}</div>'
-                  f'<div class="tiles">{tiles_html}</div></section>')
+                  f'<div class="tiles">{tiles_html}</div>{changes_table_html(changes)}</section>')
 
     # ---- availability card
     avail_html = '<p class="muted">no status file for this stream</p>'
@@ -353,7 +408,7 @@ def build_page(key: str, rec: dict, args, index: dict, stations: list) -> str:
         blocks.append(
             f'<section class="sect" id="m-{m}">'
             f'<h2><span class="mtag mtag-{m}">{config.method_label(m)}</span></h2>'
-            f'<div class="card">{_fig(charts.series_timeseries(g, km, m), f"fig-ts-{m}")}</div>'
+            f'<div class="card">{_fig(charts.series_timeseries(g, km, m, changes=changes), f"fig-ts-{m}")}</div>'
             f'<div class="grid2">'
             f'<div class="card">{_fig(charts.monthly_flag_bars(g, m), f"fig-mo-{m}")}</div>'
             f'<div class="card">{_fig(charts.aux_timeseries(g, m), f"fig-aux-{m}")}</div></div>'
@@ -419,6 +474,14 @@ def _header(rec: dict) -> str:
             f"unit {rec.get('ident', '—')}",
             f"{f(rec.get('lat'), '.3f')}, {f(rec.get('lon'), '.3f')}",
             f(rec.get("alt"), ".0f", " m")]
+    # Which physical unit and firmware the page is about: a C_L belongs to one optical unit.
+    uid = (rec.get("unit_id") or "").strip()
+    if uid and uid.upper() not in ("CL0", "0", "UNKNOWN"):
+        bits.append(f"optical unit {uid}")
+    elif uid:
+        bits.append(f"serial not reported ({uid})")
+    if rec.get("firmware"):
+        bits.append(f"firmware {rec['firmware']}")
     return (f'<h1>{rec.get("name") or rec.get("wmo")} '
             f'<span class="itype">{rec.get("itype") or ""}</span></h1>'
             f'<p class="metainline">{" · ".join(bits)}</p>')
@@ -745,6 +808,11 @@ def main() -> None:
         os.environ["ALC_CAMS_DIR"] = args.cams
     os.environ["ALC_FULLCAL_DIR"] = str(args.work.resolve())
     os.environ["PLOTS"] = "1"
+    # Each night is recomputed into the work dir, but SCREENED with the operational classification
+    # curtains (run_network_calibration.CLS_ROOT) and CHECKED against its published row
+    # (_attach_published) -- the panel must show the same verdict the C_L series plots.
+    os.environ.setdefault("ALC_CLASSIFICATION_DIR", str(Path(args.cal_dir).resolve()))
+    os.environ["ALC_PANEL_REFERENCE_DIR"] = str(Path(args.cal_dir).resolve())
     args.work.mkdir(parents=True, exist_ok=True)
     args.out.mkdir(parents=True, exist_ok=True)
 

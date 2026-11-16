@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 from netCDF4 import Dataset
 
-from calibration.io.cams import ensure_cams_file
+from calibration.io.cams import ensure_cams_file, find_cams_file
 from calibration.cloud.calibration import INSTRUMENT_CAL_DEFAULT
 from calibration.water_vapor_correction.water_vapor import (
     cams_water_vapor_profile, two_way_wv_transmission, laser_spectrum_for, in_water_vapor_band,
@@ -36,23 +36,59 @@ CALIB = Path("C:/DATA/Projects/202606_E-PROFILE_calibration/figs_paper_validatio
 CAMS = "D:/CAMS"
 CAMS_04 = Path(os.environ.get("ALC_VAL_CAMS_04", "D:/CAMS_Monthly_04"))
 CAMS_1DEG = Path(os.environ.get("ALC_VAL_CAMS_1DEG", "D:/CAMS"))
+# Daily 0.4 deg CAMS (CAMS_Beta_<YYYYMMDD>.nc, the operational prefetch) — the only source for recent
+# months whose monthly file does not exist yet (e.g. Jun-Aug 2026). Used per day as a last fallback.
+CAMS_DAILY = Path(os.environ.get("ALC_VAL_CAMS_DAILY", "D:/CAMS_daily"))
 _G0, _RD, _LAPSE = 9.80665, 287.058, 0.0065   # std gravity, dry-air gas const, std lapse rate
 # --- L1 data path (validate by applying the CSCS calibration to the raw range-corrected signal) ---
 # rcs_0 is read from the native daily L1 archive and turned into attenuated backscatter with
 # beta_att [Mm^-1 sr^-1] = rcs_0 / C_L * 1e6, where C_L is the CSCS Kalman lidar constant from the
 # calout <key>_kalman.csv. (No L2 product, no raw vendor files.) Both env-overridable.
 L1_ROOT = Path(os.environ.get("ALC_VAL_L1_ROOT", "D:/E-PROFILE_L1_2026"))
-# Per-gate SNR>=3 detection gate at L1 read (in _l1_day, on the native profiles retimed to hourly).
-# DEFAULT OFF: the SNR gate keeps only gates whose noisy beta exceeds 3-sigma -> conditions on positive
-# noise -> biases the retained median HIGH at altitude, instrument-dependently. The validation therefore
-# reads the UNGATED signal (symmetric noise averages out in the median); detection limits are reported
-# separately as a sensitivity profile, not as a censoring gate. Re-enable with ALC_VAL_L1_SNR=1.
-L1_SNR_GATE = os.environ.get("ALC_VAL_L1_SNR", "0") != "0"
+
+# --- Noise filtering mode for the L1 validation ---------------------------------------------------
+# The detection gate is applied on the NATIVE (sub-hourly) profiles inside _l1_day, BEFORE the hourly
+# median — the only stage where the raw profiles still exist. Three modes, selectable at run time:
+#   "none"     (default) — no gate. Symmetric noise averages out in the hourly median; keeping the
+#              UNGATED signal avoids conditioning on positive noise (which biases the retained median
+#              HIGH at altitude, instrument-dependently). Detection limits are a separate sensitivity
+#              profile, not a censoring gate.
+#   "snr3"     — per-gate window SNR>=3 (|median|/(robust_sigma/sqrt n)) inside retime_hourly; the
+#              operational sensitivity gate. (Legacy switch ALC_VAL_L1_SNR=1 still selects this.)
+#   "cloudnet" — the Cloudnet / ceilopyter per-profile filter (ceilopyter.noise.remove_noise): mask
+#              each sample whose non-range-corrected signal rcs_0/r^2 falls below CLOUDNET_SNR_LIMIT x
+#              the per-profile far-range std, then median the survivors.
+# The mode is read LIVE from ALC_VAL_NOISE_FILTER (or set_noise_filter()) so a runner can switch it
+# before dispatching work — including across the site ProcessPool, whose Windows-spawn children
+# inherit os.environ. Cloudnet knobs: ALC_VAL_CLOUDNET_SNR (default 5), ALC_VAL_CLOUDNET_FLOOR (0).
+_VALID_FILTERS = ("none", "snr3", "cloudnet")
+
+
+def noise_filter_mode():
+    """Active noise-filter mode ('none'|'snr3'|'cloudnet'), read live from the environment."""
+    m = os.environ.get("ALC_VAL_NOISE_FILTER", "").strip().lower()
+    if not m:
+        m = "snr3" if os.environ.get("ALC_VAL_L1_SNR", "0") != "0" else "none"
+    return m if m in _VALID_FILTERS else "none"
+
+
+def set_noise_filter(mode):
+    """Select the noise-filter mode programmatically (sets ALC_VAL_NOISE_FILTER for this process and
+    any ProcessPool children spawned afterwards). Returns the normalised mode."""
+    mode = str(mode).strip().lower()
+    if mode not in _VALID_FILTERS:
+        raise ValueError(f"noise filter must be one of {_VALID_FILTERS}, got {mode!r}")
+    os.environ["ALC_VAL_NOISE_FILTER"] = mode
+    return mode
 CALOUT = Path(os.environ.get(
     "ALC_VAL_CALOUT", "C:/DATA/Projects/202606_E-PROFILE_calibration/E_PROFILE_calout_2025_2026"))
 WV_LUT = REPO / "calibration" / "data" / "abs_cross_wv_910nm.nc"
 STD_ATM = REPO / "calibration" / "data" / "standard_atmosphere_US_1976_50km.csv"
-WV_PARAMS = {"CL31": (909.7, 6.0), "CL51": (910.0, 3.4), "CL61": (910.74, 1.0),
+# CL61: the manufacturer emission line (910.55 nm, sigma 0.08 -> FWHM 0.188 nm) is the OPERATIONAL
+# spectrum since 2026-08 (E-PROFILE per-night NetCDFs reproduce it night-for-night); the historical
+# Qmini 910.74/1.0 over-corrects WV ~x9 and is retired. The beta WV correction must use the SAME
+# spectrum as the calibration constant it is paired with.
+WV_PARAMS = {"CL31": (909.7, 6.0), "CL51": (910.0, 3.4), "CL61": (910.55, 0.188),
              "CHM15k": (1064.47, 0.5), "Mini-MPL": (532.0, 0.1)}
 
 
@@ -209,8 +245,17 @@ def _l1_day(fp):
             temp = _read1d(nc, "temp_int", t.size) - 273.15   # internal temperature K -> degC (NaN if absent)
     except Exception:
         return None
+    # Native-profile noise filtering (see noise_filter_mode): the Cloudnet filter masks noisy samples
+    # in place (then the hourly median below runs over the survivors); the SNR3 gate is applied per
+    # hourly window inside retime_hourly. "none" leaves the ungated signal.
+    mode = noise_filter_mode()
+    snr_idx = ()
+    if mode == "cloudnet":
+        rcs = apply_cloudnet_filter(rcs, rng)
+    elif mode == "snr3":
+        snr_idx = (0,)
     grid, (rcsh, cbhh, vvh, temph) = retime_hourly(t, [rcs, cbh, vv, temp], min_cov_s=MIN_AVG_S,
-                                                   snr_idx=((0,) if L1_SNR_GATE else ()))
+                                                   snr_idx=snr_idx)
     return grid, rcsh, cbhh, vvh, temph, rng
 
 
@@ -290,17 +335,42 @@ def load_calout_kalman(wmo, ident, method):
 
 
 # --------------------------------------------------------------------------- WV correction
+def cams_periods(t):
+    """Split the profile times t into CAMS periods: (sel, cams_file_or_None, tstart, tend, label).
+    A month with a monthly file (0.4 deg, else 1 deg) is one period averaged over the month; a month
+    without one is split into DAYS served by the daily 0.4 deg files (CAMS_DAILY, the file of the day
+    itself, else of the next day — a daily file holds the night ending on its date). A period with no
+    file at all is returned with cams_file=None so the caller can NaN-mask it."""
+    tt = pd.to_datetime(t)
+    months = pd.PeriodIndex(tt, freq="M")
+    for p in months.unique():
+        selm = np.asarray(months == p)
+        cams = find_cams_month(p.year, p.month)
+        if cams is not None:
+            tstart = np.datetime64(f"{p.year}-{p.month:02d}-01") - np.timedelta64(1, "D")
+            tend = np.datetime64(f"{p.year}-{p.month:02d}-01") + np.timedelta64(40, "D")
+            yield selm, cams, tstart, tend, str(p)
+            continue
+        days = pd.PeriodIndex(tt, freq="D")
+        for d in days[selm].unique():
+            sel = np.asarray(days == d)
+            d64 = np.datetime64(f"{d.year}-{d.month:02d}-{d.day:02d}")
+            f = None
+            for cand in (d64, d64 + np.timedelta64(1, "D")):
+                f = find_cams_file(CAMS_DAILY, str(cand).replace("-", ""))
+                if f is not None:
+                    break
+            yield sel, f, d64, d64 + np.timedelta64(1, "D"), str(d)
+
+
 def apply_wv(beta, l2, lam0, fwhm):
-    """Divide beta by the two-way WV transmission, per month (exact-month CAMS; missing month -> NaN)."""
-    t = l2["time"]
+    """Divide beta by the two-way WV transmission, per CAMS period (monthly file, else daily files;
+    no CAMS -> NaN)."""
     z_asl = l2["alt"]
     z_agl = z_asl - l2["station_alt"]
-    months = pd.PeriodIndex(pd.to_datetime(t), freq="M")
     out = beta.copy()
     info = {"months": [], "months_excluded": [], "median_t2": []}
-    for p in months.unique():
-        sel = np.asarray(months == p)
-        cams = find_cams_month(p.year, p.month)          # 0.4 deg primary, 1 deg fallback
+    for sel, cams, tstart, tend, p in cams_periods(l2["time"]):
         if cams is None:
             out[sel, :] = np.nan
             info["months_excluded"].append(str(p)); continue
@@ -309,9 +379,7 @@ def apply_wv(beta, l2, lam0, fwhm):
         if cams_point_too_far(cams, l2["lat"], l2["lon"]):
             out[sel, :] = np.nan
             info["months_excluded"].append(f"{p} (CAMS too far)"); continue
-        tstart = np.datetime64(f"{p.year}-{p.month:02d}-01") - np.timedelta64(1, "D")
-        tend = (np.datetime64(f"{p.year}-{p.month:02d}-01") + np.timedelta64(40, "D"))
-        prof = cams_water_vapor_profile(cams, l2["lat"], l2["lon"], tstart, tend)
+        prof = _cams_wv_profile_cached(cams, l2["lat"], l2["lon"], tstart, tend)
         if prof is None:
             out[sel, :] = np.nan; info["months_excluded"].append(str(p)); continue
         h_wv, n_wv = prof
@@ -329,16 +397,24 @@ def apply_wv(beta, l2, lam0, fwhm):
 # --------------------------------------------------------------------------- wavelength
 def _molecular_beta(z_agl, station_alt, wavelength_nm):
     """Molecular ATTENUATED backscatter beta_mol*T^2_mol [Mm^-1 sr^-1] on z_agl from the US
-    standard atmosphere. The two-way molecular transmission matters: the measured signal the
+    standard atmosphere, evaluated at the station's ABSOLUTE altitude (z_agl + station_alt),
+    with the two-way molecular transmission integrated from the instrument upward — the same
+    convention as _mol_att_cams. (Fixed 2026-07: the previous version ignored station_alt and
+    interpolated the sea-level profile at z_AGL, overestimating beta_mol by ~exp(alt/8400)
+    (Payerne +6 %) and including the below-station layer in T^2. The error largely cancels in
+    the 910/1064 M-term (<1 % of signal) but not for the 532 nm molaer path.)
+    The two-way molecular transmission matters: the measured signal the
     molaer model subtracts from is attenuated, and at 532 nm T^2_mol is already ~0.85-0.90 by
     2-3 km — subtracting the UNattenuated beta_mol there biases the extracted aerosol low by
     ~beta_mol*(1-T^2), which after the 532->1064 recombination produced a spurious ~-40 % on the
     Mini-MPL (the native 532 nm EARLINET comparison shows the instrument itself is within a few %)."""
-    grid = np.arange(0, 15001, 30.0)
+    grid = np.arange(0.0, 20001.0, 30.0)                       # ASL grid (US-Std file reaches 50 km)
     atm = load_standard_atmosphere(STD_ATM, grid)
-    mol = calculate_molecular_properties(atm.temperature, atm.pressure, grid, wavelength_nm * 1e-9)
-    bmol_att = mol.beta_mol * mol.transmission * 1e6   # (m^-1 sr^-1 -> Mm^-1 sr^-1) x two-way T^2
-    return np.interp(z_agl, grid, bmol_att, left=np.nan, right=np.nan)
+    z_asl = np.asarray(z_agl, "f8") + float(station_alt)
+    T = np.interp(z_asl, grid, atm.temperature, left=np.nan, right=np.nan)
+    P = np.interp(z_asl, grid, atm.pressure, left=np.nan, right=np.nan)
+    mol = calculate_molecular_properties(T, P, np.asarray(z_agl, "f8"), wavelength_nm * 1e-9)
+    return mol.beta_mol * mol.transmission * 1e6               # (m^-1 sr^-1 -> Mm^-1 sr^-1) x T^2
 
 
 def wavelength_correct(beta, l2, lam, target, alpha, model):
@@ -365,6 +441,30 @@ def find_cams_month(year, month):
     return f
 
 
+# The CAMS water-vapour and T/p profiles depend ONLY on (file, lat, lon, month window), never on the
+# instrument signal or the noise-filter mode — but the pipeline extracts them once per channel per
+# WV-on/off twin (and again per noise-filter mode when a runner sweeps modes). Memoise them so a
+# multi-mode / multi-channel sweep pays each monthly extraction once. Safe: the returned arrays are
+# read-only downstream (interpolated, never mutated in place). Single-process (run_site); a ProcessPool
+# worker keeps its own cache.
+_CAMS_WV_CACHE = {}
+_CAMS_TP_CACHE = {}
+
+
+def _cams_wv_profile_cached(cams, lat, lon, tstart, tend):
+    key = (str(cams), float(lat), float(lon), str(tstart), str(tend))
+    if key not in _CAMS_WV_CACHE:
+        _CAMS_WV_CACHE[key] = cams_water_vapor_profile(cams, lat, lon, tstart, tend)
+    return _CAMS_WV_CACHE[key]
+
+
+def _cams_tp_profile_cached(cams_file, lat, lon, tstart, tend):
+    key = (str(cams_file), float(lat), float(lon), str(tstart), str(tend))
+    if key not in _CAMS_TP_CACHE:
+        _CAMS_TP_CACHE[key] = cams_temperature_pressure_profile(cams_file, lat, lon, tstart, tend)
+    return _CAMS_TP_CACHE[key]
+
+
 def _mol_att_cams(cams_file, lat, lon, tstart, tend, alt_asl, station_alt, wavelength_nm):
     """Molecular attenuated backscatter beta_mol*T2_mol [Mm^-1 sr^-1] on the instrument grid from the
     CAMS T/p profile (nearest grid point, night-mean). BELOW the lowest CAMS level (elevated / valley
@@ -372,7 +472,7 @@ def _mol_att_cams(cams_file, lat, lon, tstart, tend, alt_asl, station_alt, wavel
     are extrapolated HYDROSTATICALLY with the standard lapse rate, not held constant: constant-fill
     underestimates the air density (hence beta_mol) by up to ~20 % over Aosta's below-grid gates.
     Returns None if CAMS has no usable profile there."""
-    prof = cams_temperature_pressure_profile(cams_file, lat, lon, tstart, tend)
+    prof = _cams_tp_profile_cached(cams_file, lat, lon, tstart, tend)
     if prof is None:
         return None
     h_cams, t_cams, p_cams = np.asarray(prof[0], "f8"), np.asarray(prof[1], "f8"), np.asarray(prof[2], "f8")
@@ -396,22 +496,17 @@ def wavelength_correct_molecular(beta, l2, lam, target, alpha):
     """Optimal 910->target conversion: WV-corrected beta in, analytic molecular (Rayleigh) from CAMS
     T/p removed, Angstrom (lam/target)^alpha applied to the AEROSOL RESIDUAL only, molecular re-added at
     the target line:  beta_target = beta_mol_att|target + [beta - beta_mol_att|lam] * (lam/target)^alpha.
-    Per month (0.4 deg CAMS, 1 deg fallback); a month with no CAMS falls back to the US-std molecular."""
+    Per CAMS period (monthly 0.4 deg / 1 deg, else daily 0.4 deg); a period with no CAMS falls back to
+    the US-std molecular."""
     if not np.isfinite(lam) or abs(lam - target) < 1.0:
         return beta
-    t = l2["time"]
-    months = pd.PeriodIndex(pd.to_datetime(t), freq="M")
     alt_asl = np.asarray(l2["alt"], "f8")
     z_agl = alt_asl - l2["station_alt"]
     f = (lam / target) ** alpha
     out = beta.copy()
-    for p in months.unique():
-        sel = np.asarray(months == p)
-        cf = find_cams_month(p.year, p.month)
+    for sel, cf, tstart, tend, _p in cams_periods(l2["time"]):
         bml = bmt = None
         if cf is not None:
-            tstart = np.datetime64(f"{p.year}-{p.month:02d}-01") - np.timedelta64(1, "D")
-            tend = np.datetime64(f"{p.year}-{p.month:02d}-01") + np.timedelta64(40, "D")
             bml = _mol_att_cams(cf, l2["lat"], l2["lon"], tstart, tend, alt_asl, l2["station_alt"], lam)
             bmt = _mol_att_cams(cf, l2["lat"], l2["lon"], tstart, tend, alt_asl, l2["station_alt"], target)
         if bml is None or bmt is None:              # no CAMS this month -> US-std molecular
@@ -468,6 +563,56 @@ def snr_mask(X, snr_min=SNR_MIN):
     keep = ~np.isfinite(snr) | (snr >= snr_min)
     keep[~np.isfinite(med)] = True   # NaN gates stay NaN anyway; do not turn them into "removed"
     return keep
+
+
+# --- Cloudnet / ceilopyter per-profile noise filter (the "cloudnet" mode) --------------------------
+CLOUDNET_TOP_FRACTION = 0.10   # fraction of far-range gates used to estimate the per-profile noise
+
+
+def cloudnet_noise_mask(P, snr_limit=None, noise_floor=None):
+    """Boolean is_noise mask (time x range) — the Cloudnet filter of ceilopyter.noise.remove_noise.
+    P is the NON-range-corrected signal rcs_0/r^2. Per profile the noise is the std over the top
+    CLOUDNET_TOP_FRACTION (far-range) gates; a sample is noise where P < snr_limit*max(noise, floor).
+
+    Reimplemented rather than imported to (a) fix ceilopyter's empty top slice when there are no
+    trailing all-zero gates — E-PROFILE rcs_0 has none, so the upstream function would silently no-op
+    — and (b) tolerate NaN (nanstd; NaN samples stay unflagged, i.e. kept as NaN). With the default
+    floor 0 the far-range std alone sets a scale-free per-profile SNR, so the same code serves the
+    three instruments whose rcs_0 magnitudes span ~1e12 (CHM ~9e5, CL31 ~2e2, CL61 ~7e-7)."""
+    snr_limit = (float(os.environ.get("ALC_VAL_CLOUDNET_SNR", "5")) if snr_limit is None
+                 else snr_limit)
+    noise_floor = (float(os.environ.get("ALC_VAL_CLOUDNET_FLOOR", "0")) if noise_floor is None
+                   else noise_floor)
+    P = np.asarray(P, "f8")
+    if P.ndim != 2 or P.shape[1] == 0:
+        return np.zeros(P.shape, bool)
+    # Match ceilopyter: drop trailing all-zero range gates from the noise reference. (Its own slice
+    # beta[:, -n_top-n_zeros:-n_zeros] becomes EMPTY when there are none — the E-PROFILE rcs_0 case —
+    # so it no-ops; here the reference then falls back to the last n_top gates.)
+    zero_ranges = np.all(P == 0, axis=0)
+    n_zeros = int(np.argmax(~zero_ranges[::-1]))
+    n_top = max(1, int(round(P.shape[1] * CLOUDNET_TOP_FRACTION)))
+    end = P.shape[1] - n_zeros
+    with np.errstate(all="ignore"):
+        noise = np.nanstd(P[:, max(0, end - n_top):end], axis=1)   # per-profile far-range noise
+    noise = np.where(np.isfinite(noise), noise, 0.0)
+    noise = np.maximum(noise, noise_floor)
+    with np.errstate(all="ignore"):
+        snr = P / noise[:, None]                              # noise==0 -> +/-inf -> keep(+)/flag(-)
+    return snr < snr_limit                                    # NaN -> False -> kept as NaN (faithful)
+
+
+def apply_cloudnet_filter(rcs, rng):
+    """Return rcs_0 with the Cloudnet-flagged noise samples set to NaN. The filter runs on the
+    non-range-corrected signal rcs_0/r^2 (r in km); gates with r<=0 (the CL61 first gate at 0 m) are
+    excluded from the estimate and never flagged."""
+    r2 = (np.asarray(rng, "f8") * 1e-3) ** 2
+    ok = r2 > 0
+    P = np.full(rcs.shape, np.nan)
+    P[:, ok] = rcs[:, ok] / r2[ok][None, :]
+    out = rcs.copy()
+    out[cloudnet_noise_mask(P)] = np.nan
+    return out
 
 
 def retime_hourly(time, arrays, min_cov_s=None, snr_idx=()):

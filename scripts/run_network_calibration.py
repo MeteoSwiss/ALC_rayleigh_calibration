@@ -81,16 +81,19 @@ from calibration import (  # noqa: E402
 )
 from calibration.config import InstrumentType  # noqa: E402
 from calibration.cloud import CloudCalConfig  # noqa: E402
+import calibration.cloud._filters as CF  # noqa: E402  (active eta-table generation -> cloud version)
 from calibration.cloud.calibration import (  # noqa: E402
     liquid_cloud_calibration_from_data, set_defaults, build_cloud_input_from_day)
 from calibration.io.classification import (  # noqa: E402
     classification_files_for_night, read_classification_curtain)
 from calibration.io.data_loader import build_file_paths  # noqa: E402
 from calibration.io.instrument_day import load_instrument_day  # noqa: E402
+from calibration.io.vaisala_type import file_instrument_type  # noqa: E402
 from calibration.flags import cloud_flag, flag_label, dominant_cloud_reject_flag  # noqa: E402
 from calibration.plotting import plot_cloud_diagnostics_compact  # noqa: E402
 from calibration.io.output import (  # noqa: E402
-    VERSION_CODES, version_code, write_calibration_result, strip_calibration_method)  # noqa: E402
+    VERSION_CODES, version_code, version_code_for, write_calibration_result,
+    strip_calibration_method)  # noqa: E402
 from monitoring.kalman import kalman_best_estimate  # noqa: E402  (self-contained leaf)
 from monitoring import periods as periods_mod  # noqa: E402  (period set: auto years + active/frozen)
 
@@ -108,6 +111,8 @@ try:
 except json.JSONDecodeError:
     MOLECULAR_PARAMS = {}
     print("ALC_MOLECULAR_PARAMS is not valid JSON - ignored", flush=True)
+# Uncertainty-model override ('ensemble' | 'v2.3'), same pattern: empty -> options.json wins.
+UNCERTAINTY_MODEL = os.environ.get("ALC_UNCERTAINTY_MODEL", "").strip()
 
 # --- Paths / configuration --------------------------------------------------
 # Paths are env-overridable (set them in ops/config.sh on the server); the defaults are the local
@@ -115,6 +120,12 @@ except json.JSONDecodeError:
 L1_ROOT = Path(os.environ.get("ALC_L1_ROOT", "D:/E-PROFILE_L1_2026"))
 CENSUS = Path(os.environ.get("ALC_CENSUS", str(REPO / "validation" / "scope_l1_2026_census.json")))
 OUT = Path(os.environ.get("ALC_FULLCAL_DIR", "C:/DATA/Projects/202606_E-PROFILE_calibration/fullcal_l1_2026"))
+# Where the Rayleigh classification screen READS the night's target-classification curtains. Default:
+# OUT, where the daily run writes them. The dashboard's panel builder recomputes nights into a private
+# work dir, so it points this at the OPERATIONAL tree: without it the panel calibrated the night
+# WITHOUT the screen and could contradict the published series (Payerne 2026-09-07: series C_L
+# 1.02e12 with the screen, panel flag -2 without it).
+CLS_ROOT = Path(os.environ.get("ALC_CLASSIFICATION_DIR") or OUT)
 CAMS = Path(os.environ.get("ALC_CAMS_DIR", "D:/CAMS"))
 # OmB CAMS resolution: the primary monthly archive (0.4 deg, ALC_CAMS_DIR) with a per-month fallback
 # to a coarser 1 deg archive (ALC_CAMS_DIR_FALLBACK) for months the 0.4 deg download has not covered.
@@ -133,6 +144,11 @@ ITYPE = {
 }
 RAYLEIGH_TYPES = {"CL61", "CHM15k", "Mini-MPL"}
 CLOUD_TYPES = {"CL31", "CL51", "CL61"}
+# Research override (unset = operational routing above): force a method on extra instrument types,
+# e.g. ALC_RAYLEIGH_TYPES_EXTRA="CL31,CL51" or ALC_CLOUD_TYPES_EXTRA="CHM15k,Mini-MPL", to
+# demonstrate why the operational routing excludes them.
+RAYLEIGH_TYPES |= {t for t in os.environ.get("ALC_RAYLEIGH_TYPES_EXTRA", "").split(",") if t.strip()}
+CLOUD_TYPES |= {t for t in os.environ.get("ALC_CLOUD_TYPES_EXTRA", "").split(",") if t.strip()}
 
 # Operational L2 archive (for the OmB operational-constant overlay) and the
 # authoritative Kalman method per instrument type for the OmB/sensitivity C_L
@@ -151,7 +167,10 @@ SENS_FIELDS = ["period", "date_start", "date_end", "wavelength", "icao_alt_200",
 # what produced it, and the dashboard was left ASSERTING a hard-coded "v2.0" over v2.2 numbers.
 CSV_FIELDS = ["date", "method", "flag", "cal_value", "uncertainty",
               "n_profiles", "bottom_height", "top_height", "version", "message"]
-_SUCCESS = (1, 1.0, 0.5)
+# Operator-maintained instrument events (unit swaps, optical-block replacements). Entries with
+# "kalman_restart": true start a new Kalman segment on that day: a constant belongs to ONE unit.
+EVENTS_FILE = REPO / "monitoring" / "instrument_events.json"
+_SUCCESS = (1, 1.0, 0.5, 0.25)          # 0.25 = polar-summer low-sun night (option polar_night_fallback)
 _HK_NAN = {k: float("nan") for k in ("laser_life_time", "status_detector", "status_laser",
                                      "temperature_optical_module", "window_transmission",
                                      "optical_module_id")}
@@ -288,10 +307,13 @@ def _make_shared_reader(s):
             return cache[ds]
         night = [str(f) for f in build_file_paths(ds, info, o) if f.exists()]
         idd = None
-        if night:
+        # Vaisala: each file's type from its range extent. A night that straddles a CL31 -> CL51 swap
+        # mixes two range grids and two types: no shared read, each pass loads its own day.
+        types = {file_instrument_type(f, s["type"]) for f in night}
+        if night and len(types) == 1:
             try:
                 idd = load_instrument_day(
-                    night, s["type"], CAMS, cams_folder_fallback=fb,
+                    night, types.pop(), CAMS, cams_folder_fallback=fb,
                     read_cams=False, build_working=False)  # Rayleigh uses .native; cloud/OmB/sens/
                     # classify re-coarsen each day via slice_to_date (memoised) -- night grid unused
             except Exception:  # noqa: BLE001 - a bad read falls back to each step's own load
@@ -323,6 +345,18 @@ def _do_rayleigh(s, start, end, shared=None, screen=False):
         o.molecular_method = MOLECULAR_METHOD
     if MOLECULAR_PARAMS:
         o.molecular_params = dict(o.molecular_params or {}, **MOLECULAR_PARAMS)
+    if UNCERTAINTY_MODEL:
+        o.uncertainty_model = UNCERTAINTY_MODEL
+    # Per-station override of the molecular-window parameters (options.json station_molecular_params,
+    # keyed by '<wmo>_<ident>'): Payerne CHM15k A (TUB140016, abnormal receiver) stays on tier 1 only
+    # ({"use_noise": false}; doc/v2.3/vertical_consistency.md section 6).
+    sp = (getattr(o, "station_molecular_params", None) or {}).get(key)
+    if sp:
+        o.molecular_params = dict(o.molecular_params or {}, **sp)
+    # Polar-summer low-sun fallback (doc/v2.3/polar_summer.md): ALC_POLAR_NIGHT_FALLBACK=1/0 overrides
+    # options.json polar_night_fallback for a network run without editing the operational file.
+    if os.environ.get("ALC_POLAR_NIGHT_FALLBACK", "") in ("0", "1"):
+        o.polar_night_fallback = os.environ["ALC_POLAR_NIGHT_FALLBACK"] == "1"
     # Measured dark-baseline profile (rayleigh_availability/dark_profiles.py). Empty = off.
     if os.environ.get("ALC_DARK_PROFILE"):
         o.dark_profile_file = os.environ["ALC_DARK_PROFILE"]
@@ -346,7 +380,7 @@ def _do_rayleigh(s, start, end, shared=None, screen=False):
             cls = None
             if screen:
                 cls = read_classification_curtain(
-                    classification_files_for_night(OUT, key, s["wmo"], ds))
+                    classification_files_for_night(CLS_ROOT, key, s["wmo"], ds))
             r = calibrate_rayleigh(
                 ds, info, o, preloaded_data=(idd.native if idd is not None else None),
                 classification=cls)
@@ -354,7 +388,7 @@ def _do_rayleigh(s, start, end, shared=None, screen=False):
                              uncertainty=r.uncertainty, n_profiles="",
                              bottom_height=r.calibration_bottom_height,
                              top_height=r.calibration_top_height,
-                             version=version_code(getattr(o, "molecular_method", "")),
+                             version=version_code_for(getattr(o, "molecular_method", ""), r.flag),
                              message=r.message))
         except Exception as exc:  # noqa: BLE001 - one bad night must not kill the stream
             rows.append(dict(date=ds, method="rayleigh", flag=-99, cal_value=-1, uncertainty=0,
@@ -376,14 +410,25 @@ def _do_cloud(s, start, end, shared=None):
     except Exception:  # noqa: BLE001 - a cleanup failure must not abort the calibration
         pass
     rows = []
+    warned_type = False
     for d in _days(start, end):
         fp = _l1_file(s["wmo"], s["ident"], d)
         if not fp.exists():
             continue
         ds = d.strftime("%Y%m%d")
+        # Vaisala CL31/CL51: the day's type from the file's range extent, not the census (which follows
+        # the lagging L1 attribute). Every other type: the census type. info follows the day's type.
+        dtype = file_instrument_type(fp, s["type"])
+        info = _info(dict(s, type=dtype))
+        if dtype != s["type"] and not warned_type:
+            warned_type = True
+            known = any(r.date() <= d.date() for r in _kalman_restarts(key))
+            print(f"{key}: {ds} calibrated as {dtype} (range extent), census says {s['type']}"
+                  + ("" if known else "; no kalman_restart event in instrument_events.json, add the swap"),
+                  flush=True)
         try:
             cfg = set_defaults(CloudCalConfig(
-                nc_file=str(fp), instrument=s["type"],
+                nc_file=str(fp), instrument=dtype,
                 # ALC_WV_DISABLE=1 : variante R&D sans correction WV (voir _do_rayleigh)
                 apply_wv_correction=(os.environ.get("ALC_WV_DISABLE") != "1"),
                 apply_transmission_correction=True, aerosol_lidar_ratio=50.0,
@@ -399,7 +444,7 @@ def _do_cloud(s, start, end, shared=None):
             idd = shared(ds) if shared is not None else None
             if idd is None:  # shared read unavailable -> load just this day (still coarse)
                 idd = load_instrument_day(
-                    [str(fp)], s["type"], CAMS,
+                    [str(fp)], dtype, CAMS,
                     cams_folder_fallback=(str(CAMS_FALLBACK) if CAMS_FALLBACK else ""),
                     read_cams=False, build_working=False)  # sliced per day; night grid unused
             if idd is not None:
@@ -444,10 +489,13 @@ def _do_cloud(s, start, end, shared=None):
             ok = _is_success(flag) and math.isfinite(cl) and cl > 0
             cl_unc = (cl * std / coef) if (ok and math.isfinite(coef) and coef != 0) else 0.0
             msg = (f"OK ({n} profiles)" if ok else flag_label(flag))
+            # The CSV row carries the cloud version code like the Rayleigh rows carry theirs (the NetCDF
+            # always did; the CSV column was left empty for cloud rows up to the v2.3 release run).
             rows.append(dict(date=ds, method="cloud", flag=flag,
                              cal_value=(cl if ok else -1),
                              uncertainty=(cl_unc if ok else 0), n_profiles=n,
-                             bottom_height=None, top_height=None, message=msg))
+                             bottom_height=None, top_height=None,
+                             version=VERSION_CODES[CF.cloud_version_name()], message=msg))
             if ok:
                 # Same standard NetCDF as Rayleigh, tagged method=1 (cloud, per-day window).
                 rr = CalibrationResult(lidar_constant=cl, flag=flag, uncertainty=cl_unc,
@@ -459,7 +507,7 @@ def _do_cloud(s, start, end, shared=None):
                     time_end=_epoch_days(d) + 1.0,
                     wavelength_nm=info.instrument_type.wavelength_nm,
                     housekeeping=_HK_NAN, method=1,
-                    version=VERSION_CODES["cloud_oconnor"],
+                    version=VERSION_CODES[CF.cloud_version_name()],
                 )
             # PLOTS-gated diagnostic figure. Unset operationally (PNGs retired for the panel), but
             # the path must remain: the panel's payload capture patches this module-level binding
@@ -493,27 +541,88 @@ def _do_cloud(s, start, end, shared=None):
 
 
 # --- Kalman best estimate (per method) --------------------------------------
-def _kalman_rows(rows):
+def _kalman_weighting():
+    """Weight each night of the Kalman best estimate by its reported relative uncertainty?
+    ALC_KALMAN_UNCERTAINTY_WEIGHTING (1/0) overrides options.json kalman_uncertainty_weighting
+    (default off = the operational, equally weighted filter)."""
+    env = os.environ.get("ALC_KALMAN_UNCERTAINTY_WEIGHTING", "").strip()
+    if env:
+        return env == "1"
+    return bool(CalibrationOptions.from_json(REPO / "options.json").kalman_uncertainty_weighting)
+
+
+def _kalman_restarts(key):
+    """Days on which the stream's Kalman starts afresh (instrument_events.json, kalman_restart)."""
+    if not key:
+        return []
+    try:
+        ev = json.loads(EVENTS_FILE.read_text(encoding="utf-8")).get(key, [])
+    except (OSError, ValueError, AttributeError):
+        return []
+    out = []
+    for e in ev:
+        if isinstance(e, dict) and e.get("kalman_restart"):
+            try:
+                out.append(datetime.strptime(str(e["date"]), "%Y-%m-%d"))
+            except (KeyError, ValueError):
+                continue
+    return sorted(set(out))
+
+
+def _kalman_excluded_flags(key):
+    """Flags kept out of this stream's Kalman (options.json station_kalman_params.exclude_flags)."""
+    if not key:
+        return set()
+    params = CalibrationOptions.from_json(REPO / "options.json").station_kalman_params.get(key, {})
+    try:
+        return {float(f) for f in params.get("exclude_flags", [])}
+    except (TypeError, ValueError):
+        return set()
+
+
+def _kalman_rows(rows, weighted=None, key=None):
+    """Kalman best estimate per method from the calibration rows of ONE stream.
+
+    ``key`` ('<wmo>_<ident>') enables the stream's options: flags excluded from the input
+    (station_kalman_params) and a fresh filter after each unit change (instrument_events.json), so the
+    best estimate never carries one unit's constant across to the next."""
+    if weighted is None:
+        weighted = _kalman_weighting()
+    excluded = _kalman_excluded_flags(key)
+    restarts = _kalman_restarts(key)
     out = []
     for method in ("rayleigh", "cloud"):
         pts = []
         for r in rows:
             if r["method"] != method or not _is_success(r["flag"]):
                 continue
+            if excluded and float(r["flag"]) in excluded:
+                continue
             try:
                 v = float(r["cal_value"])
             except (TypeError, ValueError):
                 continue
             if math.isfinite(v) and v > 0:
-                pts.append((datetime.strptime(r["date"], "%Y%m%d"), v))
-        if len(pts) < 5:
-            continue
+                try:
+                    u = float(r.get("uncertainty", "nan"))
+                except (TypeError, ValueError):
+                    u = float("nan")
+                pts.append((datetime.strptime(r["date"], "%Y%m%d"), v, u))
         pts.sort()
-        grid, state, std = kalman_best_estimate([p[0] for p in pts], [p[1] for p in pts])
-        for g, sv, sd in zip(grid, state, std):
-            out.append(dict(method=method,
-                            date=np.datetime_as_string(g, unit="D").replace("-", ""),
-                            kalman=f"{sv:.6e}", kalman_std=f"{sd:.6e}"))
+        edges = [None] + restarts + [None]
+        for lo, hi in zip(edges[:-1], edges[1:]):
+            seg = [p for p in pts if (lo is None or p[0] >= lo) and (hi is None or p[0] < hi)]
+            if len(seg) < 5:
+                continue
+            # Uncertainty weighting (option): kalman_best_estimate keeps the empirical variance scale
+            # and only takes the night-to-night RATIO of the relative uncertainties (clipped x4 in sigma).
+            uncs = [p[2] for p in seg] if weighted else None
+            grid, state, std = kalman_best_estimate([p[0] for p in seg], [p[1] for p in seg],
+                                                    uncertainties=uncs)
+            for g, sv, sd in zip(grid, state, std):
+                out.append(dict(method=method,
+                                date=np.datetime_as_string(g, unit="D").replace("-", ""),
+                                kalman=f"{sv:.6e}", kalman_std=f"{sd:.6e}"))
     return out
 
 
@@ -542,7 +651,11 @@ def _preserve_existing_rows(csv_path, methods, start, end):
 # Canonical field -> candidate L1 variable names (first present wins); manufacturers differ -- Lufft
 # CHM15k uses status_laser / temperature_optical_module / temperature_detector, Vaisala CL31/51/61
 # use laser_energy / temperature_laser. Temperatures are stored in degC (the L1 files store K).
-HK_FIELDS = ["date", "laser", "window", "temp_optics", "temp_internal", "temp_detector"]
+HK_FIELDS = ["date", "laser", "window", "temp_optics", "temp_internal", "temp_detector",
+             # instrument identity, from the L1 global attributes: the dashboard marks a change of
+             # optical unit (CHM15k optical_module_id TUB..., CL61/Mini-MPL serial) or firmware on
+             # the C_L series (monitoring/unit_changes.py). Vaisala CL31/CL51 report "CL0".
+             "unit_id", "firmware"]
 #: Hourly sidecar (<key>_hk_hourly.csv): same fields keyed by hour. A SEPARATE file on purpose --
 #: the daily _hk.csv merge filters on the "date" string and its readers parse %Y%m%d, so mixing
 #: cadences in one file would corrupt both (the plan's original three reasons).
@@ -663,6 +776,20 @@ def _read_status_values(nc, itype):
     return values, cl61
 
 
+def _unit_identity(nc):
+    """(unit_id, firmware) from the L1 global attributes. CHM15k carries the optical module
+    (`optical_module_id` = TUB...) -- the unit a calibration constant belongs to; other types only an
+    `instrument_serial_number` (CL61 X..., Mini-MPL; Vaisala CL31/CL51 write the placeholder "CL0",
+    which the dashboard ignores). Empty strings when absent."""
+    def attr(name):
+        try:
+            return str(nc.getncattr(name)).strip() if name in nc.ncattrs() else ""
+        except Exception:  # noqa: BLE001
+            return ""
+    unit = attr("optical_module_id") or attr("instrument_serial_number")
+    return unit, attr("instrument_firmware_version")
+
+
 def _do_monitoring(s, start, end):
     """Per-day housekeeping means AND decoded instrument status for one stream, in a single cheap
     pass (opens each L1 file once, reads only 1-D HK/status/time vars — never the rcs matrix).
@@ -681,6 +808,7 @@ def _do_monitoring(s, start, end):
         try:
             nc = netCDF4.Dataset(str(fp))
             try:
+                row["unit_id"], row["firmware"] = _unit_identity(nc)
                 hk_arrays = {}
                 for field, cands in _HK_SOURCES.items():
                     val = float("nan")
@@ -736,7 +864,9 @@ def _do_monitoring(s, start, end):
                 nc.close()
         except Exception:  # noqa: BLE001 - one unreadable file must not kill the stream
             continue
-        if any(row[f] for f in HK_FIELDS if f != "date"):
+        if any(row.get(f) for f in HK_FIELDS if f not in ("date", "unit_id", "firmware")) or row.get("unit_id"):
+            for f in HK_FIELDS:
+                row.setdefault(f, "")
             hk_rows.append(row)
         if srow is not None:
             status_rows.append(srow)
@@ -931,13 +1061,20 @@ def _do_omb(s, start, end, kalman_rows, shared=None):
         c_ours = _const_per_profile(data["time"], kmap, default)
         c_op = _const_per_profile(data["time"], op_map, default)
         rcs = data["rcs"].astype("float64")
-        res = compute_omb(
-            time=data["time"], range_agl=data["range"],
-            beta_sources={"op": rcs / c_op[:, None], "ours": rcs / c_ours[:, None]},
-            station_lat=data["lat"], station_lon=data["lon"], station_alt=data["alt"],
-            wavelength=data["wl"], cams_file=str(cams), instrument=itype,
-            cloud_base_height=data["cbh"], abs_cs_lookup_table=str(WV_LUT),
-        )
+        try:
+            res = compute_omb(
+                time=data["time"], range_agl=data["range"],
+                beta_sources={"op": rcs / c_op[:, None], "ours": rcs / c_ours[:, None]},
+                station_lat=data["lat"], station_lon=data["lon"], station_alt=data["alt"],
+                wavelength=data["wl"], cams_file=str(cams), instrument=itype,
+                cloud_base_height=data["cbh"], abs_cs_lookup_table=str(WV_LUT),
+            )
+        except ValueError as exc:
+            # One bad day (a corrupt range axis, no CAMS overlap) must not cost the stream its whole
+            # OmB pass -- the v2.3 release add-ons lost Lerwick to a single file (2026-04-01).
+            print(f"{key}: omb skipped {ds8}: {type(exc).__name__}: {exc}", flush=True)
+            del data, rcs
+            continue
         del data, rcs
         omb_cache_update(sdir, res)
         any_update = True
@@ -1178,14 +1315,15 @@ def _process_stream(payload):
             rows.sort(key=lambda r: (r["method"], r["date"]))
             _write_csv_atomic(sdir / f"{key}_cal.csv", CSV_FIELDS, rows)
             _write_csv_atomic(sdir / f"{key}_kalman.csv",
-                              ["method", "date", "kalman", "kalman_std"], _kalman_rows(rows))
+                              ["method", "date", "kalman", "kalman_std"], _kalman_rows(rows, key=key))
             _write_monitoring()   # monitoring panel: daily HK means + decoded status/availability
             n_ok = sum(1 for r in rows if _is_success(r["flag"]))
 
     # OmB / sensitivity add-ons consume the Kalman C_L: the fresh one if we just
     # calibrated, else the existing <key>_kalman.csv (the --no-cal reuse path).
     if do_sens or do_omb:
-        kalman_rows = _kalman_rows(rows) if rows else _read_kalman_csv(sdir / f"{key}_kalman.csv")
+        kalman_rows = (_kalman_rows(rows, key=key) if rows
+                       else _read_kalman_csv(sdir / f"{key}_kalman.csv"))
         try:
             if do_omb:
                 try:

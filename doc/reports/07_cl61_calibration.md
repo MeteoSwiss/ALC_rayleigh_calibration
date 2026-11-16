@@ -38,6 +38,23 @@ The calibration-coefficient convention throughout is the **Wiegner lidar constan
 
 ## 1. The two-method disagreement and its resolution
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+The reconciliation numbers of this section (C_L 1.207 vs 1.216, and the "+20…+52 %" CL61-vs-CHM15k offset)
+were all computed with the retired WV model. At the correct line the two methods do not move together:
+- Rayleigh constant: ×0.81–0.83. Measured on the same 7 Payerne nights with today's code, CAMS 0.4°:
+  1.227 → 1.006, ×0.827 (§4.7 update).
+- Cloud constant: ×0.85–0.86 (scene re-expression, `DATA/cbh_native_l55`).
+- Ratio: R = C_ray/C_cloud falls by about 6 %. On `calout_v22_04` re-expressed, the median over 11 dual-method
+  streams goes 1.019 → 0.937, and Payerne 0.862 → 0.805.
+
+**Verdict changed:** the "< 1 % convergence" was obtained with a WV error that affects the two methods
+differently. At the correct line the CL61 Rayleigh constant sits about 6 % below the cloud constant before
+any dark correction, which is the direction of the weak-signal dark offset (§4). The additional cloud CBH
+residual of the retired model (+9 %/km) disappears (phase4 §3 update: +0.79 ± 1.68 %/km).
+
 **The observation.** The paper validation showed good agreement CHM15k ↔ CL61-**cloud** at Payerne
 but not CHM15k ↔ CL61-**Rayleigh**: with the pre-2026-07 processing, the same CL61 read
 `C_L(Rayleigh) = 1.25` vs `C_L(cloud) = 1.43` (ratio 0.88), and the liquid-cloud calibration ran
@@ -123,6 +140,11 @@ Re-running from scratch exposed several real bugs (this *was* the point of the e
 
 ### 2.2 Headline result — cloud was higher than Rayleigh at every CL61
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** The network offsets here (+25.8 %, Payerne +21 %) are retired-model and legacy-η values (historical). At the correct line both constants drop, Rayleigh more than cloud. See the §1 update for the current ratio.
+
 **The liquid-cloud calibration was systematically higher than the molecular calibration at every
 CL61 — 8/8 sites with Mar–May 2026 data** (EDT has no clear Mar–May night). The direction was
 unambiguous and universal.
@@ -143,6 +165,22 @@ nights) and real inter-site differences, not by method irreproducibility.
 > the weak-signal baseline offset (§4).
 
 ### 2.3 Water vapour — strong on both methods; the parfor bug corrected
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+
+| WV-off → WV-on change | 910.74 nm (retired model) | **910.55 nm (correct)** |
+|---|---|---|
+| Rayleigh lidar constant | +20.8 % (network median, range +15…+33 %) | **+3.9 % Payerne (43 nights), +2.8 % Lindenberg (190 nights)** |
+| Cloud C_L (coefficient C = 1/C_L) | coefficient −12.8 % | **C_L +2.8 % Payerne (69 nights), +2.0 % Lindenberg (304 nights)**, i.e. coefficient −2.7 / −2.0 % |
+
+Source: `validation/paper/wv_magnitude_cl61.py` (full reruns `DATA/diag_v22_l55s008` vs `DATA/diag_v22_nowv`,
+v2.2, today's code; log `DATA/wv_magnitude_cl61_l55.log`). The June 2026 network toggle (`run_cl61_variants.py`
++ MATLAB cloud) was not repeated: its L2/MATLAB chain hard-codes 910.74 and is superseded by these runs.
+**Verdict changed:** the WV correction stays mandatory at 910 nm, but for the CL61 it is a 3–4 % term, not a
+13–21 % term. The CL31/CL51 magnitudes are unchanged.
 
 | Quantity | WV-off → WV-on change (network median) |
 |---|---|
@@ -182,6 +220,11 @@ ratio 1.01, CV ≈ 1 %; median over sites 1.008). This confirms the L2 reconstru
 CL61 is not in the network L1 archive and uses its from-raw L2.)
 
 ### 2.5 Kalman smoothing — unstable on short/irregular records
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** The cloud C values here (1.13, 1.09, 1.04, 0.968) are retired-model constants, about 14 % too high (scene re-expression median ×0.863). The Kalman-stability finding is unaffected.
 
 **Kalman is numerically unstable for short/irregular CL61 records** — it diverged on 3 of 9:
 
@@ -226,6 +269,11 @@ differ **only in the calibration constant**.
 
 ### 3.1 Four CL61 calibrations vs CHM15k (Rayleigh)
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** This MATLAB/L2 four-calibration table was computed with 910.74/1.0 in both the calibration and the display-side WV correction. It was not rerun: the MATLAB chain is outside this repository and hard-codes the CL61 spectrum. With the correct line the WV-on/WV-off gap shrinks from ≈ 18 pts to ≈ 3–4 pts (§3.2 update).
+
 | Calibration | corr. factor | rel. bias vs CHM15k | r |
 |---|---|---|---|
 | **cloud + WV** | 0.987 | **+16.0 %** | 0.987 |
@@ -245,6 +293,18 @@ differ **only in the calibration constant**.
 > update; the WV/Ångström/S/molecular-profile sensitivities below are unaffected.
 
 ### 3.2 Water-vapour correction (in the calibration)
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+| method | WV-off → WV-on shift, 910.74 nm (retired model) | **910.55 nm (correct)** |
+|---|---|---|
+| Cloud | −18.6 pts | **≈ −3 pts** (C_L +2.8 % Payerne) |
+| Rayleigh | −17.6 pts | **≈ −4 pts** (C_L +3.9 % Payerne) |
+
+**Verdict changed:** the correction remains mandatory, but it is a 3–4-point term for the CL61, not ≈ 18
+points. The literature ~20 % magnitude applies to the broad CL31/CL51 lines.
 
 | Method | WV-off → WV-on | shift |
 |---|---|---|
@@ -269,6 +329,11 @@ ERA5 path exists (`wv_source = 'era5'` + a prefetched Earth Data Hub cache) but 
 
 ### 3.3 Ångström exponent (wavelength correction 910 → 1064 nm)
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** The Ångström factor uses (910.74/1064)^Å. At 910.55 nm it is (910.55/1064.47)^Å: 0.8554 instead of 0.8556 at Å = 1, a negligible difference (0.02 %). The base biases (+16.0 % / +1.7 %) are retired-model values (MATLAB, not rerun).
+
 The 910 nm β is scaled to 1064 nm by `β /= (λ/λ_target)^(−Å)`, i.e. **× (910.74/1064)^Å = × 0.856^Å**
 — a uniform factor, so the bias scales **exactly**: bias(Å) = (1+bias₁)·0.856^(Å−1) − 1. Effect
 ≈ **−14 % per unit Å**.
@@ -288,6 +353,11 @@ molecular part is handled analytically and Ångström scales only the aerosol re
 as a same-instrument scale factor.
 
 ### 3.4 Lidar ratio
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** The S table is built on the retired-model cloud bias (+16.0 %). The C ∝ 1/S scaling is unchanged; only the base value is affected.
 
 - **Cloud — droplet lidar ratio S** (O'Connor): the constant is `S_apparent / S_theoretical`, so
   **C ∝ 1/S** (exact). bias(S) = (1+bias₁)·18.8/S − 1.
@@ -340,6 +410,11 @@ radiosonde) humidity; running "with a standard atmosphere" for WV is the WV-off 
 
 ### 3.6 Sensitivities ranked by impact
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** Row 'WV correction in calibration ≈ 18 pts' becomes **≈ 3–4 pts** (§3.2 update). Row 'WV laser-wavelength config < 1 %' becomes **12–18 %** for the CL61: retired (910.74/1.0) vs correct (910.55/0.188) changes β by −12…−16 % and the Rayleigh C_L by −18 % (report 03 §3, §4.7 here).
+
 | Factor | Impact on CL61 bias | Note |
 |---|---|---|
 | Calibration **method** (cloud vs Rayleigh) | **≈ 14 pts** *(legacy η; now < 1 % with the CL61 PVC table, §5)* | Rayleigh (CHM-validated) is the anchor |
@@ -361,6 +436,20 @@ were patched in place; both WV-on CL61 calibrations were recomputed with the cor
 ---
 
 ## 4. The CL61 weak-signal baseline offset
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+Two rows of the verdict table change:
+- 'WV correction … T²_wv ≈ 0.78 at the fit windows → raises C_L by ≈ 28 %' becomes: at 910.55/0.188,
+  T²_wv ≈ 0.96–0.97 at 2.5–4.5 km (Payerne, April 2026), so the correction raises C_L by **≈ 4 %**.
+- 'wrong laser wavelength (910.74 vs 910.55) — immaterial, +0.5 %' is **refuted**. The test kept FWHM 1.0 nm.
+  With the correct 0.188 nm width the same 7 nights recalibrate from 1.227 to **1.006 (−17 %)** on CAMS 0.4°
+  (1.268 → 1.006 on the July 1° grid) (§4.7 update).
+
+The baseline-offset conclusions are not affected by the spectrum, but every C_L level and every gap to the
+cloud constant in §4.3–§4.9 is a retired-model value.
 
 *(Source: cl61_rayleigh_investigation.md, 2026-07-02. This is the residual within-CL61 driver of the
 cloud-vs-Rayleigh difference once the η table is corrected: a genuine detector artefact that biases
@@ -430,6 +519,11 @@ under-corrects the (night-time) Rayleigh calibration.*
 
 ### 4.3 Causal test — remove the measured offset and recalibrate
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** C_L levels here (1.047…1.322, cloud 1.425) are retired-model values. At the correct line, Rayleigh constants scale by about ×0.82 and the cloud reference by about ×0.85, so the relative offset-correction shifts (+15…+26 %) stand, but the gaps to the cloud constant must be re-derived. Not rerun.
+
 Removing the offset from the non-range-corrected signal and re-range-correcting is identical to
 subtracting b_dark(z) from β_att. Doing so on the calibration nights (full eprof_v2 recalibration,
 WV on):
@@ -460,6 +554,11 @@ cloud-method (CHM15k-anchored) constant; dotted: the operational Rayleigh Kalman
 every paired night toward the cloud constant and unlocks additional nights.*
 
 ### 4.4 Direct impact estimate on the molecular calibration
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** The ratio b_dark/molecular signal uses C_L·β_mol·T²_mol·T²_wv with the retired T²_wv (≈ 0.78). At the correct line T²_wv ≈ 0.96, the molecular target signal is ≈ 23 % larger, and the dark fractions shrink accordingly (e.g. −13.0 % → ≈ −10.6 % at 5 km). Estimate, not rerun.
 
 Comparing the *uncorrected* dark distributions with the Rayleigh-calibration target signal
 C_L·β_mol·T²_mol·T²_wv, the fractional β bias — which is the C_L bias for a fit window at that altitude:
@@ -544,6 +643,28 @@ temperature, pooled (×1.32) vs the weaker within-session slope (×1.13).*
 
 ### 4.7 Wavelength & spectrum of the fit (excluded as a cause)
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+Rerun of the same 7 common Payerne nights with today's code: `validation/paper/_cl61_wavelength_experiment_l55.py`.
+The 910.55 nm (correct) column is on CAMS 0.4° (log `DATA/cl61_wavelength_l55.log`). The July setup on CAMS 1°
+(`--cams1deg`, `DATA/cl61_wavelength_l55_cams1deg`) reproduces the July values exactly (1.268 / 1.274).
+
+| λ₀ / FWHM [nm] | C_L median, CAMS 1° (July setup) | **C_L median, CAMS 0.4°** | per-night ratio to 910.74/1.0 (0.4°) | T²_wv at 3.5 km (0.4°) |
+|---|---|---|---|---|
+| 910.74 / 1.0 (retired model) | 1.268 | 1.227 | 1.000 | 0.790 |
+| 910.55 / 1.0 (old 'manufacturer' test) | 1.274 | 1.232 | 1.005 | 0.786 |
+| **910.55 / 0.188 (correct)** | 1.006 | **1.006** | **0.827** | **0.965** |
+
+**Verdict changed:** the wavelength is NOT excluded as a cause. The spectral model moves the CL61 Rayleigh
+constant by −17 % (0.4°; −18 % on the July 1° grid). Note on the CAMS grid: at Payerne the 1° grid point is
+≈ 894 m too high and truncates the WV column, but the retired constant is still 3 % higher on 1° than on
+0.4°. The correct constant (narrow line in an absorption valley) is the same on both grids. Against the retired-model cloud constant 1.425 the gap would widen from −11 % to −29 %, but
+that cloud constant is itself too high, by about ×1.17 (scene re-expression). In the full v2.2 reruns at the
+correct line, Payerne CL61 gives Rayleigh 0.849 (43 nights) vs cloud 1.058 (70 nights) over Mar–Aug 2026
+(different window and η table; `DATA/diag_v22_l55s008`).
+
 Recalibrating every successful Payerne night with the manufacturer line vs the Qmini-measured line:
 
 | λ₀ / FWHM [nm] | C_L median | vs C_L(cloud)=1.425 |
@@ -556,6 +677,11 @@ A pure-transmission scan at the window (λ₀ 909.7–911.0, FWHM 0.3–3.4) mov
 Rayleigh constants are low by construction — not comparable.)
 
 ### 4.8 Water-vapour source sensitivity
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** The sonde-vs-CAMS difference (−3.6 % / −1.0 % paired) is proportional to the CL61 absorption, which is 6–7× smaller at 910.55/0.188 (report 03 §3 update). Expected ≈ −0.5 % / −0.15 %. Not rerun.
 
 Per-night T²_wv at the fit window:
 
@@ -581,6 +707,11 @@ the night-time offset exceeding the daytime-measured b_dark by ≈ 40 %; a night
 missing measurement.
 
 ### 4.9 AERONET forward-Klett closure (CL61 direct, CHM15k as method control)
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** The closure used the retired WV model in the forward Klett and retired-model constants (1.251, 1.425). Both move at the correct line (Rayleigh ×0.82, cloud ×0.85; β in-band −12…−16 % from the WV term). The (C_L, b) degeneracy argument stands, but the numbers in the table are retired-model values. Not rerun (the AERONET chain is not wrapped).
 
 Run on 2026 L1.5 AERONET data (Mar-01…Jun-20, 6 897 CL61 / 7 350 CHM15k matched samples; LR from the
 2026 almucantar inversions where valid, else 50 sr; WV per monthly CAMS):
@@ -790,6 +921,20 @@ not of fixing an over-aggressive cloud or vertical-visibility detection.
 
 ## 7. Network coherence and per-unit offset histories
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+The monthly lever 1/T²_wv(3–5 km) here was computed at 910.74/1.0 (T² 0.71–0.85). At 910.55/0.188 the lever is
+T² ≈ 0.96–0.98, so the "Rayleigh constant tracks the seasonal WV lever" reading (Aosta corr +0.93, ≈ ±8 % lever)
+was partly the retired model's own seasonal over-correction. That component is now ≈ 6× smaller.
+Ray/cloud ratios re-expressed from the v2.2 network run (`calout_v22_04`, same stations, 910.74 → 910.55):
+Payerne 0.862 → **0.805**, Lindenberg 1.020 → **0.973**, Aosta 1.173 → **1.059**, Camborne 0.991 → **0.899**,
+Uccle 0.889 → **0.791** (`DATA/cbh_native_l55/rescale_rayleigh.log`). The original 2025–2026 run
+(`old/E_PROFILE_calout_2025_2026`) was not re-expressed.
+**Verdict changed:** the Aosta seasonal cycle should not be attributed to the WV lever; at the correct line the
+WV lever is only a few percent.
+
 *(Source: cl61_rayleigh_investigation.md §5. This closes the network pattern of the historical
 Rayleigh-vs-cloud ratios; note that with the 2026-07 η table the within-CL61 ratios now converge — §5 —
 but the *unit-to-unit offset behaviour* documented here remains the physical explanation for the
@@ -924,6 +1069,25 @@ prescription:
   a correct fix is a **flattening** of the altitude structure.
 
 ### 8.4 Results
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+These biases used the retired spectrum twice: in the CL61 constants (C_L too high) and in the display-side β
+WV division (T² too low). The two errors partly cancel. At 0.5–3 km, for a Rayleigh-calibrated CL61:
+- the constant is ×1/0.82 too high;
+- the β WV division is ×(0.981/0.864) = ×1.135 too strong;
+- net: retired β ≈ 4 % too low.
+
+For a cloud-calibrated CL61 the first-order net is ≈ 2 % too low. **Measured instead (report 05 §2.3 update,
+full rerun at 910.55/0.188, CAMS 0.4°, adopted conversion):** CL61 (cloud) − CHM15k is −2.1 % (Payerne),
+−4.1 % (Lindenberg), +8.2 % (Aosta), −7.2 % (Camborne). With the retired model it was +0.1 / −1.7 / +12.0 /
+−2.9 %. The CL61 (Rayleigh) rows are +5.0 / +2.4 / −3.1 / +1.1 %. The shifts (−2 to −4 points for the cloud
+rows, −4 at Aosta) also include today's recalibration code and CAMS 0.4° (July: mostly 1°); the first-order
+estimate above had the wrong sign for the cloud rows.
+The altitude-tilt conclusion of the conversion method is unaffected. A full rerun of the treatment matrix
+was not done (see the audit).
 
 **CL61 (cloud) − CHM15k median relative bias, 500–3000 m AGL:**
 

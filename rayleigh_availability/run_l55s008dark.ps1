@@ -10,7 +10,7 @@ $env:ALC_WV_SPECTRUM = '{"CL61": [910.55, 0.188]}'
 $env:ALC_DARK_PROFILE = "C:/DATA/Projects/202606_E-PROFILE_calibration/rayleigh_availability/dark_profiles_payerne.npz"
 python scripts/run_streams_parallel.py --streams 0-20000-0-06610_C --start 20250101 --end 20260813 `
     --methods rayleigh --out "C:/DATA/Projects/202606_E-PROFILE_calibration/diag_v22_l55s008dark" `
-    --cams "A:/CAMS_Monthly_04;D:/CAMS_daily" --chunks 6 --workers 12
+    --cams "D:/CAMS_Monthly_04;D:/CAMS_daily" --chunks 6 --workers 12  # was A:/CAMS_Monthly_04 (moved to D:, same files)
 "rc=$LASTEXITCODE"
 Remove-Item Env:ALC_WV_SPECTRUM,Env:ALC_DARK_PROFILE -ErrorAction SilentlyContinue
 "L55S008DARK_DONE"

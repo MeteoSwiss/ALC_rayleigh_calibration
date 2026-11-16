@@ -736,6 +736,17 @@ undamped to 10 km; the CL31 has no coherent ripple.*
 
 ## 3.4 The correction profiles and full-period CL61 recalibration
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+Absolute levels here (C_L 1.231 / 1.297, cloud 1.4252) are retired-model values. At the correct line, Rayleigh
+constants scale by about ×0.82 and the cloud constant by about ×0.85 (report 07 §4.7 update; scene
+re-expression). The molecular target signal at the window is about 23 % larger (T²_wv 0.96 instead of 0.78),
+so the relative weight of the dark offset — and the paired +15 % shift — is somewhat smaller. The offset
+diagnosis and night-unlocking result stand; the gaps (−13.7 % / −9.0 %) must be re-derived. The "monthly-CAMS
+WV over-correction" invoked for the residual is ≈ 6× smaller at the correct line. Not rerun.
+
 The correction subtracts the modeled b(z) = P_model(z)·z² from L1 `rcs_0`, gate by gate, **before** the
 water-vapour division (the offset is an additive term in the raw signal).
 
@@ -780,6 +791,16 @@ the offset, largest toward the surface; for the CL61 it deepens at the cold (nig
   fixed.
 
 ## 3.6 Multi-instrument intercomparison — does correcting the offset improve agreement?
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+The CL61 rows combine a retired-model constant (too high by ×1/0.82 for Rayleigh) with a retired-model β WV
+division (too strong by ≈ ×1.13 at 0.5–3 km). They largely cancel: measured over
+Mar–Jun 2026 at Payerne (report 05 §2.3 update), CL61 (cloud) −2.1 % and CL61 (Rayleigh, no offset correction)
++5.0 % vs the CHM15k at the correct line (CAMS 0.4°). The conclusion — correcting the CL61
+offset helps, correcting the CHM15k degrades — is not affected. Not rerun.
 
 Regenerating the Payerne intercomparison (Mar–May 2026, β_att vs the CHM15k Rayleigh reference over 500–3000 m,
 **L1 only** with the operational calout Kalman constants; offset models subtracted from L1 rcs_0):

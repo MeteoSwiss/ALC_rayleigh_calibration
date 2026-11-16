@@ -15,6 +15,19 @@ antérieures et n'ont pas été recalculés ici.
 
 ## 1. Le verdict réseau en cinq lignes
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+Points 1 and 2 change:
+- Point 1: the Rayleigh/cloud ratio over the 11 dual-method CL61 streams moves from a median of **1.019 →
+  0.937** (IQR 0.882–1.019). Both constants were re-expressed (`rescale_cl61_rayleigh_l55.py`: Rayleigh
+  ×0.811, cloud ×0.863).
+- Point 2: the CL61 CBH residual **disappears**: +9.05 → **+0.79 ± 1.68 %/km** (see §3).
+
+**Verdict changed:** the CL61 cloud anchor does not carry a CBH-dependent bias; it was created by the
+retired WV model.
+
 1. **Accord nuage/Rayleigh CL61** : ratio Rayleigh/cloud médian 0,986, IQR 0,935–1,062 sur les
    10 flux double-méthode (contexte) — l'accord de niveau est bon *en médiane*, mais il cache un
    biais dépendant de la CBH (point 2) et le dark électronique CL61 (Payerne 0,876 → 0,98 après
@@ -147,6 +160,38 @@ concerne la majorité du réseau, avec un signe dominant **opposé** à Payerne.
 ---
 
 ## 3. Le résidu CBH natif (PVC + 0,4°) vs legacy
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+The CL61 cloud constants of `calout_v22_04` were computed with the retired 910.74/1.0 model. They were
+re-expressed at 910.55/0.188 scene by scene (`rayleigh_availability/cbh_native/rescale_cl61_l55.py`):
+ln C_L(correct) = ln C_L(retired) − [ln T²_l55(CBH) − ln T²_l74(CBH)], using the pipeline's own transmission
+function, LUT and CAMS 0.4°. This was checked against the full 910.55 reruns (`diag_v22_l55s008`): the
+re-expressed constants match within a median of 1.1 % (Payerne C, 70 days) and 1.3 % (Lindenberg C, 289
+days). The retired constants are 18 % and 14 % too high there. The regression was then rerun with
+`analyze_cbh_l55.py`; outputs are in `DATA/cbh_native_l55/`.
+
+| CL61 estimator | 910.74 nm (retired model) | **910.55 nm (correct)** |
+|---|---|---|
+| fixed effects per stream (781 days, 12 streams) | +9.05 ± 1.46 %/km | **+0.79 ± 1.68 %/km** |
+| fixed effects stream × month | +7.21 ± 1.76 | **+0.74 ± 2.20** |
+| first differences (pairs ≤ 3 d) | +6.93 ± 2.78 | **+0.52 ± 3.09** |
+| CBH ≥ 0.8 km | +8.96 ± 2.34 | **+1.22 ± 2.63** |
+| streams > +2σ (of 9 with n ≥ 30) | 9/9 positive | **5/9 positive, 0 > +2σ** |
+| WV-term contribution to d ln C_L/dCBH | +10.3 %/km | **+1.8 %/km** |
+| CL61 cloud level C_L(correct)/C_L(retired) | 1 | **0.863** (P05–P95 0.786–0.957) |
+
+Per stream (910.74 → 910.55, %/km): Camborne +9.4 → +3.0, Zeebrugge +10.4 → +2.1, Uccle +4.2 → −3.9,
+Payerne (pre-break) +7.4 → −1.5, Lindenberg +12.0 → +4.0, Temelin +13.8 → +7.1, Birkenes +10.0 → +0.9,
+Lanzhot +4.7 → −1.9, Aosta +3.3 → −9.9. These scatter around zero like the CL31 units.
+
+**Verdict changed: the CL61 CBH residual does NOT persist.** The +9 %/km "type effect" was the CBH
+dependence that the over-strong retired WV model injected, which matches the 8 % the raw signal really
+carries (cbh_slope_heterogeneity §2.3ter). It is neither instrumental, nor an additive baseline, nor
+residual aerosol. CL61 is now flat like the CL31 (+0.84 %/km); the CL51 stays positive (+5.0 %/km,
+unchanged).
 
 Question de phase : les résidus dC/dCBH mesurés sur l'archive legacy (η Hopkin + WV 1° par
 endroits) survivent-ils au run natif ? Régression ln(cal_value) sur la CBH médiane des scènes
@@ -339,6 +384,13 @@ transparence/aérosol saisonniers et dérives instrumentales dominent.
    fenêtre) tant que le §4.4-1 n'est pas appliqué.
 
 ### 5.2 Actions ouvertes (file:line)
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+Action 3 (CL61 CBH residual: restrict the CBH gate, revise η, or correct the slope) is **closed**. The
+residual vanishes at the correct WV line (+0.79 ± 1.68 %/km). Do not change the CBH gate or η for the CL61.
 
 | # | Action | Ancrage code |
 |---|---|---|

@@ -74,7 +74,8 @@ def kalman_best_estimate(times, values, *, uncertainties=None, outlier_mode="rol
     tolerable as soon as availability is raised, because the added nights are systematically the
     less certain ones. The empirical scale (day-to-day scatter) is kept -- it captures error the
     formal uncertainty does not -- and only the RATIO between nights is taken from the reported
-    values, clipped to a factor 4 either way so one absurd uncertainty cannot dominate. The ratio
+    values, clipped to [0.5, 4] in sigma ([0.25, 16] in variance) so one absurd uncertainty cannot
+    dominate. The ratio
     is formed from RELATIVE uncertainties (u divided by that night's own C_L): reported
     uncertainties are absolute, so across a level step (an optical-module swap) the high side's u
     scales with the level itself, and an absolute-u ratio would down-weight a whole era for its

@@ -29,7 +29,7 @@ from calibration.water_vapor_correction.water_vapor import (                    
     cams_water_vapor_profile, two_way_wv_transmission)
 
 FIG = REPO / "doc" / "reports" / "figs_cbh_heterogeneity"
-CAMS = "A:/CAMS_Monthly_04;D:/CAMS_daily"
+CAMS = "D:/CAMS_Monthly_04;D:/CAMS_daily"  # was A:/CAMS_Monthly_04 (moved to D:, same files)
 LUT = REPO / "calibration" / "data" / "abs_cross_wv_910nm.nc"
 LAM0 = 910.74                                   # nm, MESURE (appendice A1, +-0.10)
 FWHMS = (0.05, 0.1, 0.2, 0.3, 0.5, 1.0, 1.5)

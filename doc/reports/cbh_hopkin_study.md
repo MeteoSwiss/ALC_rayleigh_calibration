@@ -37,6 +37,16 @@ Le rapport n'embarque que la synthèse par type et les cas extrêmes.
 
 ### 1.2 Vue par type : le CL31 passe le test de platitude de Hopkin, CL51 et CL61 penchent
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 910.55 nm / FWHM 0.188 nm is the correct CL61 line (Vaisala datasheet B211780EN, DA10 guide M212895EN-E).
+The CL61 row (+7.8 ± 2.2 %/km, bands 93 → 106–114 %) uses the retired-model constants of `calout_v22_04`.
+At 910.55/0.188 the CL61 pooled slope is **+0.79 ± 1.68 %/km** (stream fixed effects, 781 scenes), and the
+binned profile stays within −1.5 % … +3.2 % of the unit medians over 0.5–2.4 km (`DATA/cbh_native_l55`).
+**Verdict changed:** the CL61 passes the flatness test of §1.2 like the CL31. The heatmap figure was not
+regenerated.
+
 ![Heatmaps Hopkin agrégées par type (chaque unité normalisée par sa propre médiane) : CL31 plat, CL51 et CL61 inclinés positivement](figs_cbh_heterogeneity/pooled_hopkin_by_type.png)
 
 | type | unités | scènes | pente agrégée | moyennes de bande (0,5–2,25 km) |
@@ -61,6 +71,15 @@ gamme de CBH réellement vue reste bornée.
 
 ### 1.4 Tous les CL61 : l'effet de type, unité par unité
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 
+Per unit (910.74 → 910.55, %/km): Camborne +9.4 → +3.0, Zeebrugge +10.4 → +2.1, Uccle +4.2 → −3.9,
+Payerne +7.4 → −1.5, Lindenberg +12.0 → +4.0, Temelin +13.8 → +7.1, Birkenes +10.0 → +0.9,
+Lanzhot +4.7 → −1.9, Aosta +3.3 → −9.9. **Verdict changed:** instead of "9/9 positive" there are 5/9
+positive and none significant at 2σ. No type effect.
+
 ![Les 9 unités CL61 (les mieux échantillonnées d'abord) : 9/9 pentes positives](figs_cbh_heterogeneity/cl61_all_units.png)
 
 9/9 pentes positives, de +3,3 à +13,8 %/km (la mieux échantillonnée, 10393_C Lindenberg, n = 293 :
@@ -69,6 +88,11 @@ gamme de CBH réellement vue reste bornée.
 par unité.
 
 ### 1.5 La métrique de confiance : impact = |pente| × IQR(CBH de l'unité)
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** The CL61 impact metric (|slope| × IQR(CBH)) shrinks by the same factor: with the corrected slopes (≈ 1 %/km median) the CL61 impact is ≈ 1 % instead of ≈ 8 %.
 
 La pente seule ne répond pas à la question de l'opérateur : ce qui compte est le déplacement de C_L
 **sur la gamme de CBH que l'unité voit réellement**. Métrique : impact (%) = \|pente\| ×
@@ -87,6 +111,11 @@ plus forte pente de type, reste **partout sous 10 %** parce que ses IQR de CBH n
 ~0,6–0,9 km.
 
 ### 1.6 Verdict de confiance (par type, avec la doctrine)
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** **Verdict changed for the CL61:** confidence is the same as for the CL31 (flat). The 'type effect, ±5 % scene bias' doctrine for the CL61 is withdrawn.
 
 **Doctrine.** La moyenne long-terme (le C_L du Kalman) intègre la pente sur la **climatologie de
 CBH de l'unité** : tant que cette climatologie est stationnaire, la pente gonfle le scatter
@@ -108,6 +137,15 @@ scène à CBH atypique sur les unités extrêmes.
 ---
 
 ## 1bis. Heatmaps par profil (10 unités)
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** 
+The per-profile dumps used here (`DATA/cloud_profile_dump`, 2026-08-16 11:09) were computed with 910.74/1.0.
+Full 910.55 dumps exist for Payerne B/C and Lindenberg C (`DATA/cloud_profile_dump_l55s008`, made for the
+dashboard v3 ladder). The per-profile heatmaps were not regenerated in this audit. The stream-level slopes
+above replace the CL61 numbers.
 
 *Les heatmaps du §1 réduisent chaque jour à sa médiane (une scène = un jour). Hopkin et al. 2019
 (fig. 6) tracent au contraire **chaque profil calibré individuellement**. Vérification ici sur 10
@@ -182,6 +220,11 @@ de plus que cette unité a un problème d'état, pas une simple sensibilité à 
 
 ## 2. Stabilité temporelle des pentes
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** The CL61 change-points and seasonal cycle in this section are on retired-model constants. The WV term at 910.74 carried a seasonal (humidity-driven) component that is about 6× smaller at 910.55, so the CL61 part of the seasonal cycle is expected to shrink. Not recomputed per unit.
+
 **Méthode.** OLS glissant de ln C contre CBH par unité : fenêtre 180 j, pas 30 j, ≥ 30 scènes et
 p90−p10(CBH) ≥ 400 m par fenêtre. 227 unités à ≥ 150 scènes → 3 111 fenêtres (13–15 par unité).
 Ratio de stabilité = SD(pentes glissantes) / moyenne(SE des fenêtres) : ≈ 1 si la pente est une
@@ -237,6 +280,11 @@ cycle.
 
 ## 3. Le test de correction hors-échantillon
 
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** The CL61 out-of-sample correction test corrected a slope that no longer exists at 910.55/0.188. Its CL61 conclusion is void; the CL31/CL51 conclusions are unchanged.
+
 **Protocole** (`correction_test.py`). Par unité : scènes partagées en deux moitiés par **dates
 alternées** (préserve la structure temporelle), pente estimée sur la moitié train, correction
 appliquée sur la moitié test : C_corr = C · exp(−pente · (CBH − 1 250 m)). Métrique = variation
@@ -283,6 +331,11 @@ re-poser après la campagne dark CL61.
 ---
 
 ## 4. Recommandation opérationnelle
+
+⚠ CL61 numbers computed with the retired WV model 910.74 nm / 1.0 nm. The correct CL61 line is 910.55 nm / 0.188 nm (Vaisala datasheet B211780EN, DA10 guide M212895EN-E); see wv_cl61_91074_audit.md
+
+<!-- l55-update -->
+**Update 2026-11-02: 910.55 nm (correct) vs 910.74 nm (retired model).** **Verdict changed for the CL61:** no CBH correction or CL61-specific doctrine is needed once the correct WV line (910.55/0.188, operational since 2026-08-18) is used.
 
 1. **Ne rien corriger en aval** (§3) ; maintenir la priorité au traitement CL61 **à la source**
    (caractérisation/soustraction de la baseline additive dépendant de la portée avant l'intégrale

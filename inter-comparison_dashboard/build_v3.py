@@ -62,11 +62,13 @@ os.environ.setdefault("ALC_VAL_CAMS_04", "A:/CAMS_Monthly_04")
 import numpy as np
 
 from validation.paper import intercompare as IC
+from validation.paper import overlap as OV
 from validation.paper import run_paper_validation as RP
 from monitoring.kalman import kalman_best_estimate
 import build_l1_l2_dashboard as BD          # cache reader, dark_for, pwv, l2_applied
 import l1_l2_calib as CAL
 import l1_l2_io as IO
+import nf_v3 as NF
 import sites
 import variants_v3 as V3
 
@@ -141,18 +143,25 @@ def f32block(A):
 
 # ---------------------------------------------------------------------------- panels
 def stream_block(d, ch_alt_grid):
-    """One cached stream -> (hours, screened block, qf-only block) on the display grid.
+    """One cached stream -> (hours, screened block, qf-only block, internal temperature).
 
     Mirrors build_l1_l2_dashboard.build_panel with the calibration and the corrections REMOVED --
-    what is left is exactly the raw signal the browser will transform.
+    what is left is exactly the raw signal the browser will transform.  The internal temperature
+    rides along through the SAME retiming so the overlap T-model (Hervo 2016) can be evaluated
+    per hour on the same axis as the signal blocks.
     """
     beta = np.asarray(d["beta"], "f8")
     scr = IC.screen(beta, d)
     disp = beta.copy()
     disp[d["qf"] > 0] = np.nan
-    g, (S, Dq) = IC.retime_hourly(d["time"], [scr, disp], min_cov_s=IC.MIN_AVG_S, snr_idx=())
+    tmp = d.get("temp_int")
+    arrs = [scr, disp]
+    if tmp is not None and np.ndim(tmp) == 1 and len(tmp) == len(d["time"]):
+        arrs.append(np.asarray(tmp, "f8"))
+    g, out = IC.retime_hourly(d["time"], arrs, min_cov_s=IC.MIN_AVG_S, snr_idx=())
     alt = np.asarray(d["alt"], "f8")
-    return g, IC.regrid(S, alt, ch_alt_grid), IC.regrid(Dq, alt, ch_alt_grid)
+    T = out[2] if len(out) > 2 else None
+    return g, IC.regrid(out[0], alt, ch_alt_grid), IC.regrid(out[1], alt, ch_alt_grid), T
 
 
 def corr_arrays(d, station_alt, alt_asl, days):
@@ -180,7 +189,8 @@ def corr_arrays(d, station_alt, alt_asl, days):
         # CL61 only -- the manufacturer's measured line (910.55 nm, sigma 0.08 -> FWHM 0.188),
         # which is ~9x less absorbed.  Instruments the finding does not concern keep one array and
         # the page's "constructeur" option falls back to it.
-        specs = {"nom": IC.WV_PARAMS.get(d["itype"], (910.0, 3.4))}
+        specs = {"nom": V3.NOMINAL_WV_SPECTRUM.get(d["itype"],
+                                                   IC.WV_PARAMS.get(d["itype"], (910.0, 3.4)))}
         if d["itype"] in V3.LAM_TYPES:
             specs["ctor"] = (910.55, 0.188)
         W = {k: np.full((len(days), nz), np.nan) for k in specs}
@@ -221,6 +231,62 @@ def corr_arrays(d, station_alt, alt_asl, days):
     return out
 
 
+def overlap_payload(v3, wmo, z_agl, temp_u, have):
+    """Per-CHM15k ingredients for the temperature-dependent overlap correction (Hervo et al. 2016).
+
+    The E-PROFILE L1 rcs_0 already carries the instrument's STATIC reference overlap; what is left
+    is a residual that depends on the internal temperature.  validation/paper/overlap.py (verified
+    against the MATLAB/overlap_probe_eprofile chain) models it per instrument as
+
+        Dif(z) = a(z) * T_int + b(z)   [%]   ->   rcs_corrected = rcs_0 * (1 + Dif/100)
+
+    so the browser only needs a(z), b(z) on the display grid and the per-hour internal temperature
+    -- the reference overlap cancels.  a and b are interpolated exactly the way correct_rcs() does
+    (held at the first gate below the model, ZERO above its top gate, i.e. a true no-op there).
+
+    A CHM15k with no model file, or with no usable internal temperature, is reported with the
+    reason so the page can grey the box out instead of silently doing nothing.
+    """
+    out = {}
+    for inst in v3["instruments"]:
+        ident = inst["ident"]
+        if inst["itype"] != "CHM15k":
+            continue                                    # model (and the physics) are CHM15k-only
+        model = OV.load_overlap_model(wmo, ident)
+        if model is None:
+            out[ident] = dict(ok=False, why=(f"aucun modèle de recouvrement pour ce flux dans "
+                                             f"{OV.MODEL_DIR.name} (fichier "
+                                             f"Overlap_correction_model_*_{ident}.nc absent)"))
+            continue
+        T = temp_u.get(ident)
+        T = None if T is None else np.asarray(T, "f8")[have]
+        if T is None or not np.any(np.isfinite(T)):
+            out[ident] = dict(ok=False, why="température interne (temp_int) absente du L1 de ce "
+                                            "flux — le modèle en dépend")
+            continue
+        a = np.interp(z_agl, model["range"], model["a"], left=model["a"][0], right=0.0)
+        b = np.interp(z_agl, model["range"], model["b"], left=model["b"][0], right=0.0)
+        # what the operator sees quoted on the page: the correction at the band floor and the
+        # height above which it is exactly 1 (a and b both vanish)
+        nz_last = np.where((np.abs(a) > 1e-12) | (np.abs(b) > 1e-12))[0]
+        ztop = float(z_agl[nz_last[-1]]) if nz_last.size else 0.0
+        tmed = float(np.nanmedian(T))
+        fband = float(np.clip(1.0 + (a[np.argmax(z_agl >= ZMIN)] * tmed +
+                                     b[np.argmax(z_agl >= ZMIN)]) / 100.0,
+                              OV._FACTOR_MIN, OV._FACTOR_MAX))
+        out[ident] = dict(
+            ok=True, file=model["file"],
+            a=[float(f"{x:.6g}") for x in a], b=[float(f"{x:.6g}") for x in b],
+            t=[None if not np.isfinite(x) else float(f"{x:.4g}") for x in T],
+            fmin=float(OV._FACTOR_MIN), fmax=float(OV._FACTOR_MAX),
+            ztop=round(ztop, 1), tmed=round(tmed, 1), fband=round(fband, 5),
+            nt=int(np.isfinite(T).sum()), nh=int(T.size))
+        print(f"   overlap {ident}: {model['file']}  actif < {ztop:.0f} m, "
+              f"T med {tmed:.1f} degC, facteur a {ZMIN:.0f} m = {fband:.4f}, "
+              f"{int(np.isfinite(T).sum())}/{T.size} h avec T", flush=True)
+    return out
+
+
 # ---------------------------------------------------------------------------- calibration series
 def _kalman_record(dates, C, U, label_method):
     kt, ks, kstd = kalman_best_estimate(dates, C, uncertainties=U)
@@ -237,38 +303,60 @@ def _kalman_record(dates, C, U, label_method):
         _kt=kt, _ks=ks)
 
 
+def _spec_nights(spec, ident, method, wmo, min_nights):
+    """(dates, C, U) of ONE source spec, or the reason string when it has none."""
+    kind, arg = spec
+    if kind == "nc":                                  # v2.0 published NetCDFs (Payerne only)
+        try:
+            dates, C, U, M, created, src = CAL.all_nights(ident)
+        except FileNotFoundError:
+            return f"aucun NetCDF ALC_calibration_{wmo}_{ident}<année>.nc sur ce poste"
+        keep = np.isin(M, np.asarray([0 if method == "rayleigh" else 1]))
+        if keep.sum() < min_nights:
+            return f"seulement {int(keep.sum())} nuit(s) « {method} » dans les NetCDF v2.0"
+        return [d for d, k in zip(dates, keep) if k], C[keep], U[keep]
+    if kind == "json":                                # per-night json from the availability corpus
+        nights = CAL.v22_nights(arg)
+        if nights is None:
+            return f"pas de sortie eprof_v2.2 par nuit ({arg}) pour ce canal"
+        return nights
+    nights = CAL.run_csv_nights(arg, method, min_nights=min_nights)   # a network-runner tree
+    if nights is None:
+        return (f"aucune nuit « {method} » exploitable dans "
+                f"{Path(arg).parent.parent.name}/{Path(arg).parent.name}")
+    return nights
+
+
 def calib_for(site_key, ident, itype, method, variant, wmo):
     """(record | None, reason) for one (instrument, method, variant) triple.
 
     Never carries a series over from another variant: a channel a run does not cover is reported as
     UNAVAILABLE with the reason, so the page can grey it out instead of showing someone else's
     numbers under this variant's name.
+
+    A LIST of specs is one variant read from several runs of the same settings, in order: the
+    original series, then its extension rerun(s) (variants_v3.EXT_TAG).  A later spec only APPENDS
+    the nights dated after the last night already held, so the original series is never altered
+    (and check_v3 can rebuild the snapshot-era constants exactly).  Only the first spec must hold
+    enough nights on its own; an extension contributes whatever successful nights it has.
     """
     spec = V3.source_for(site_key, ident, itype, method, variant, wmo)
     if isinstance(spec, str):
         return None, spec
-    kind, arg = spec
-    if kind == "nc":                                  # v2.0 published NetCDFs (Payerne only)
-        try:
-            dates, C, U, M, created, src = CAL.all_nights(ident)
-        except FileNotFoundError:
-            return None, f"aucun NetCDF ALC_calibration_{wmo}_{ident}<année>.nc sur ce poste"
-        keep = np.isin(M, np.asarray([0 if method == "rayleigh" else 1]))
-        if keep.sum() < 5:
-            return None, (f"seulement {int(keep.sum())} nuit(s) « {method} » dans les NetCDF v2.0")
-        dates = [d for d, k in zip(dates, keep) if k]
-        C, U = C[keep], U[keep]
-    elif kind == "json":                              # per-night json from the availability corpus
-        nights = CAL.v22_nights(arg)
-        if nights is None:
-            return None, f"pas de sortie eprof_v2.2 par nuit ({arg}) pour ce canal"
-        dates, C, U = nights
-    else:                                             # kind == "csv": a network-runner tree
-        nights = CAL.run_csv_nights(arg, method)
-        if nights is None:
-            return None, (f"aucune nuit « {method} » exploitable dans "
-                          f"{Path(arg).parent.parent.name}/{Path(arg).parent.name}")
-        dates, C, U = nights
+    specs = spec if isinstance(spec, list) else [spec]
+    nights = []                                       # (datetime, C, U)
+    for i, sp in enumerate(specs):
+        got = _spec_nights(sp, ident, method, wmo, min_nights=5 if i == 0 else 1)
+        if isinstance(got, str):
+            if i == 0:
+                return None, got
+            continue                                  # an extension with no night adds nothing
+        last = max(n[0].date() for n in nights) if nights else None
+        nights += [n for n in zip(*got) if last is None or n[0].date() > last]
+    nights.sort(key=lambda n: n[0])
+    dates = [n[0] for n in nights]
+    C = np.array([n[1] for n in nights], "f8")
+    U = np.array([n[2] for n in nights], "f8")
     rec = _kalman_record(dates, C, U, "Rayleigh" if method == "rayleigh" else "Nuages liquides")
     if rec is None:
         return None, f"trop peu de nuits ({len(C)}) pour le filtre de Kalman"
@@ -293,13 +381,21 @@ def build_site(site_key):
           f"streams {len(sources)}x{len(idents)}", flush=True)
 
     # --- raw panels ---------------------------------------------------------------------------
-    raw, hours_of = {}, {}
+    raw, hours_of, temp_of = {}, {}, {}
     for src in sources:
         for ident in idents:
-            g, S, Dq = stream_block(cache[(src, ident)], alt_asl)
+            g, S, Dq, T = stream_block(cache[(src, ident)], alt_asl)
             raw[(src, ident)] = (S, Dq)
             hours_of[(src, ident)] = g
+            if src == "L1" and T is not None:
+                temp_of[ident] = T
     union = np.unique(np.concatenate(list(hours_of.values())))
+    temp_u = {}
+    for ident, T in temp_of.items():
+        pos = np.searchsorted(union, hours_of[("L1", ident)])
+        U = np.full(union.size, np.nan)
+        U[pos] = T
+        temp_u[ident] = U
     aligned, aligned_disp = {}, {}
     for k, (S, Dq) in raw.items():
         pos = np.searchsorted(union, hours_of[k])
@@ -400,8 +496,17 @@ def build_site(site_key):
         title=v3["title"], subtitle=v3["subtitle"], warnings=warns,
         streams=streams, corr=corr_out, corr_of={f"{a}|{b}": v for (a, b), v in corr_of.items()},
         dark=dark, dark_kind=V3.dark_kind(site_key), calib=calib,
+        dark_nwin=(dark_sessions() if s.get("dark_npz") else {}),
         l2_applied=BD.l2_applied_constants(npz, t0, t1),
     )
+    # Noise-filter ingredients: per-hour admission bits for the four evaluation windows and the
+    # four inclusion rules, plus the monthly noise sums of the "average first" mode -- computed
+    # from the NATIVE L1 daily files (the _streams_* cache is hourly by design; an hourly stream
+    # has one sample per window and carries no noise statistics).  See nf_v3.py.
+    payload["nf"] = NF.compute_nf(v3, site_key, s["wmo"], t0, t1, union, have,
+                                  calib, dark, Z_AGL, station_alt, hour_month,
+                                  months, bool(s.get("dark_npz")))
+    payload["overlap"] = overlap_payload(v3, s["wmo"], Z_AGL, temp_u, have)
     payload["hopkin"] = hopkin_payload(v3, s["wmo"], calib)
     payload["pcolor"] = pcolor_payload(v3, aligned, aligned_disp, union, union_day, corr, corr_of,
                                        calib, dark)
@@ -559,6 +664,19 @@ def _fmt_c(v):
     return f"{v / 10**e:.1f}e{e}"
 
 
+def dark_sessions():
+    """{ident: number of hood sessions pooled into its measured b(z)} from the current site's
+    dark npz (`<ident>_nwin`), or {} where there is no measured dark."""
+    out = {}
+    if BD.DARK_NPZ is None or not BD.DARK_NPZ.exists():
+        return out
+    with np.load(BD.DARK_NPZ) as z:
+        for k in z.files:
+            if k.endswith("_nwin"):
+                out[k[:-len("_nwin")]] = int(z[k])
+    return out
+
+
 def prose_tokens(site_key, calib, t0, t1):
     """Numbers the warning prose interpolates, computed from the SAME series the page uses.
 
@@ -579,6 +697,20 @@ def prose_tokens(site_key, calib, t0, t1):
 
     w0, w1 = str(np.datetime64(t0, "D")), str(np.datetime64(t1, "D"))
     if site_key == "payerne":
+        # hood-dark provenance: the version is pinned in variants_v3, the session counts are read
+        # from the profile file the page actually subtracts
+        nw = dark_sessions()
+        for ident in ("A", "B", "C"):
+            tok[f"DARK_NWIN_{ident}"] = nw.get(ident, "—")
+        tok["DARK_VER"] = V3.DARK_MEAS_VERSION
+        tok["DARK_PERIOD"] = V3.DARK_MEAS_PERIOD
+        tok["DARK_RUN"] = V3.DARK_MEAS.name
+        # window extension: t1 is the EXCLUSIVE end (midnight after the last day)
+        tok["WIN_END"] = str((np.datetime64(t1) - np.timedelta64(1, "s")).astype("datetime64[D]"))
+        tok["EXT_DIR"] = V3.EXT_ROOT.name
+        for ident, name in (("A", "A_V20_LAST"), ("C", "C_V20_LAST")):
+            rec = calib.get(f"{ident}|rayleigh|v2.0")
+            tok[name] = rec["points"][-1]["d"] if rec and rec.get("ok") else "—"
         for v, name in (("v2.0", "V20"), ("v2.2", "V22"), ("v2.2dark", "DARK")):
             tok[f"A_{name}_WIN"] = nights(f"A|rayleigh|{v}", w0, w1)
             tok[f"A_{name}_JA"] = nights(f"A|rayleigh|{v}", "2026-07-08", "2026-08-13")

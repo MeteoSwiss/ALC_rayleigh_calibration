@@ -144,7 +144,7 @@ def merge(key, parts_dir, out_dir, n_chunks):
     # Kalman must be recomputed on the MERGED rows: each chunk only saw its own slice of history.
     with open(sdir / f"{key}_cal.csv", newline="", encoding="utf-8") as fh:
         rows = list(csv.DictReader(fh))
-    krows = _kalman_rows(rows)
+    krows = _kalman_rows(rows, key=key)
     with open(sdir / f"{key}_kalman.csv", "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=["method", "date", "kalman", "kalman_std"])
         w.writeheader()
