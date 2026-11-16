@@ -4,10 +4,12 @@
   G1 vintage      one row per (stream, method, date); every calibration NetCDF carries only the v2.3
                   codes 230 (Rayleigh), 231 (Rayleigh, polar-summer low-sun night) and 1100 (cloud,
                   eta tables v2); no parts_nc/ leftovers.
-  G2 continuity   against the release tree (--ref): inside the release window every calibration row
-                  and every Kalman row is bit-identical, except where v2.3.0 is MEANT to differ:
-                  the cloud rows of the four CL31 -> CL51 swap streams (per-day type) and the Kalman of
-                  the streams with a kalman_restart event or a station_kalman_params entry.
+  G2 continuity   against the release tree (--ref): inside the release window every calibration row is
+                  bit-identical, except the cloud rows of the CL31 -> CL51 swap streams (per-day type). The
+                  Kalman is re-estimated over the whole series whenever days are added (its noise and
+                  outlier screen are series-wide), so it is not compared with the release: instead every
+                  stream's Kalman is recomputed from the tree's own calibration rows with this code and
+                  must match its <key>_kalman.csv exactly. The shift against the release is reported.
   G3 content      the five uncertainty components in every NetCDF with Rayleigh rows; flag 0.25 only
                   north of 57 N; no stream with flag -99 on more than 1 % of its rows (the first-pass
                   failure mode: every 910 nm night -99); isolated -99 days (a corrupt L1 file) are
@@ -122,23 +124,44 @@ def gate_continuity(new: Path, ref: Path | None) -> tuple:
                     n_moved += 1
                     if len(unexpected) < 8:
                         unexpected.append(f"{k} {key}: {b[key]} -> {a.get(key)}")
-        ka = {(r["method"], r["date"]): r["kalman"] for r in _rows(new / k / f"{k}_kalman.csv")}
-        kb = {(r["method"], r["date"]): r["kalman"] for r in _rows(ref / k / f"{k}_kalman.csv")}
-        if k in kalman_moves:
-            continue
-        for key in kb:
-            if key[1] > RELEASE_END:
-                continue
-            k_cmp += 1
-            if ka.get(key) != kb[key]:
-                k_moved += 1
-                if len(unexpected) < 8:
-                    unexpected.append(f"{k} kalman {key}: {kb[key]} -> {ka.get(key)}")
     msgs.append(f"  calibration rows in the release window: {n_cmp} compared, {n_expected} moved as intended "
                 f"(cloud rows of {sorted(swaps)}), {n_moved} moved unexpectedly")
-    msgs.append(f"  Kalman rows outside {len(kalman_moves)} intended streams: {k_cmp} compared, {k_moved} moved")
     msgs += [f"    {u}" for u in unexpected]
-    ok &= n_moved == 0 and k_moved == 0 and not any("missing" in u for u in unexpected)
+    ok &= n_moved == 0 and not any("missing" in u for u in unexpected)
+    # Kalman: recomputed from the tree's own rows with this code (options + instrument events) == stored
+    import os
+    import sys
+    os.environ.setdefault("ALC_KALMAN_UNCERTAINTY_WEIGHTING", "1")     # the v2.3 operational setting
+    sys.path.insert(0, str(REPO / "scripts"))
+    import run_network_calibration as rnc
+    k_cmp = k_bad = 0
+    bad = []
+    shift = []
+    for k in _streams(new):
+        rows = _rows(new / k / f"{k}_cal.csv")
+        if not rows:
+            continue
+        want = {(r["method"], r["date"]): r["kalman"] for r in rnc._kalman_rows(rows, key=k)}
+        have = {(r["method"], r["date"]): r["kalman"] for r in _rows(new / k / f"{k}_kalman.csv")}
+        k_cmp += 1
+        if want != have:
+            k_bad += 1
+            if len(bad) < 5:
+                diff = [x for x in set(want) | set(have) if want.get(x) != have.get(x)]
+                bad.append(f"{k}: {len(diff)} rows differ, e.g. {sorted(diff)[:2]}")
+        if ref is not None and (ref / k / f"{k}_kalman.csv").exists():
+            kb = {(r["method"], r["date"]): float(r["kalman"]) for r in _rows(ref / k / f"{k}_kalman.csv")}
+            for x, v in have.items():
+                if x in kb and x[1] <= RELEASE_END and kb[x] > 0:
+                    shift.append(abs(float(v) / kb[x] - 1))
+    msgs.append(f"  Kalman recomputed from the tree's rows: {k_cmp} streams, {k_bad} differ from their _kalman.csv")
+    msgs += [f"    {b}" for b in bad]
+    if shift:
+        shift.sort()
+        q = lambda f: shift[min(len(shift) - 1, int(f * len(shift)))]
+        msgs.append(f"  (info) Kalman vs the release in its window: median {q(.5):.1e}, P99 {q(.99):.1e}, "
+                    f"max {shift[-1]:.2f} relative ({len(shift)} rows; new days re-estimate the series)")
+    ok &= k_bad == 0
     return ok, msgs
 
 
