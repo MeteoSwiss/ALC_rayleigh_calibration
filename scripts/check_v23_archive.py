@@ -219,8 +219,11 @@ def gate_completeness(new: Path, census: dict) -> tuple:
         if not (d / f"{k}_hk.csv").exists():
             no_hk.append(k)
         kal = _rows(d / f"{k}_kalman.csv")
-        if not kal:
-            dead.append(k)                       # no Kalman -> nothing for the add-ons to use
+        # The add-ons use ONE Kalman per type (run_network_calibration.SENS_OMB_METHOD): Rayleigh for the
+        # CHM15k, CL61 and Mini-MPL, cloud for the CL31 and CL51. Without it they are skipped by design.
+        need = "cloud" if census.get(k, {}).get("type") in ("CL31", "CL51") else "rayleigh"
+        if not any(r.get("method") == need for r in kal):
+            dead.append(k)                       # no Kalman of that method -> nothing for the add-ons to use
             continue
         miss = [s for s in addons if not (d / f"{k}{s}").exists()]
         miss += [c for c in caches if not (d / c).exists()]
@@ -230,7 +233,7 @@ def gate_completeness(new: Path, census: dict) -> tuple:
             no_add.append(f"{k} {miss}")
     msgs.append(f"  {len(_streams(new))} streams; missing core CSVs: {len(no_core)} {no_core[:3]}")
     msgs.append(f"  no _hk.csv (L1 without housekeeping fields, as in v2.2): {len(no_hk)} {no_hk[:5]}")
-    msgs.append(f"  no Kalman (dead or too few nights, add-ons not expected): {len(dead)} {dead[:5]}")
+    msgs.append(f"  no Kalman of the add-on method (dead or too few nights, add-ons not expected): {len(dead)} {dead[:5]}")
     msgs.append(f"  missing add-on outputs (known out-of-domain OmB excused): {len(no_add)} {no_add[:3]}")
     not_in_census = [k for k in _streams(new) if k not in census]
     msgs.append(f"  streams not in the census: {len(not_in_census)} {not_in_census[:3]}")
