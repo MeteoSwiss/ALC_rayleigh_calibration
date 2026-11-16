@@ -43,11 +43,15 @@ START=${START:-20250101}
 [ -d "$ALC_FULLCAL_DIR" ] || { echo "REFUSING: $ALC_FULLCAL_DIR does not exist" >&2; exit 1; }
 IDX=${SLURM_ARRAY_TASK_ID:-0}
 NT=${SLURM_ARRAY_TASK_COUNT:-1}
+# Streams: KEYS_FILE (one key per line) when given, else every stream of the tree with a _cal.csv.
+if [ -n "${KEYS_FILE:-}" ]; then
+  ALL=$(tr -d '\r' < "$KEYS_FILE")
+else
+  ALL=$(for d in "$ALC_FULLCAL_DIR"/*/; do k=$(basename "$d"); [ -f "$d/${k}_cal.csv" ] && echo "$k"; done)
+fi
 KEYS=()
 i=0
-for d in "$ALC_FULLCAL_DIR"/*/; do
-  k=$(basename "$d")
-  [ -f "$d/${k}_cal.csv" ] || continue
+for k in $ALL; do
   [ $(( i % NT )) -eq "$IDX" ] && KEYS+=(--key "$k")
   i=$((i + 1))
 done
